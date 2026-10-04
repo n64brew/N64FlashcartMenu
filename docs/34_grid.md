@@ -5,8 +5,8 @@ first of the main tabs: Grid, Files, History, Favorites, and Settings.
 
 Grid needs the `menu/metadata` folder described in
 [Game Pak and box art](19_gamepak_boxart.md). Without it, the Grid tab, its
-settings, and **Set as Grid library directory** are hidden, and the menu boots
-into Files.
+settings, and **Set current directory as Grid library** are hidden, and the
+menu boots into Files.
 
 **Boot Into** in Settings > Menu opens Grid or Files at startup. Files is the
 default. An enabled ROM autoload still takes precedence.
@@ -15,9 +15,12 @@ default. An enabled ROM autoload still takes precedence.
 
 Grid indexes the `.z64`, `.n64`, `.v64`, and `.rom` files directly inside its
 library directory, up to 512 ROMs. Subdirectories and `sc64menu` are not
-included. To choose the library, open a directory in Files, press Z, and
-select **Set as Grid library directory**. Configurations without a library
-directory use the Files start directory.
+included. To choose the library, open the directory in Files (press `A` on it
+so its contents are listed), press `Z`, and select **Set current directory as
+Grid library**. The option always uses the directory being shown, not the
+highlighted entry, so pressing it with a subdirectory highlighted sets the
+parent. Configurations without a library directory use the Files start
+directory.
 
 The index, artwork choice, sorting, grouping, and manual order are stored in
 `menu/cache/grid.index`. When Grid first opens after startup, and after

@@ -1588,7 +1588,7 @@ static void draw(menu_t *menu, surface_t *display) {
             "%s\n%s\n\n"
             "Grid shows the ROMs directly inside this directory.\n"
             "To use another, open it in Files, press Z,\n"
-            "and select Set as Grid library directory.",
+            "and select Set current directory as Grid library.",
             grid.scan_error ? "Couldn't read the Grid library:" : "No N64 ROMs in the Grid library:",
             menu->settings.grid_directory
         );

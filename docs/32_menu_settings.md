@@ -115,7 +115,8 @@ Files and does not override ROM autoload. The corresponding `[menu]` INI key is
 
 **Grid Library** shows the Grid library directory, stored as `grid_directory`
 independently of `default_directory`. When absent, it inherits
-`default_directory`. **Grid Cache** shows how many ROMs Grid has indexed; press
-`A` to delete the index, including the tile arrangement and view choices. Grid
+`default_directory`. To change it, open the directory in Files, press `Z`, and
+select **Set current directory as Grid library**. **Grid Cache** shows how many
+ROMs Grid has indexed; press `A` to delete the index, including the tile arrangement and view choices. Grid
 rebuilds it the next time it opens.
 See [Grid](34_grid.md) for controls, artwork, and indexing.

@@ -542,9 +542,9 @@ static component_context_menu_t entry_context_menu = {
         { .text = "Show entry properties", .action = show_properties },
         { .text = "Delete selected entry", .action = delete_entry },
         { .text = "Controller Pak manager", .action = open_controller_pak },
-        { .text = "Set as Files start directory", .action = set_default_directory },
+        { .text = "Set current directory as Files start", .action = set_default_directory },
         /* Last, so that hiding it without Grid only shortens the menu. */
-        { .text = "Set as Grid library directory", .action = set_grid_directory },
+        { .text = "Set current directory as Grid library", .action = set_grid_directory },
         COMPONENT_CONTEXT_MENU_LIST_END,
     }
 };

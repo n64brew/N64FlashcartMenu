@@ -19,8 +19,11 @@ panel opacity, and hue editing.
 
 #### File options
 Press `Z` in the file browser to open the options menu. Here you can view entry
-properties, delete an entry, or set the current directory as the default folder.
-Choose "Controller Pak manager" to open the Controller pane directly.
+properties, delete an entry, or open the Controller Pak manager. **Set current
+directory as Files start** and **Set current directory as Grid library** apply to
+the directory being shown, not the highlighted entry, so open a directory with
+`A` before choosing them. See [File operations](31_file_browser.md#usage-instructions)
+for the full list.
 
 #### Additional ROM information
 <!-- Could use a sample screenshot here -->
