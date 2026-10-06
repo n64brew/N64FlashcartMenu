@@ -745,6 +745,13 @@ static flashcart_err_t sc64_set_bootmode (flashcart_reboot_mode_t boot_mode) {
     return FLASHCART_OK;
 }
 
+static flashcart_err_t sc64_set_tv_type (flashcart_tv_type_t tv_type) {
+    if (sc64_ll_set_config(CFG_ID_TV_TYPE, (uint32_t) tv_type) != SC64_OK) {
+        return FLASHCART_ERR_INT;
+    }
+    return FLASHCART_OK;
+}
+
 static flashcart_err_t sc64_get_button_state (bool *pressed) {
     uint32_t value;
 
@@ -785,6 +792,7 @@ static flashcart_t flashcart_sc64 = {
     .set_save_type = sc64_set_save_type,
     .set_save_writeback = sc64_set_save_writeback,
     .set_next_boot_mode = sc64_set_bootmode,
+    .set_tv_type = sc64_set_tv_type,
 };
 
 

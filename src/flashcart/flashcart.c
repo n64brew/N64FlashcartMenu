@@ -111,6 +111,7 @@ static flashcart_t *flashcart = &((flashcart_t) {
     .set_save_type = dummy_set_save_type,
     .set_save_writeback = NULL,
     .set_next_boot_mode = NULL,
+    .set_tv_type = NULL,
 });
 
 #ifdef NDEBUG
@@ -443,4 +444,12 @@ flashcart_err_t flashcart_set_next_boot_mode (flashcart_reboot_mode_t boot_mode)
     }
 
     return flashcart->set_next_boot_mode(boot_mode);
+}
+
+flashcart_err_t flashcart_set_tv_type (flashcart_tv_type_t tv_type) {
+    if (!flashcart->set_tv_type) {
+        return FLASHCART_OK; /* optional — silently skip if unsupported */
+    }
+
+    return flashcart->set_tv_type(tv_type);
 }
