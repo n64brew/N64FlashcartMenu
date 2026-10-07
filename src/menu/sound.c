@@ -159,22 +159,50 @@ void sound_play_effect(sound_effect_t sfx) {
         switch (sfx) {
             case SFX_CURSOR:
                 wav64_play(&sfx_cursor, SOUND_SFX_CHANNEL);
+                if (joypad_get_rumble_supported(0)) {
+                    joypad_set_rumble_active(0, true);
+                    wait_ms(15);
+                    joypad_set_rumble_active(0, false);
+                }
                 break;
             case SFX_EXIT:
                 wav64_play(&sfx_exit, SOUND_SFX_CHANNEL);
+                if (joypad_get_rumble_supported(0)) {
+                    joypad_set_rumble_active(0, true);
+                    wait_ms(40);
+                    joypad_set_rumble_active(0, false);
+                }
                 break;
             case SFX_SETTING:
                 wav64_play(&sfx_setting, SOUND_SFX_CHANNEL);
+                if (joypad_get_rumble_supported(0)) {
+                    joypad_set_rumble_active(0, true);
+                    wait_ms(40);
+                    joypad_set_rumble_active(0, false);
+                }
                 break;
             case SFX_ENTER:
                 wav64_play(&sfx_enter, SOUND_SFX_CHANNEL);
+                if (joypad_get_rumble_supported(0)) {
+                    joypad_set_rumble_active(0, true);
+                    wait_ms(40);
+                    joypad_set_rumble_active(0, false);
+                }
                 break;
             case SFX_ERROR:
                 wav64_play(&sfx_error, SOUND_SFX_CHANNEL);
+                if (joypad_get_rumble_supported(0)) {
+                    joypad_set_rumble_active(0, true);
+                    wait_ms(50);
+                    joypad_set_rumble_active(0, false);
+                }
                 break;
             default:
+                if ( joypad_get_rumble_active(0)) {
+                    joypad_set_rumble_active(0, false);
+                }
                 break;
-        } 
+        }
     }
 }
 
