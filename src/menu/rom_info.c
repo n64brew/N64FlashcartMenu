@@ -690,6 +690,7 @@ static rom_tv_type_t determine_tv_type (rom_destination_type_t rom_destination_c
         switch (rom_destination_code) {
             case MARKET_NORTH_AMERICA:
             case MARKET_CANADIAN:
+            case MARKET_CHINESE: // (China is a PAL region, but was never used. The Chinese iQue patches seem use this would be NTSC)
             case MARKET_KOREAN:
             case MARKET_JAPANESE:
             case MARKET_JAPANESE_MULTI:
@@ -712,7 +713,6 @@ static rom_tv_type_t determine_tv_type (rom_destination_type_t rom_destination_c
             case MARKET_OTHER_Y:
                 return ROM_TV_TYPE_PAL;
             // FIXME: We cannot be sure on these markets, so just return the default for the moment!
-            case MARKET_CHINESE: // (China is a PAL region, but the N64 ROM patch may be NTSC, so we cannot be sure!)
             case MARKET_OTHER_Z:
             default:
                 return ROM_TV_TYPE_UNKNOWN;
