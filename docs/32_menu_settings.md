@@ -10,8 +10,9 @@ Press `B` to return to categories. Tab switching is blocked while a pane has a
 modal confirmation or operation open.
 
 In the Menu pane, use Up and Down to select a row and `A` or Left/Right to toggle
-a boolean setting. Actions such as Reset to Defaults and clearing Autoload ROM
-require `A`. Default Directory is a read-only status row.
+a boolean setting. Actions such as Reset to Defaults, clearing Autoload ROM, and
+clearing Grid Cache require `A`. Default Directory and Grid Library are
+read-only status rows.
 
 ### Autoload ROM
 
@@ -115,3 +116,20 @@ The selected theme is stored as `theme` in `[menu]`. `[custom_theme]` stores the
 preset copied into Custom (`base`), its exact RGBA `palette`, `hue_shift`, and
 whether the saved background image is enabled (`background_image`). Settings
 files from before themes existed keep showing a previously set background image.
+
+### Grid
+
+These settings are hidden when the SD card has no `menu/metadata` folder, since
+Grid is too.
+
+**Boot Into** in Settings > Menu selects **Grid** or **Files**. It defaults to
+Files and does not override ROM autoload. The corresponding `[menu]` INI key is
+`boot_into_grid` (`false` for Files, `true` for Grid).
+
+**Grid Library** shows the Grid library directory, stored as `grid_directory`
+independently of `default_directory`. When absent, it inherits
+`default_directory`. To change it, open the directory in Files, press `Z`, and
+select **Set current directory as Grid library**. **Grid Cache** shows how many
+ROMs Grid has indexed; press `A` to delete the index, including the tile arrangement and view choices. Grid
+rebuilds it the next time it opens.
+See [Grid](34_grid.md) for controls, artwork, and indexing.

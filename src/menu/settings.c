@@ -39,6 +39,8 @@ static settings_t init = {
     .force_progressive_scan = false,
     .show_protected_entries = false,
     .default_directory = "/",
+    .boot_into_grid = false,
+    .grid_directory = "/",
     .use_saves_folder = true,
     .use_global_saves_folder = false,
     .migrate_saves_to_global_folder = false,
@@ -87,6 +89,9 @@ void settings_load (settings_t *settings) {
     settings->show_protected_entries = ini_get_bool(ini, "menu", "show_protected_entries", init.show_protected_entries);
     free(settings->default_directory);
     settings->default_directory = strdup(ini_get_string(ini, "menu", "default_directory", init.default_directory));
+    settings->boot_into_grid = ini_get_bool(ini, "menu", "boot_into_grid", init.boot_into_grid);
+    free(settings->grid_directory);
+    settings->grid_directory = strdup(ini_get_string(ini, "menu", "grid_directory", settings->default_directory));
     settings->use_saves_folder = ini_get_bool(ini, "menu", "use_saves_folder", init.use_saves_folder);
     settings->use_global_saves_folder = ini_get_bool(ini, "menu", "use_global_saves_folder", init.use_global_saves_folder);
     settings->migrate_saves_to_global_folder = ini_get_bool(ini, "menu", "migrate_saves_to_global_folder", init.migrate_saves_to_global_folder);
@@ -133,6 +138,8 @@ void settings_save (settings_t *settings) {
     ini_set_bool(ini, "menu", "force_progressive_scan", settings->force_progressive_scan);
     ini_set_bool(ini, "menu", "show_protected_entries", settings->show_protected_entries);
     ini_set_string(ini, "menu", "default_directory", settings->default_directory);
+    ini_set_bool(ini, "menu", "boot_into_grid", settings->boot_into_grid);
+    ini_set_string(ini, "menu", "grid_directory", settings->grid_directory);
     ini_set_bool(ini, "menu", "use_saves_folder", settings->use_saves_folder);
     ini_set_bool(ini, "menu", "use_global_saves_folder", settings->use_global_saves_folder);
     ini_set_bool(ini, "menu", "migrate_saves_to_global_folder", settings->migrate_saves_to_global_folder);

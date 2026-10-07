@@ -160,9 +160,9 @@ static void draw(menu_t *menu, surface_t *display) {
     ui_components_background_draw();
 
     if(tab_context == BOOKKEEPING_TAB_CONTEXT_FAVORITE) {
-        ui_components_tabs_common_draw(2);
+        ui_components_tabs_common_draw(menu, 3);
     } else if(tab_context == BOOKKEEPING_TAB_CONTEXT_HISTORY) {
-        ui_components_tabs_common_draw(1);
+        ui_components_tabs_common_draw(menu, 2);
     }
 
     ui_components_layout_draw_tabbed();

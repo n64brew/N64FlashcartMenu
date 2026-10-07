@@ -77,7 +77,7 @@ static void process (menu_t *menu) {
     if (menu->actions.back) {
         show_oss_lib_info_message = false;
         sound_play_effect(SFX_EXIT);
-        menu->next_mode = MENU_MODE_BROWSER; 
+        menu->next_mode = menu->settings.boot_into_grid && menu->grid_enabled ? MENU_MODE_GRID : MENU_MODE_BROWSER;
     } else if (menu->actions.context) {
         if (show_oss_lib_info_message) {
             show_oss_lib_info_message = false;

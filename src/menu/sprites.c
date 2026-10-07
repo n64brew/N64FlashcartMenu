@@ -9,15 +9,15 @@ typedef struct {
 } sprite_entry_t;
 
 static sprite_entry_t sprite_entries[SPRITE_LIST_END] = {
-    [SPRITE_FILETYPE_FOLDER]            = { "rom:/filetype_folder.sprite" },
-    [SPRITE_FILETYPE_COMPRESSED]        = { "rom:/filetype_compressed.sprite" },
-    [SPRITE_FILETYPE_N64ROM]            = { "rom:/filetype_n64cart.sprite" },
-    [SPRITE_FILETYPE_N64DISK]           = { "rom:/filetype_n64disk.sprite" },
-    [SPRITE_FILETYPE_MUSIC]             = { "rom:/filetype_music.sprite" },
-    [SPRITE_FILETYPE_TEXT]              = { "rom:/filetype_text.sprite" },
-    [SPRITE_FILETYPE_IMAGE]             = { "rom:/filetype_image.sprite" },
-    [SPRITE_FILETYPE_SAVE]              = { "rom:/filetype_save.sprite" },
-    [SPRITE_FILETYPE_UNKNOWN]           = { "rom:/filetype_unknown.sprite" },
+    [SPRITE_FILETYPE_FOLDER]            = { "rom:/menu/sprites/filetype_folder.sprite" },
+    [SPRITE_FILETYPE_COMPRESSED]        = { "rom:/menu/sprites/filetype_compressed.sprite" },
+    [SPRITE_FILETYPE_N64ROM]            = { "rom:/menu/sprites/filetype_n64cart.sprite" },
+    [SPRITE_FILETYPE_N64DISK]           = { "rom:/menu/sprites/filetype_n64disk.sprite" },
+    [SPRITE_FILETYPE_MUSIC]             = { "rom:/menu/sprites/filetype_music.sprite" },
+    [SPRITE_FILETYPE_TEXT]              = { "rom:/menu/sprites/filetype_text.sprite" },
+    [SPRITE_FILETYPE_IMAGE]             = { "rom:/menu/sprites/filetype_image.sprite" },
+    [SPRITE_FILETYPE_SAVE]              = { "rom:/menu/sprites/filetype_save.sprite" },
+    [SPRITE_FILETYPE_UNKNOWN]           = { "rom:/menu/sprites/filetype_unknown.sprite" },
 };
 
 void ui_components_sprites_init(void) {

@@ -15,6 +15,7 @@
  */
 typedef enum {
     FNT_DEFAULT = 1, /**< Default font type */
+    FNT_LARGE_NUMBERS = 2, /**< Large digits for Grid group counts */
 } menu_font_type_t;
 
 /**

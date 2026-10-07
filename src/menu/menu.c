@@ -61,6 +61,11 @@ static void menu_init (boot_params_t *boot_params) {
         menu->next_mode = MENU_MODE_FAULT;
     }
 
+    // The menu runs with or without an Expansion Pak, checking is_memory_expanded()
+    // where it matters. Checking before anything large is allocated also stops
+    // libdragon warning that the ROM requires one.
+    debugf("Expansion Pak: %s\n", is_memory_expanded() ? "installed" : "not installed");
+
     joypad_init();
     timer_init();
     rtc_init();
@@ -174,6 +179,7 @@ static void menu_deinit (menu_t *menu) {
     }
     free(menu->browser.list);
     path_free(menu->browser.directory);
+    view_grid_shutdown();
     free(menu);
 
     display_close();
@@ -199,6 +205,7 @@ typedef const struct {
 
 static view_t menu_views[] = {
     { MENU_MODE_STARTUP, view_startup_init, view_startup_display },
+    { MENU_MODE_GRID, view_grid_init, view_grid_display },
     { MENU_MODE_BROWSER, view_browser_init, view_browser_display },
     { MENU_MODE_FILE_INFO, view_file_info_init, view_file_info_display },
     { MENU_MODE_IMAGE_VIEWER, view_image_viewer_init, view_image_viewer_display },

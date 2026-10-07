@@ -34,6 +34,8 @@ enum {
     SETTING_CONFIRM_RESET   = (1 << 4),  /**< Needs the reset confirmation before applying. */
     SETTING_CLEAR_BACKGROUND = (1 << 5), /**< Acts on press rather than toggling. */
     SETTING_CLEAR_AUTOLOAD  = (1 << 6), /**< Disable autoload and clear its target. */
+    SETTING_CLEAR_GRID_CACHE = (1 << 7), /**< Delete the Grid index. */
+    SETTING_GRID            = (1 << 8), /**< Hidden when Grid is disabled. */
 };
 
 typedef const char *(*setting_value_fn)(menu_t *menu);
@@ -62,8 +64,17 @@ static const char *format_clear_action (menu_t *menu) {
     return "A: Clear";
 }
 
+static const char *format_boot_view (menu_t *menu) {
+    return menu->settings.boot_into_grid ? "Grid" : "Files";
+}
+
 static const char *format_reset_action (menu_t *menu) {
     return "A: Reset";
+}
+
+/** @brief Read only: set from the Files context menu. */
+static const char *format_grid_directory (menu_t *menu) {
+    return menu->settings.grid_directory;
 }
 
 /** @brief Read only: the default directory is configured in menu/config.ini. */
@@ -92,7 +103,9 @@ static const char *format_autoload (menu_t *menu) {
 #endif
 
 static const setting_descriptor_t settings[] = {
+    { "Boot Into", format_boot_view, offsetof(settings_t, boot_into_grid), SETTING_GRID },
     { "Default Directory", format_default_directory, NO_BOOL_OFFSET, 0 },
+    { "Grid Library", format_grid_directory, NO_BOOL_OFFSET, SETTING_GRID },
     BOOL_SETTING("Show Hidden Files", show_protected_entries, SETTING_RELOAD_BROWSER),
     BOOL_SETTING("Sound Effects", soundfx_enabled, SETTING_UPDATE_SFX),
     BOOL_SETTING("Background Music", bgm_enabled, SETTING_UPDATE_BGM),
@@ -115,11 +128,26 @@ static const setting_descriptor_t settings[] = {
     BOOL_SETTING("Hide ROM Tags", show_browser_rom_tags, 0),
     BOOL_SETTING("Rumble Feedback", rumble_enabled, 0),
 #endif
+    { "Grid Cache", view_grid_cache_summary, NO_BOOL_OFFSET, SETTING_CLEAR_GRID_CACHE | SETTING_GRID },
     { "Remove Background", format_clear_action, NO_BOOL_OFFSET, SETTING_CLEAR_BACKGROUND },
     { "Reset to Defaults", format_reset_action, NO_BOOL_OFFSET, SETTING_CONFIRM_RESET },
 };
 
 #define SETTING_COUNT ((int) (sizeof(settings) / sizeof(settings[0])))
+
+static bool setting_visible (menu_t *menu, int row) {
+    return menu->grid_enabled || !(settings[row].flags & SETTING_GRID);
+}
+
+/** @brief The nearest visible row from @p row in direction @p step, or -1. */
+static int visible_row_from (menu_t *menu, int row, int step) {
+    for (; row >= 0 && row < SETTING_COUNT; row += step) {
+        if (setting_visible(menu, row)) {
+            return row;
+        }
+    }
+    return -1;
+}
 
 /**
  * @brief Resolve the boolean a setting is bound to.
@@ -173,6 +201,11 @@ static void setting_activate (menu_t *menu) {
         ui_components_background_clear();
         theme_custom_clear_background_image();
         settings_save(&menu->settings);
+        return;
+    }
+
+    if (setting->flags & SETTING_CLEAR_GRID_CACHE) {
+        view_grid_clear_cache(menu);
         return;
     }
 
@@ -230,7 +263,7 @@ static bool setting_is_toggle (void) {
 }
 
 static void pane_enter (menu_t *menu) {
-    selected_row = 0;
+    selected_row = visible_row_from(menu, 0, 1);
     show_reset_confirm_message = false;
     show_reset_complete_message = false;
     show_pal60_confirm_message = false;
@@ -270,13 +303,16 @@ static bool pane_process (menu_t *menu) {
         return true;
     }
 
+    int previous_row = visible_row_from(menu, selected_row - 1, -1);
+    int next_row = visible_row_from(menu, selected_row + 1, 1);
+
     if (menu->actions.back) {
         return false;
-    } else if (menu->actions.go_up && selected_row > 0) {
-        selected_row--;
+    } else if (menu->actions.go_up && previous_row >= 0) {
+        selected_row = previous_row;
         sound_play_effect(SFX_CURSOR);
-    } else if (menu->actions.go_down && selected_row < SETTING_COUNT - 1) {
-        selected_row++;
+    } else if (menu->actions.go_down && next_row >= 0) {
+        selected_row = next_row;
         sound_play_effect(SFX_CURSOR);
     } else if (menu->actions.enter || ((menu->actions.go_left || menu->actions.go_right) && setting_is_toggle())) {
         setting_activate(menu);
@@ -287,12 +323,26 @@ static bool pane_process (menu_t *menu) {
 }
 
 static void pane_draw (menu_t *menu, bool focused) {
-    int first = MIN(MAX(selected_row - (SETTINGS_ROWS / 2), 0), MAX(SETTING_COUNT - SETTINGS_ROWS, 0));
+    int rows[SETTING_COUNT];
+    int row_count = 0;
+    int selected = 0;
+
+    for (int i = 0; i < SETTING_COUNT; i++) {
+        if (setting_visible(menu, i)) {
+            if (i == selected_row) {
+                selected = row_count;
+            }
+            rows[row_count++] = i;
+        }
+    }
+
+    int first = MIN(MAX(selected - (SETTINGS_ROWS / 2), 0), MAX(row_count - SETTINGS_ROWS, 0));
     int y = SETTINGS_PANE_Y0 + 4;
 
-    for (int i = first; (i < SETTING_COUNT) && (i < first + SETTINGS_ROWS); i++) {
+    for (int i = first; (i < row_count) && (i < first + SETTINGS_ROWS); i++) {
+        const setting_descriptor_t *setting = &settings[rows[i]];
         ui_components_settings_row_draw(
-            y, settings[i].label, setting_value(menu, &settings[i]), focused && (selected_row == i)
+            y, setting->label, setting_value(menu, setting), focused && (selected_row == rows[i])
         );
         y += SETTINGS_ROW_HEIGHT;
     }
@@ -321,7 +371,7 @@ static bool pane_blocks_tabs (menu_t *menu) {
 }
 
 static const char *pane_hint (menu_t *menu, settings_hint_t slot) {
-    if (settings[selected_row].flags & SETTING_CLEAR_AUTOLOAD) {
+    if (settings[selected_row].flags & (SETTING_CLEAR_AUTOLOAD | SETTING_CLEAR_GRID_CACHE)) {
         switch (slot) {
             case SETTINGS_HINT_LEFT: return "A: Clear\nB: Categories";
             case SETTINGS_HINT_CENTER: return "D-Pad: Choose\n◀L Tab R▶";

@@ -668,7 +668,7 @@ static void process (menu_t *menu) {
         } else if (show_extra_info_message) {
             show_extra_info_message = false;
         } else {
-            menu->next_mode = MENU_MODE_BROWSER;
+            menu->next_mode = menu->load.from_grid ? MENU_MODE_GRID : MENU_MODE_BROWSER;
         }
     } else if (menu->actions.options) {
         ui_components_context_menu_show(&options_context_menu);
@@ -952,11 +952,9 @@ static void deinit (void) {
 
 
 void view_load_rom_init (menu_t *menu) {
-    /* Only startup autoload supplies a path and requests an immediate launch.
-     * The saved setting must not bypass path selection for manual Details. */
-#ifdef FEATURE_AUTOLOAD_ROM_ENABLED
-    if (!menu->load_pending.rom_file) {
-#endif
+    /* Startup autoload and Grid supply rom_path, which also survives the
+     * cheat editor; otherwise resolve the current selection. */
+    if (!menu->load_pending.rom_file && !menu->load.from_grid) {
         if (menu->load.rom_path) {
             rom_info_free_meta(&menu->load.rom_info);
             path_free(menu->load.rom_path);
@@ -971,9 +969,7 @@ void view_load_rom_init (menu_t *menu) {
             menu->load.rom_path = path_clone_push(menu->browser.directory, menu->browser.entry->name);
         }
 
-#ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     }
-#endif
     rom_filename = path_last_get(menu->load.rom_path);
 
     if (show_extra_info_message) {
@@ -1001,6 +997,13 @@ void view_load_rom_init (menu_t *menu) {
 
     if (!is_memory_expanded()) {
         menu->load.rom_info.settings.cheats_enabled = false;
+    }
+
+    /* Launching from Grid must not skip the confirmation that Details shows. */
+    if (menu->load_pending.rom_file && menu->load.from_grid && rom_requires_missing_expansion_pak(menu)) {
+        menu->load_pending.rom_file = false;
+        show_expansion_pak_warning = true;
+        sound_play_effect(SFX_ERROR);
     }
 
     if (menu->load.rom_info.meta.size_limit_exceeded) {
@@ -1069,5 +1072,9 @@ void view_load_rom_display (menu_t *menu, surface_t *display) {
         menu->load.load_history_id = -1;
         menu->load.load_favorite_id = -1;
         deinit();
+        /* The error view returns to Grid and clears the flag itself. */
+        if (menu->next_mode != MENU_MODE_ERROR) {
+            menu->load.from_grid = false;
+        }
     }
 }

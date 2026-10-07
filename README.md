@@ -30,6 +30,7 @@ The current state of support is:
 * Doctor V64
 * PicoCart
 * DaisyDrive
+* EverDrive-64 Pro series
 
 
 ## Current (notable) menu features

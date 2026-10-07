@@ -16,10 +16,10 @@
 #include "views.h"
 
 /** @brief Index of the Settings tab in the common tab bar. */
-#define SETTINGS_TAB_INDEX  (3)
+#define SETTINGS_TAB_INDEX  (4)
 
 /** @brief Height of a single entry in the category rail. */
-#define RAIL_ENTRY_HEIGHT   (42)
+#define RAIL_ENTRY_HEIGHT   (37)
 
 static const settings_pane_t *const panes[] = {
     &settings_pane_menu,
@@ -69,7 +69,8 @@ static void process (menu_t *menu) {
         if (pane_focused) {
             leave_pane(menu);
         }
-        menu->next_mode = menu->actions.tab_left ? MENU_MODE_FAVORITE : MENU_MODE_BROWSER;
+        menu->next_mode = menu->actions.tab_left ? MENU_MODE_FAVORITE :
+                          menu->grid_enabled ? MENU_MODE_GRID : MENU_MODE_BROWSER;
         sound_play_effect(SFX_CURSOR);
         return;
     }
@@ -155,7 +156,7 @@ static void draw (menu_t *menu, surface_t *display) {
     rdpq_attach(display, NULL);
 
     ui_components_background_draw();
-    ui_components_tabs_common_draw(SETTINGS_TAB_INDEX);
+    ui_components_tabs_common_draw(menu, SETTINGS_TAB_INDEX);
     ui_components_layout_draw_tabbed();
 
     rail_draw();
