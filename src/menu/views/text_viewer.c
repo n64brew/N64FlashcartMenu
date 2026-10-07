@@ -14,6 +14,7 @@
 #include "views.h"
 
 #define MAX_FILE_SIZE KiB(128)
+#define TEXT_VIEWER_ESCAPE_CHAR '^'
 
 /** @brief Text file structure */
 typedef struct {
@@ -164,7 +165,22 @@ void view_text_viewer_init (menu_t *menu) {
         return menu_show_error(menu, "Text file is too big to be displayed");
     }
 
-    if ((text->contents = malloc((text->length + 1) * sizeof(char))) == NULL) {
+    /*
+     * libdragon uses '^' to introduce text formatting escape sequences.
+     * Text files contain arbitrary user content, so literal '^' characters
+     * must be escaped before the contents are passed to the text renderer.
+     *
+     * Count the characters requiring escaping so we can allocate the exact
+     * amount of memory needed for the expanded contents.
+     */
+    size_t caret_count = 0;
+    long file_start = ftell(text->f);
+    if (file_start < 0) {
+        deinit();
+        return menu_show_error(menu, "Couldn't determine text file position");
+    }
+
+    if ((text->contents = malloc(text->length + 1)) == NULL) {
         deinit();
         return menu_show_error(menu, "Couldn't allocate memory for the text file contents");
     }
@@ -173,7 +189,41 @@ void view_text_viewer_init (menu_t *menu) {
         deinit();
         return menu_show_error(menu, "Couldn't read text file contents");
     }
+
     text->contents[text->length] = '\0';
+
+    for (size_t i = 0; i < text->length; i++) {
+        if (text->contents[i] == TEXT_VIEWER_ESCAPE_CHAR) {
+            caret_count++;
+        }
+    }
+
+    if (caret_count > 0) {
+        size_t escaped_length = text->length + caret_count;
+        char *escaped_contents = malloc(escaped_length + 1);
+
+        if (escaped_contents == NULL) {
+            deinit();
+            return menu_show_error(menu, "Couldn't allocate memory for escaped text contents");
+        }
+
+        size_t src_pos = text->length;
+        size_t dst_pos = escaped_length;
+        escaped_contents[dst_pos--] = '\0';
+
+        while (src_pos > 0) {
+            char c = text->contents[--src_pos];
+            escaped_contents[dst_pos--] = c;
+
+            if (c == TEXT_VIEWER_ESCAPE_CHAR) {
+                escaped_contents[dst_pos--] = TEXT_VIEWER_ESCAPE_CHAR;
+            }
+        }
+
+        free(text->contents);
+        text->contents = escaped_contents;
+        text->length = escaped_length;
+    }
 
     if (fclose(text->f)) {
         deinit();
