@@ -1,6 +1,6 @@
 [submodule "libdragon"]
 	path = libdragon
-	url = https://github.com/DragonMinded/libdragon
+	url = https://github.com/n64brew/libdragon
 	branch = preview
 	ignore = dirty
 [submodule "src/libs/libspng"]
@@ -18,4 +18,8 @@
 [submodule "src/libs/dr_libs"]
 	path = src/libs/dr_libs
 	url = https://github.com/mackron/dr_libs.git
+	ignore = dirty
+[submodule "libjpeg-turbo-src"]
+	path = src/libs/libjpeg-turbo/libjpeg-turbo-src
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo
 	ignore = dirty

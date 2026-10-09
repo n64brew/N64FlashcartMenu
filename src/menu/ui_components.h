@@ -30,6 +30,23 @@ typedef enum {
     IMAGE_TYPE_END         /**< List end marker */
 } file_image_type_t;
 
+/** 
+ * @brief Sprites enumeration.
+ * 
+ * Enumeration for different types of sprites used in the user interface.
+ */
+typedef enum {
+    SPRITE_FILETYPE_FOLDER,                  /**< Folder sprite */
+    SPRITE_FILETYPE_COMPRESSED,              /**< Compressed file sprite */
+    SPRITE_FILETYPE_N64ROM,                  /**< N64 ROM file sprite */
+    SPRITE_FILETYPE_N64DISK,                 /**< Disk image sprite */
+    SPRITE_FILETYPE_MUSIC,                   /**< Music file sprite */
+    SPRITE_FILETYPE_TEXT,                    /**< Text file sprite */
+    SPRITE_FILETYPE_IMAGE,                   /**< Image file sprite */
+    SPRITE_FILETYPE_SAVE,                    /**< Save file sprite */
+    SPRITE_FILETYPE_UNKNOWN,                 /**< Generic file sprite */
+    SPRITE_LIST_END                          /**< List end marker */
+} sprite_type_t;
 
 typedef struct fat_file_attributes {
     bool is_read_only;    /**< Read-only attribute */
@@ -88,6 +105,8 @@ void ui_components_box_draw(int x0, int y0, int x1, int y1, color_t color);
  * @param y1 Ending y-coordinate.
  */
 void ui_components_border_draw(int x0, int y0, int x1, int y1);
+/** Palette-independent outline for the currently focused control. */
+void ui_components_focus_draw(int x0, int y0, int x1, int y1);
 
 /**
  * @brief Draw the layout component with tabs.
@@ -220,7 +239,8 @@ void ui_components_background_draw(void);
 surface_t *ui_components_background_get_image(void);
 
 /**
- * @brief Reload the background image from cache (call after temporarily freeing).
+ * @brief Reload the background image from cache (call after temporarily freeing
+ *        or changing the theme); frees it when the active theme has no image.
  */
 void ui_components_background_reload(void);
 
@@ -312,6 +332,10 @@ typedef struct {
  */
 component_boxart_t *ui_components_boxart_init(const char *storage_prefix, const char *game_code, const char *rom_title, file_image_type_t current_image_view);
 
+/** Initialize boxart from an image buffer owned by the decoder. */
+component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *data, size_t size,
+                                                  int max_width, int max_height);
+
 /**
  * @brief Free the box art component resources.
  * 
@@ -327,8 +351,47 @@ void ui_components_boxart_free(component_boxart_t *b);
 void ui_components_boxart_draw(component_boxart_t *b);
 
 /**
- * @brief Draw the tabs component.
+ * @brief Initialize the sprites component.
+ */
+void ui_components_sprites_init(void);
+
+/**
+ * @brief Draw a sprite component.
  * 
+ * @param sprite Type of the sprite to draw.
+ * @param pos_x X-coordinate position to draw the sprite.
+ * @param pos_y Y-coordinate position to draw the sprite.
+ */
+void ui_components_sprite_draw (sprite_type_t sprite, float pos_x, float pos_y);
+
+/**
+ * @brief Draw a block of text inside an explicit rectangle.
+ *
+ * @param x The x-coordinate of the top-left corner.
+ * @param y The y-coordinate of the top-left corner.
+ * @param width Width of the rectangle.
+ * @param height Height of the rectangle.
+ * @param style Font style to draw with.
+ * @param align Horizontal alignment within the rectangle.
+ * @param wrap Wrapping mode for text that exceeds the rectangle.
+ * @param text The text to draw.
+ */
+void ui_components_text_draw(int x, int y, int width, int height, menu_font_type_t style,
+                             rdpq_align_t align, rdpq_textwrap_t wrap, const char *text);
+
+/**
+ * @brief Draw a label/value row inside a settings pane.
+ *
+ * @param y The y-coordinate of the top of the row.
+ * @param label The row label.
+ * @param value The row value.
+ * @param selected Whether the row is highlighted.
+ */
+void ui_components_settings_row_draw(int y, const char *label, const char *value, bool selected);
+
+/**
+ * @brief Draw the tabs component.
+ *
  * @param text Array of tab labels.
  * @param count Number of tabs.
  * @param selected Index of the selected tab.
@@ -339,9 +402,10 @@ void ui_components_tabs_draw(const char **text, int count, int selected, float w
 /**
  * @brief Draw the common part of the tabs component.
  * 
- * @param selected Index of the selected tab.
+ * @param menu Pointer to the menu structure; Grid is omitted unless enabled.
+ * @param selected Index of the selected tab, counting Grid as 0.
  */
-void ui_components_tabs_common_draw(int selected);
+void ui_components_tabs_common_draw(menu_t *menu, int selected);
 
 /**
  * @brief Draw a value editor component.

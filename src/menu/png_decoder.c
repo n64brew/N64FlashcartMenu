@@ -80,12 +80,13 @@ static png_err_t png_decoder_setup (int max_width, int max_height) {
 
     size_t image_size;
 
-    if (spng_decoded_image_size(decoder->ctx, SPNG_FMT_RGB8, &image_size) != SPNG_OK) {
+    if (spng_decoded_image_size(decoder->ctx, SPNG_FMT_RGBA8, &image_size) != SPNG_OK) {
         png_decoder_deinit(false);
         return PNG_ERR_BAD_FILE;
     }
 
-    if (spng_decode_image(decoder->ctx, NULL, image_size, SPNG_FMT_RGB8, SPNG_DECODE_PROGRESSIVE) != SPNG_OK) {
+    if (spng_decode_image(decoder->ctx, NULL, image_size, SPNG_FMT_RGBA8,
+                         SPNG_DECODE_PROGRESSIVE | SPNG_DECODE_TRNS) != SPNG_OK) {
         png_decoder_deinit(false);
         return PNG_ERR_BAD_FILE;
     }
@@ -110,7 +111,7 @@ static png_err_t png_decoder_setup (int max_width, int max_height) {
     }
 
     while (decoder->dst_w > 1 && decoder->dst_h > 1) {
-        size_t row_size  = (size_t)src_w * 3;
+        size_t row_size  = (size_t)src_w * 4;
         size_t surf_size = (size_t)decoder->dst_w * decoder->dst_h * 2;
 
         heap_stats_t heap;
@@ -137,7 +138,7 @@ static png_err_t png_decoder_setup (int max_width, int max_height) {
         return PNG_ERR_OUT_OF_MEM;
     }
 
-    if ((decoder->row_buffer = malloc(src_w * 3)) == NULL) {
+    if ((decoder->row_buffer = malloc(src_w * 4)) == NULL) {
         png_decoder_deinit(true);
         return PNG_ERR_OUT_OF_MEM;
     }
@@ -173,7 +174,10 @@ png_err_t png_decoder_start_mem (void *buf, size_t buf_size, int max_width, int 
     if (decoder != NULL) return PNG_ERR_BUSY;
 
     decoder = calloc(1, sizeof(png_decoder_t));
-    if (decoder == NULL) return PNG_ERR_OUT_OF_MEM;
+    if (decoder == NULL) {
+        free(buf);
+        return PNG_ERR_OUT_OF_MEM;
+    }
 
     decoder->callback = callback;
     decoder->callback_data = callback_data;
@@ -228,7 +232,7 @@ void png_decoder_poll (void) {
         return;
     }
 
-    err = spng_decode_row(decoder->ctx, decoder->row_buffer, decoder->ihdr.width * 3);
+    err = spng_decode_row(decoder->ctx, decoder->row_buffer, decoder->ihdr.width * 4);
 
     if (err == SPNG_OK || err == SPNG_EOI) {
         decoder->decoded_rows += 1;
@@ -242,18 +246,23 @@ void png_decoder_poll (void) {
                                              + dst_y * decoder->image->stride);
             for (int dx = 0; dx < decoder->dst_w; dx++) {
                 int sx = (dx * src_w) / decoder->dst_w;
-                uint8_t *p = decoder->row_buffer + sx * 3;
+                uint8_t *p = decoder->row_buffer + sx * 4;
                 uint8_t r = p[0] >> 3;
                 uint8_t g = p[1] >> 3;
                 uint8_t b = p[2] >> 3;
-                dst_row[dx] = (r << 11) | (g << 6) | (b << 1) | 1;
+                uint8_t a = p[3] >= 128;
+                dst_row[dx] = (r << 11) | (g << 6) | (b << 1) | a;
             }
         }
     }
 
     if (err == SPNG_EOI) {
-        decoder->callback(PNG_OK, decoder->image, decoder->callback_data);
+        png_callback_t *callback = decoder->callback;
+        void *callback_data = decoder->callback_data;
+        surface_t *image = decoder->image;
+        decoder->image = NULL;
         png_decoder_deinit(false);
+        callback(PNG_OK, image, callback_data);
     } else if (err != SPNG_OK) {
         png_callback_t *callback = decoder->callback;
         void *callback_data = decoder->callback_data;

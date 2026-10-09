@@ -1,0 +1,7 @@
+An open-source menu for N64 flashcarts, allowing you to load and manage ROMs easily. And is released under AGPL-V3.0
+
+The user guide is available at https://menu.summercart64.dev/
+
+Please consider contributing to its development at https://github.com/Polprzewodnikowy/N64FlashcartMenu
+
+Or sponsoring https://ko-fi.com/networkfusion

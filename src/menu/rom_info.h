@@ -9,9 +9,12 @@
 #define ROM_INFO_H__
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "path.h"
+
+#define ROM_METADATA_MAX_SCREENSHOTS 8
 
 /** @brief ROM error enumeration. */
 typedef enum {
@@ -104,10 +107,10 @@ typedef enum {
 
 /** @brief ROM memory requirements enumeration. */
 typedef enum {
-    EXPANSION_PAK_NONE,             /**< Happy with 4MB of memory */
-    EXPANSION_PAK_REQUIRED,         /**< Requires 8MB of memory */
+    EXPANSION_PAK_UNSPECIFIED,      /**< Unspecified use of 4-8MB of memory */
+    EXPANSION_PAK_UNUSED,           /**< Only uses 4MB of memory */
     EXPANSION_PAK_RECOMMENDED,      /**< Recommends 8MB of memory */
-    EXPANSION_PAK_SUGGESTED,        /**< Suggests 8MB of memory */
+    EXPANSION_PAK_REQUIRED,         /**< Requires 8MB of memory */
     EXPANSION_PAK_FAULTY,           /**< Faulty with 8MB of memory */
 } rom_expansion_pak_t;
 
@@ -174,9 +177,19 @@ typedef struct {
         uint32_t age_rating;        /**< The minimum game age rating */
         uint32_t num_players;       /**< The number of players supported */
         char *short_description;    /**< The short game description */
+        char *long_description_fn;  /**< The long game description file name */
+        char *metadata_zip_path;    /**< ZIP containing metadata images, if any */
+        char *boxart[6];            /**< Spec-defined boxart filenames: front, back, top, bottom, left, right */
+        char *cartart[2];           /**< Spec-defined boxart filenames: front, back */
+        char *screenshots[ROM_METADATA_MAX_SCREENSHOTS]; /**< Spec-defined screenshot filenames */
+        uint8_t screenshot_count;   /**< Number of screenshot filenames */
         bool size_limit_exceeded;   /**< Metadata was skipped because metadata.ini exceeded size cap */
     } meta;                         /**< The ROM metadata */
 } rom_info_t;
+
+/** Extract a metadata image from the associated ZIP into a heap buffer. */
+bool rom_info_extract_metadata_image(const rom_info_t *rom_info, const char *filename,
+                                     uint8_t **data, size_t *size);
 
 /**
  * @brief Get the CIC seed for the ROM.

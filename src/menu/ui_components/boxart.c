@@ -8,6 +8,7 @@
 
 #include "../ui_components.h"
 #include "../path.h"
+#include "../jpeg_decoder.h"
 #include "../png_decoder.h"
 #include "constants.h"
 #include "utils/fs.h"
@@ -29,6 +30,37 @@ static void png_decoder_callback(png_err_t err, surface_t *decoded_image, void *
     component_boxart_t *b = (component_boxart_t *)(callback_data);
     b->loading = false;
     b->image = decoded_image;
+}
+
+static void jpeg_decoder_callback(jpeg_err_t err, surface_t *decoded_image, void *callback_data) {
+    component_boxart_t *b = (component_boxart_t *)(callback_data);
+    b->loading = false;
+    b->image = (err == JPEG_OK) ? decoded_image : NULL;
+}
+
+component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *data, size_t size,
+                                                  int max_width, int max_height) {
+    component_boxart_t *b = calloc(1, sizeof(component_boxart_t));
+    if (!b) {
+        free(data);
+        return NULL;
+    }
+    b->loading = true;
+
+    jpeg_err_t jpeg_err = JPEG_ERR_BAD_FILE;
+    png_err_t png_err = PNG_ERR_BAD_FILE;
+    bool is_jpeg = file_has_extensions((char *) filename, (const char *[]) { "jpg", "jpeg", NULL });
+    if (is_jpeg) {
+        jpeg_err = jpeg_decoder_start_mem(data, size, max_width, max_height, jpeg_decoder_callback, b);
+        if (jpeg_err == JPEG_OK) return b;
+    } else {
+        png_err = png_decoder_start_mem(data, size, max_width, max_height, png_decoder_callback, b);
+        if (png_err == PNG_OK) return b;
+        if (png_err == PNG_ERR_BUSY) free(data);
+    }
+
+    free(b);
+    return NULL;
 }
 
 /**
@@ -122,48 +154,6 @@ component_boxart_t *ui_components_boxart_init(const char *storage_prefix, const 
             }
         }
     }
-#ifdef FEATURE_DEPRECATED_FUNCTIONALITY
-    else { // deprecated compatibility mode
-
-        char file_name[9];
-
-        // reset the directory path used for boxart.
-        path_free(path);
-        path = path_init(storage_prefix, OLD_BOXART_DIRECTORY);
-
-        snprintf(file_name, sizeof(file_name), "%c%c%c%c.png", game_code[0], game_code[1], game_code[2], game_code[3]);
-        path_push(path, file_name);
-
-        if (file_exists(path_get(path))) {
-            if (png_decoder_start(path_get(path), BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX, png_decoder_callback, b) == PNG_OK) {
-                path_free(path);
-                return b;
-            }
-        }
-
-        path_pop(path);
-        snprintf(file_name, sizeof(file_name), "%c%c%c.png", game_code[0], game_code[1], game_code[2]);
-        path_push(path, file_name);
-
-        if (file_exists(path_get(path))) {
-            if (png_decoder_start(path_get(path), BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX, png_decoder_callback, b) == PNG_OK) {
-                path_free(path);
-                return b;
-            }
-        } else {
-            path_pop(path);
-
-            snprintf(file_name, sizeof(file_name), "%c%c.png", game_code[1], game_code[2]);
-            path_push(path, file_name);
-            if (file_exists(path_get(path))) {
-                if (png_decoder_start(path_get(path), BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX, png_decoder_callback, b) == PNG_OK) {
-                    path_free(path);
-                    return b;
-                }
-            }
-        }
-    }
-#endif
     // TODO: return default image.
 
     path_free(path);
@@ -180,9 +170,11 @@ component_boxart_t *ui_components_boxart_init(const char *storage_prefix, const 
 void ui_components_boxart_free(component_boxart_t *b) {
     if (b) {
         if (b->loading) {
+            jpeg_decoder_abort();
             png_decoder_abort();
         }
         if (b->image) {
+            rspq_wait();
             surface_free(b->image);
             free(b->image);
         }
@@ -202,7 +194,7 @@ void ui_components_boxart_draw(component_boxart_t *b) {
     int box_y = BOXART_Y;
     if (b && b->image && b->image->width <= BOXART_WIDTH_MAX && b->image->height <= BOXART_HEIGHT_MAX) {
         rdpq_mode_push();
-            rdpq_set_mode_copy(false);
+            rdpq_set_mode_copy(true);
             if (b->image->height == BOXART_HEIGHT_MAX) {
                 box_x = BOXART_X_JP;
                 box_y = BOXART_Y_JP;
@@ -212,13 +204,5 @@ void ui_components_boxart_draw(component_boxart_t *b) {
             }
             rdpq_tex_blit(b->image, box_x, box_y, NULL);
         rdpq_mode_pop();
-    } else {
-        ui_components_box_draw(
-            BOXART_X,
-            BOXART_Y,
-            BOXART_X + BOXART_WIDTH,
-            BOXART_Y + BOXART_HEIGHT,
-            BOXART_LOADING_COLOR
-        );
     }
 }

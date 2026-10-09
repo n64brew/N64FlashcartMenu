@@ -76,7 +76,7 @@ typedef enum {
     FEAT_RTC = (1 << 4), /**< Real Time Clock */
     FEAT_EXP_PAK_REQUIRED = (1 << 5), /**< Expansion Pak required */
     FEAT_EXP_PAK_RECOMMENDED = (1 << 6), /**< Expansion Pak recommended */
-    FEAT_EXP_PAK_ENHANCED = (1 << 7), /**< Expansion Pak enhanced */
+    FEAT_EXP_PAK_UNUSED = (1 << 7), /**< Expansion Pak unused */
     FEAT_EXP_PAK_BROKEN = (1 << 8), /**< Expansion Pak broken */
     FEAT_64DD_CONVERSION = (1 << 9), /**< 64DD disk to ROM conversion */
     FEAT_64DD_ENHANCED = (1 << 10) /**< Combo ROM + Disk games */
@@ -690,6 +690,7 @@ static rom_tv_type_t determine_tv_type (rom_destination_type_t rom_destination_c
         switch (rom_destination_code) {
             case MARKET_NORTH_AMERICA:
             case MARKET_CANADIAN:
+            case MARKET_CHINESE: // (China is a PAL region, but was never used. The Chinese iQue patches seem use this would be NTSC)
             case MARKET_KOREAN:
             case MARKET_JAPANESE:
             case MARKET_JAPANESE_MULTI:
@@ -712,7 +713,6 @@ static rom_tv_type_t determine_tv_type (rom_destination_type_t rom_destination_c
             case MARKET_OTHER_Y:
                 return ROM_TV_TYPE_PAL;
             // FIXME: We cannot be sure on these markets, so just return the default for the moment!
-            case MARKET_CHINESE: // (China is a PAL region, but the N64 ROM patch may be NTSC, so we cannot be sure!)
             case MARKET_OTHER_Z:
             default:
                 return ROM_TV_TYPE_UNKNOWN;
@@ -761,12 +761,12 @@ static void extract_rom_info (match_t *match, rom_header_t *rom_header, rom_info
         rom_info->features.expansion_pak = EXPANSION_PAK_REQUIRED;
     } else if (match->data.feat & FEAT_EXP_PAK_RECOMMENDED) {
         rom_info->features.expansion_pak = EXPANSION_PAK_RECOMMENDED;
-    } else if (match->data.feat & FEAT_EXP_PAK_ENHANCED) {
-        rom_info->features.expansion_pak = EXPANSION_PAK_SUGGESTED;
+    } else if (match->data.feat & FEAT_EXP_PAK_UNUSED) {
+        rom_info->features.expansion_pak = EXPANSION_PAK_UNUSED;
     } else if (match->data.feat & FEAT_EXP_PAK_BROKEN) {
         rom_info->features.expansion_pak = EXPANSION_PAK_FAULTY;
     } else {
-        rom_info->features.expansion_pak = EXPANSION_PAK_NONE;
+        rom_info->features.expansion_pak = EXPANSION_PAK_UNSPECIFIED;
     }
 
     rom_info->meta.name = strdup("");
@@ -898,6 +898,7 @@ static bool load_metadata_from_zip_file (const char *zip_path, rom_info_t *rom_i
     bool success = false;
     if (meta_ini) {
         bool ok = true;
+        ok &= replace_owned_string(&rom_info->meta.metadata_zip_path, zip_path);
         ok &= replace_owned_string(&rom_info->meta.name,              ini_get_string(meta_ini, "meta", "name",         ""));
         ok &= replace_owned_string(&rom_info->meta.author,            ini_get_string(meta_ini, "meta", "author",       "Not specified"));
         ok &= replace_owned_string(&rom_info->meta.release_date,      ini_get_string(meta_ini, "meta", "release-date", "Not specified"));
@@ -906,6 +907,38 @@ static bool load_metadata_from_zip_file (const char *zip_path, rom_info_t *rom_i
         rom_info->meta.age_rating = ini_get_int(meta_ini, "meta", "age-rating", 0);
         rom_info->meta.num_players = ini_get_int(meta_ini, "meta", "num-players", 1);
         ok &= replace_owned_string(&rom_info->meta.short_description, ini_get_string(meta_ini, "meta", "short-desc",   ""));
+        static const char *boxart_keys[] = { "front", "back", "top", "bottom", "left", "right" };
+        for (size_t i = 0; i < 6; i++) {
+            ok &= replace_owned_string(&rom_info->meta.boxart[i], ini_get_string(meta_ini, "boxart", boxart_keys[i], ""));
+        }
+        static const char *cartart_keys[] = { "front", "back" };
+        for (size_t i = 0; i < 2; i++) {
+            ok &= replace_owned_string(&rom_info->meta.cartart[i], ini_get_string(meta_ini, "cartart", cartart_keys[i], ""));
+        }
+        for (size_t i = 0; i < rom_info->meta.screenshot_count; i++) {
+            free(rom_info->meta.screenshots[i]);
+            rom_info->meta.screenshots[i] = NULL;
+        }
+        rom_info->meta.screenshot_count = 0;
+        const char *screenshots = ini_get_string(meta_ini, "meta", "screenshots", "");
+        char *list = strdup(screenshots);
+        if (list != NULL) {
+            char *save = NULL;
+            for (char *filename = strtok_r(list, ",", &save);
+                 filename != NULL && rom_info->meta.screenshot_count < ROM_METADATA_MAX_SCREENSHOTS;
+                 filename = strtok_r(NULL, ",", &save)) {
+                while (*filename == ' ' || *filename == '\t') filename++;
+                char *end = filename + strlen(filename);
+                while (end > filename && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+                if (*filename != '\0') {
+                    rom_info->meta.screenshots[rom_info->meta.screenshot_count] = strdup(filename);
+                    if (rom_info->meta.screenshots[rom_info->meta.screenshot_count] != NULL) {
+                        rom_info->meta.screenshot_count++;
+                    }
+                }
+            }
+            free(list);
+        }
         ini_free(meta_ini);
         success = ok;
         if (ok) {
@@ -1049,6 +1082,7 @@ static bool load_rom_meta_from_embedded_zip (const char *rom_path, rom_header_t 
     bool success = false;
     if (meta_ini) {
         bool ok = true;
+        ok &= replace_owned_string(&rom_info->meta.metadata_zip_path, rom_path);
         ok &= replace_owned_string(&rom_info->meta.name,              ini_get_string(meta_ini, "meta", "name",         ""));
         ok &= replace_owned_string(&rom_info->meta.author,            ini_get_string(meta_ini, "meta", "author",       "Not specified"));
         ok &= replace_owned_string(&rom_info->meta.release_date,      ini_get_string(meta_ini, "meta", "release-date", "Not specified"));
@@ -1057,6 +1091,39 @@ static bool load_rom_meta_from_embedded_zip (const char *rom_path, rom_header_t 
         rom_info->meta.age_rating = ini_get_int(meta_ini, "meta", "age-rating", 0);
         rom_info->meta.num_players = ini_get_int(meta_ini, "meta", "num-players", 1);
         ok &= replace_owned_string(&rom_info->meta.short_description, ini_get_string(meta_ini, "meta", "short-desc",   ""));
+        ok &= replace_owned_string(&rom_info->meta.long_description_fn, ini_get_string(meta_ini, "meta", "long-desc-fn", ""));
+        static const char *boxart_keys[] = { "front", "back", "top", "bottom", "left", "right" };
+        for (size_t i = 0; i < 6; i++) {
+            ok &= replace_owned_string(&rom_info->meta.boxart[i], ini_get_string(meta_ini, "boxart", boxart_keys[i], ""));
+        }
+        static const char *cartart_keys[] = { "front", "back" };
+        for (size_t i = 0; i < 2; i++) {
+            ok &= replace_owned_string(&rom_info->meta.cartart[i], ini_get_string(meta_ini, "cartart", cartart_keys[i], ""));
+        }
+        for (size_t i = 0; i < rom_info->meta.screenshot_count; i++) {
+            free(rom_info->meta.screenshots[i]);
+            rom_info->meta.screenshots[i] = NULL;
+        }
+        rom_info->meta.screenshot_count = 0;
+        const char *screenshots = ini_get_string(meta_ini, "meta", "screenshots", "");
+        char *list = strdup(screenshots);
+        if (list != NULL) {
+            char *save = NULL;
+            for (char *filename = strtok_r(list, ",", &save);
+                 filename != NULL && rom_info->meta.screenshot_count < ROM_METADATA_MAX_SCREENSHOTS;
+                 filename = strtok_r(NULL, ",", &save)) {
+                while (*filename == ' ' || *filename == '\t') filename++;
+                char *end = filename + strlen(filename);
+                while (end > filename && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+                if (*filename != '\0') {
+                    rom_info->meta.screenshots[rom_info->meta.screenshot_count] = strdup(filename);
+                    if (rom_info->meta.screenshots[rom_info->meta.screenshot_count] != NULL) {
+                        rom_info->meta.screenshot_count++;
+                    }
+                }
+            }
+            free(list);
+        }
         ini_free(meta_ini);
         success = ok;
         if (ok) {
@@ -1126,6 +1193,39 @@ static void load_rom_meta_from_file (path_t *path, rom_info_t *rom_info) {
         rom_info->meta.age_rating = ini_get_int(rom_meta_ini, "meta", "age-rating", 0);
         rom_info->meta.num_players = ini_get_int(rom_meta_ini, "meta", "num-players", 1);
         ok &= replace_owned_string(&rom_info->meta.short_description, ini_get_string(rom_meta_ini, "meta", "short-desc",   ""));
+        ok &= replace_owned_string(&rom_info->meta.long_description_fn, ini_get_string(rom_meta_ini, "meta", "long-desc-fn", ""));
+        static const char *boxart_keys[] = { "front", "back", "top", "bottom", "left", "right" };
+        for (size_t i = 0; i < 6; i++) {
+            ok &= replace_owned_string(&rom_info->meta.boxart[i], ini_get_string(rom_meta_ini, "boxart", boxart_keys[i], ""));
+        }
+        static const char *cartart_keys[] = { "front", "back" };
+        for (size_t i = 0; i < 2; i++) {
+            ok &= replace_owned_string(&rom_info->meta.cartart[i], ini_get_string(rom_meta_ini, "cartart", cartart_keys[i], ""));
+        }
+        for (size_t i = 0; i < rom_info->meta.screenshot_count; i++) {
+            free(rom_info->meta.screenshots[i]);
+            rom_info->meta.screenshots[i] = NULL;
+        }
+        rom_info->meta.screenshot_count = 0;
+        const char *screenshots = ini_get_string(rom_meta_ini, "meta", "screenshots", "");
+        char *list = strdup(screenshots);
+        if (list != NULL) {
+            char *save = NULL;
+            for (char *filename = strtok_r(list, ",", &save);
+                 filename != NULL && rom_info->meta.screenshot_count < ROM_METADATA_MAX_SCREENSHOTS;
+                 filename = strtok_r(NULL, ",", &save)) {
+                while (*filename == ' ' || *filename == '\t') filename++;
+                char *end = filename + strlen(filename);
+                while (end > filename && (end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+                if (*filename != '\0') {
+                    rom_info->meta.screenshots[rom_info->meta.screenshot_count] = strdup(filename);
+                    if (rom_info->meta.screenshots[rom_info->meta.screenshot_count] != NULL) {
+                        rom_info->meta.screenshot_count++;
+                    }
+                }
+            }
+            free(list);
+        }
         ini_free(rom_meta_ini);
         if (ok) {
             debugf("[META] Loaded from INI file: name='%s', author='%s'\n", rom_info->meta.name, rom_info->meta.author);
@@ -1135,6 +1235,36 @@ static void load_rom_meta_from_file (path_t *path, rom_info_t *rom_info) {
     }
     debugf("[META] load_rom_meta_from_file: complete\n");
     path_free(rom_info_meta_path);
+}
+
+bool rom_info_extract_metadata_image(const rom_info_t *rom_info, const char *filename,
+                                     uint8_t **data, size_t *size) {
+    if (!rom_info || !rom_info->meta.metadata_zip_path || !filename || !data || !size ||
+        filename[0] == '/' || strstr(filename, "..") != NULL) {
+        return false;
+    }
+
+    *data = NULL;
+    *size = 0;
+    mz_zip_archive zip = {0};
+    if (!mz_zip_reader_init_file(&zip, rom_info->meta.metadata_zip_path, 0)) return false;
+
+    mz_uint index = mz_zip_reader_locate_file(&zip, filename, NULL, MZ_ZIP_FLAG_CASE_SENSITIVE);
+    mz_zip_archive_file_stat stat;
+    bool ok = index != MZ_UINT32_MAX && mz_zip_reader_file_stat(&zip, index, &stat) &&
+              stat.m_uncomp_size > 0 && stat.m_uncomp_size <= 2 * 1024 * 1024;
+    if (ok) {
+        uint8_t *buffer = malloc((size_t) stat.m_uncomp_size);
+        ok = buffer != NULL && mz_zip_reader_extract_to_mem(&zip, index, buffer, (size_t) stat.m_uncomp_size, 0);
+        if (ok) {
+            *data = buffer;
+            *size = (size_t) stat.m_uncomp_size;
+        } else {
+            free(buffer);
+        }
+    }
+    mz_zip_reader_end(&zip);
+    return ok;
 }
 
 void rom_info_free_meta(rom_info_t *rom_info) {
@@ -1166,6 +1296,25 @@ void rom_info_free_meta(rom_info_t *rom_info) {
         free(rom_info->meta.short_description);
         rom_info->meta.short_description = NULL;
     }
+    if (rom_info->meta.long_description_fn) {
+        free(rom_info->meta.long_description_fn);
+        rom_info->meta.long_description_fn = NULL;
+    }
+    free(rom_info->meta.metadata_zip_path);
+    rom_info->meta.metadata_zip_path = NULL;
+    for (size_t i = 0; i < 6; i++) {
+        free(rom_info->meta.boxart[i]);
+        rom_info->meta.boxart[i] = NULL;
+    }
+    for (size_t i = 0; i < 2; i++) {
+        free(rom_info->meta.cartart[i]);
+        rom_info->meta.cartart[i] = NULL;
+    }
+    for (size_t i = 0; i < rom_info->meta.screenshot_count; i++) {
+        free(rom_info->meta.screenshots[i]);
+        rom_info->meta.screenshots[i] = NULL;
+    }
+    rom_info->meta.screenshot_count = 0;
 }
 
 static void load_rom_config_from_file (path_t *path, rom_info_t *rom_info) {

@@ -96,9 +96,9 @@ Do not invoke libdragon tools directly unless debugging the build system. Prefer
 
 ## External resources & references
 - **libdragon**  
-  https://github.com/DragonMinded/libdragon/tree/preview  
+  https://github.com/n64brew/libdragon/tree/preview  
   Primary API reference for graphics, input, filesystem, audio, and toolchain usage.  
-  Wiki: https://github.com/DragonMinded/libdragon/wiki
+  Wiki: https://github.com/n64brew/libdragon/wiki
 
 - **N64brew**  
   https://n64brew.dev/  
@@ -218,6 +218,11 @@ Do not invoke libdragon tools directly unless debugging the build system. Prefer
 - Local constants are allowed when they encode validation, security, or out-of-bounds safety limits (including one-off scan-limit values).
 - Keep behavior identical unless the bug itself requires behavior change.
 - After edits, validate touched files and summarize exactly which findings were fixed.
+
+### Recurring pitfall patterns (watch for these on any review)
+- **Unchecked ints from user-editable config**: any value parsed from a `.ini`/config file (e.g. `rom_offset`) must be range-checked before use in pointer/size arithmetic like `SIZE - value`, which silently underflows on out-of-range input.
+- **NULL-sentinel API arguments**: avoid a single parameter meaning two different things depending on whether it's NULL (e.g. "use this new value" vs "reuse whatever was last set"). Split into a setter + a no-arg action function instead.
+- **Multiple SD card file handles open at once**: closing/reopening one SD-backed resource (e.g. audio player track) while another SD file handle from a different subsystem (e.g. custom BGM) is still open can corrupt the second open. Always close the first subsystem's handle before initializing/reopening another SD-backed resource.
 
 ### Minimal Change Policy (Strict)
 - Be laser-focused on the exact user request; do not broaden scope.

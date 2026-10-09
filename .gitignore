@@ -1,17 +1,19 @@
 # Ignore editor specific config folders/files
-/.vscode
+/.vscode/*
+# But keep .vscode/c_cpp_properties.json used for intellisense
+!/.vscode/c_cpp_properties.json
 
 # Ignore compilation result directories
 /build
 /output
 /docs/api
 /_site
+/src/libs/libjpeg-turbo/build/**
 
 # Ignore generated files in the libdragon FS
 /filesystem/Firple-Bold.font64
 /filesystem/FiraMonoBold.font64
-/filesystem/*.wav64
-/filesystem/*.sprite
+/filesystem/menu/**
 
 # Ignore external development tools
 /tools/*

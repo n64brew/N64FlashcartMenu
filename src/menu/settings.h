@@ -7,6 +7,8 @@
 #ifndef SETTINGS_H__
 #define SETTINGS_H__
 
+#include "theme.h"
+
 
 /** @brief Settings Structure */
 typedef struct {
@@ -27,6 +29,12 @@ typedef struct {
 
     /** @brief Default directory to navigate to when menu loads */
     char *default_directory;
+
+    /** @brief Start in Grid instead of Files (autoload still takes precedence). */
+    bool boot_into_grid;
+
+    /** @brief Directory indexed by Grid, without descending into subdirectories. */
+    char *grid_directory;
 
     /** @brief Put saves into separate directory */
     bool use_saves_folder;
@@ -54,6 +62,9 @@ typedef struct {
 
     /** @brief Enable Background music */
     bool bgm_enabled;
+
+    /** @brief Selected theme name; NULL when loaded from settings that predate themes. */
+    char *theme;
 
     /** @brief Enable Sound effects within the menu */
     bool soundfx_enabled;

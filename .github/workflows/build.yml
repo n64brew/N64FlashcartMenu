@@ -31,10 +31,10 @@ jobs:
       - name: Build N64FlashcartMenu ROM
         uses: devcontainers/ci@v0.3
         with:
-          imageName: ghcr.io/polprzewodnikowy/n64flashcartmenu-ci-devcontainer
-          cacheFrom: ghcr.io/polprzewodnikowy/n64flashcartmenu-ci-devcontainer
+          imageName: ghcr.io/n64brew/n64flashcartmenu-ci-devcontainer
+          cacheFrom: ghcr.io/n64brew/n64flashcartmenu-ci-devcontainer
           configFile: .devcontainer/ci/devcontainer.json
-          push: ${{ github.repository_owner == 'Polprzewodnikowy' && 'filter' || 'never' }}
+          push: ${{ github.repository_owner == 'n64brew' && 'filter' || 'never' }}
           refFilterForPush: refs/heads/main
           runCmd: |
             make all -j

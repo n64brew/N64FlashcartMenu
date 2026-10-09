@@ -101,8 +101,7 @@ static int *music_indices = NULL;
 static int music_count = 0;
 
 /* Directory scan state for async cover art search */
-static const char *cover_image_extensions[] = { "png", NULL };
-// static const char *cover_image_extensions[] = { "png", "jpg", "jpeg", NULL };
+static const char *cover_image_extensions[] = { "png", "jpg", "jpeg", NULL };
 static const char *preferred_cover_names[] = { "cover", "folder", "front", "album", "art", NULL };
 static path_t *cover_dir = NULL;
 static dir_t cover_dir_entry;
@@ -312,7 +311,6 @@ static bool try_cover_path (const char *path, int max_size) {
                                                cover_art_cb, NULL);
         if (err != JPEG_OK) {
             cover_state = COVER_IDLE;
-            free(buf);
             return false;
         }
     } else {
@@ -518,7 +516,7 @@ static void load_cover_art (path_t *directory) {
 
             if (started) return;
             cover_state = COVER_IDLE;
-            free(buf);
+            if (meta->cover_art_is_png) free(buf);
         }
     }
 
@@ -1147,8 +1145,11 @@ static void deinit (void) {
     music_count = 0;
     queue_cache_count = 0;
 
-    sound_init_default();
+    // Close the current track's SD file handle before reconfiguring audio,
+    // since sound_init_default() may reopen a custom BGM file from the SD
+    // card and some filesystem drivers don't support two open SD handles.
     audioplayer_deinit();
+    sound_init_default();
 }
 
 

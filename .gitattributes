@@ -3,4 +3,7 @@
 *.sh text eol=lf
 *.yml text eol=lf
 
+# Special case for metadata files, which are text files but should always use LF line endings
+metadata/** eol=lf
+
 src/libs/** linguist-vendored

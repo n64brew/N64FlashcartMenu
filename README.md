@@ -30,6 +30,7 @@ The current state of support is:
 * Doctor V64
 * PicoCart
 * DaisyDrive
+* EverDrive-64 Pro series
 
 
 ## Current (notable) menu features
@@ -38,18 +39,19 @@ The current state of support is:
 * Fully emulates the 64DD and loads 64DD disks (SummerCart64 only).
 * Emulator support (NES, SNES, GB, GBC, SMS, GG, CHF) ROMs.
 * N64 ROM box art image support.
-* Background image (PNG) support.
+* Background image (PNG & JPEG) support.
 * Comprehensive ROM save database (including homebrew headers).
 * Comprehensive ROM information display.
 * Real Time Clock support.
-* Music playback (MP3).
-* Menu sound effects.
-* N64 ROM fast reboot option (on reset).
+* Music playback (MP3 and FLAC) with id3 support.
+* Menu background music and sound effects.
+* N64 ROM autoload option (on reset).
 * ROM history and favorites.  
 * ROM Datel code editor.
 * Zip archive browsing and file extraction.
 * Controller Pak backup and restore (including individual notes).
 * Game art image switching.
+* Menu themes.
 
 
 ## Aims
@@ -87,11 +89,13 @@ Other compatible or commercial license options may be available upon request wit
 
 # Open source software and licenses used
 ## Libraries
-* [libdragon](https://github.com/DragonMinded/libdragon/tree/preview) - [UNLICENSE License](https://github.com/DragonMinded/libdragon/blob/preview/LICENSE.md)
+* [libdragon](https://github.com/n64brew/libdragon/tree/preview) - [UNLICENSE License](https://github.com/n64brew/libdragon/blob/preview/LICENSE.md)
 * [libspng](https://github.com/randy408/libspng) - [BSD 2-Clause License](https://github.com/randy408/libspng/blob/master/LICENSE)
+* [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) - [BSD 3-Clause License](https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/LICENSE.md)
 * [minimp3](https://github.com/lieff/minimp3) - [CC0 1.0 Universal](https://github.com/lieff/minimp3/blob/master/LICENSE)
-* [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
 * [dr_flac](https://github.com/mackron/dr_libs) - [MIT License](https://github.com/mackron/dr_libs/blob/master/LICENSE)
+* [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
+
 
 ## Sounds
 See [License](https://pixabay.com/en/service/license-summary/) for the following sounds:
@@ -101,6 +105,8 @@ See [License](https://pixabay.com/en/service/license-summary/) for the following
 
 See [License](https://creativecommons.org/licenses/by/4.0/) for the following sounds:
 * [Background Music](https://www.playonloop.com/2017-music-loops/flying-dreams/) POL-flying-dreams-short
+* [Background Music alternative](https://www.playonloop.com/2011-music-loops/warm-waves/) POL-warm-waves-short
+
 
 ## Emulators
 * [neon64v2](https://github.com/hcs64/neon64v2) by *hcs64* - [ISC License](https://github.com/hcs64/neon64v2/blob/master/LICENSE.txt)

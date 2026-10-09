@@ -17,7 +17,7 @@ static const char *archive_extensions[] = { "zip", NULL };
 static const char *cheat_extensions[] = {"cht", "cheats", "datel", "gameshark", NULL};
 static const char *disk_extensions[] = { "ndd", NULL };
 static const char *emulator_extensions[] = { "nes", "sfc", "smc", "gb", "gbc", "sms", "gg", "sg", "chf", "rzx", "mx1", "mx2", "emu", NULL };
-static const char *image_extensions[] = { "png", NULL };
+static const char *image_extensions[] = { "png", "jpg", "jpeg", NULL };
 static const char *music_extensions[] = { "mp3", NULL };
 static const char *n64_rom_extensions[] = { "z64", "n64", "v64", "rom", NULL };
 static const char *patch_extensions[] = { "bps", "ips", "aps", "ups", "xdelta", NULL };
@@ -76,8 +76,8 @@ static const struct substr hidden_prefixes[] = {
 //     return false;
 // }
 
-static bool path_is_hidden (path_t *path) {
-    char *stripped_path = strip_fs_prefix(path_get(path));
+bool view_browser_path_is_hidden (const char *full_path) {
+    char *stripped_path = strip_fs_prefix((char *) full_path);
 
     // Check for hidden files based on full path
     for (size_t i = 0; hidden_root_paths[i] != NULL; i++) {
@@ -298,7 +298,7 @@ static bool load_directory (menu_t *menu) {
 
         if (!menu->settings.show_protected_entries) {
             path_push(path, info.d_name);
-            hide = path_is_hidden(path);
+            hide = view_browser_path_is_hidden(path_get(path));
             path_pop(path);
         }
 
@@ -506,6 +506,7 @@ static void delete_entry (menu_t *menu, void *arg) {
     }
 
     path_free(path);
+    view_grid_library_changed();
 
     if (reload_directory(menu)) {
         menu->browser.valid = false;
@@ -524,11 +525,26 @@ static void set_default_directory (menu_t *menu, void *arg) {
     settings_save(&menu->settings);
 }
 
+/** @brief Open the Controller Pak pane directly from the browser's Z menu. */
+static void open_controller_pak (menu_t *menu, void *arg) {
+    (void) arg;
+    view_settings_open_pane(menu, &settings_pane_controller_pak);
+}
+
+static void set_grid_directory (menu_t *menu, void *arg) {
+    free(menu->settings.grid_directory);
+    menu->settings.grid_directory = strdup(strip_fs_prefix(path_get(menu->browser.directory)));
+    settings_save(&menu->settings);
+}
+
 static component_context_menu_t entry_context_menu = {
     .list = {
         { .text = "Show entry properties", .action = show_properties },
         { .text = "Delete selected entry", .action = delete_entry },
-        { .text = "Set current directory as default", .action = set_default_directory },
+        { .text = "Controller Pak manager", .action = open_controller_pak },
+        { .text = "Set current directory as Files start", .action = set_default_directory },
+        /* Last, so that hiding it without Grid only shortens the menu. */
+        { .text = "Set current directory as Grid library", .action = set_grid_directory },
         COMPONENT_CONTEXT_MENU_LIST_END,
     }
 };
@@ -537,33 +553,13 @@ static component_context_menu_t archive_context_menu = {
     .list = {
         { .text = "Show entry properties", .action = show_properties },
         { .text = "Extract selected entry", .action = extract_entry },
-        COMPONENT_CONTEXT_MENU_LIST_END,
-    }
-};
-
-static void set_menu_next_mode (menu_t *menu, void *arg) {
-    menu_mode_t next_mode = (menu_mode_t) (arg);
-    menu->next_mode = next_mode;
-}
-
-static component_context_menu_t settings_context_menu = {
-    .list = {
-        { .text = "Controller Pak manager", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_CONTROLLER_PAKFS) },
-        { .text = "Menu settings", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_SETTINGS_EDITOR) },
-        { .text = "Time (RTC) settings", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_RTC) },
-        { .text = "Menu information", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_CREDITS) },
-        { .text = "Flashcart information", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_FLASHCART) },
-        { .text = "N64 information", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_SYSTEM_INFO) },
+        { .text = "Controller Pak manager", .action = open_controller_pak },
         COMPONENT_CONTEXT_MENU_LIST_END,
     }
 };
 
 static void process (menu_t *menu) {
     if (ui_components_context_menu_process(menu, menu->browser.archive ? &archive_context_menu : &entry_context_menu)) {
-        return;
-    }
-
-    if (ui_components_context_menu_process(menu, &settings_context_menu)) {
         return;
     }
 
@@ -671,17 +667,14 @@ static void process (menu_t *menu) {
             );
         }
         sound_play_effect(SFX_EXIT);
-    } else if (menu->actions.options && menu->browser.entry) {
+    } else if (menu->actions.context && menu->browser.entry) {
         ui_components_context_menu_show(menu->browser.archive ? &archive_context_menu : &entry_context_menu);
         sound_play_effect(SFX_SETTING);
-    } else if (menu->actions.settings) {
-        ui_components_context_menu_show(&settings_context_menu);
-        sound_play_effect(SFX_SETTING);
-    } else if (menu->actions.go_right) {
+    } else if (menu->actions.tab_right) {
         menu->next_mode = MENU_MODE_HISTORY;
         sound_play_effect(SFX_CURSOR);
-    } else if (menu->actions.go_left) {
-        menu->next_mode = MENU_MODE_FAVORITE;
+    } else if (menu->actions.tab_left) {
+        menu->next_mode = menu->grid_enabled ? MENU_MODE_GRID : MENU_MODE_SETTINGS;
         sound_play_effect(SFX_CURSOR);
     }
 }
@@ -691,7 +684,7 @@ static void draw (menu_t *menu, surface_t *d) {
 
     ui_components_background_draw();
 
-    ui_components_tabs_common_draw(0);
+    ui_components_tabs_common_draw(menu, 1);
 
     ui_components_layout_draw_tabbed();
 
@@ -702,7 +695,7 @@ static void draw (menu_t *menu, surface_t *d) {
     if (menu->browser.entry) {
         switch (menu->browser.entry->type) {
             case ENTRY_TYPE_DIR: action = "A: Enter"; break;
-            case ENTRY_TYPE_ROM: action = "A: Load"; break;
+            case ENTRY_TYPE_ROM: action = "A: Details"; break;
             case ENTRY_TYPE_DISK: action = "A: Load"; break;
             case ENTRY_TYPE_IMAGE: action = "A: Show"; break;
             case ENTRY_TYPE_TEXT: action = "A: View"; break;
@@ -724,8 +717,8 @@ static void draw (menu_t *menu, surface_t *d) {
     ui_components_actions_bar_text_draw(
         STL_DEFAULT,
         ALIGN_RIGHT, VALIGN_TOP,
-        "^%02XStart: Settings^00\n"
-        "^%02XR:  Options^00",
+        "\n"
+        "^%02XZ:  Options^00",
         menu->browser.entries == 0 ? STL_GRAY : STL_DEFAULT
     );
 
@@ -733,7 +726,7 @@ static void draw (menu_t *menu, surface_t *d) {
         ui_components_actions_bar_text_draw(
             STL_DEFAULT,
             ALIGN_CENTER, VALIGN_TOP,
-            "C-▼▲ Fast Scroll | ◀ Tabs ▶ \n"
+            "C-▼▲ Fast Scroll | ◀L Tab R▶\n"
             "%s",
             ctime(&menu->current_time)
         );
@@ -741,14 +734,12 @@ static void draw (menu_t *menu, surface_t *d) {
         ui_components_actions_bar_text_draw(
             STL_DEFAULT,
             ALIGN_CENTER, VALIGN_TOP,
-            "C-▼▲ Fast Scroll | ◀ Tabs ▶ \n"
+            "C-▼▲ Fast Scroll | ◀L Tab R▶\n"
             "\n"
         );
     }
 
     ui_components_context_menu_draw(menu->browser.archive ? &archive_context_menu : &entry_context_menu);
-
-    ui_components_context_menu_draw(&settings_context_menu);
 
     rdpq_detach_show();
 }
@@ -757,8 +748,10 @@ static void draw (menu_t *menu, surface_t *d) {
 void view_browser_init (menu_t *menu) {
     if (!menu->browser.valid) {
         ui_components_context_menu_init(&entry_context_menu);
+        if (!menu->grid_enabled) {
+            entry_context_menu.row_count--;
+        }
         ui_components_context_menu_init(&archive_context_menu);
-        ui_components_context_menu_init(&settings_context_menu);
         if (load_directory(menu)) {
             path_free(menu->browser.directory);
             menu->browser.directory = path_init(menu->storage_prefix, "");

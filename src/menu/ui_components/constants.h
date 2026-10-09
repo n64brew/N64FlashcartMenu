@@ -9,11 +9,14 @@
 #ifndef COMPONENTS_CONSTANTS_H__
 #define COMPONENTS_CONSTANTS_H__
 
+#include "../theme.h"
+
 /**
  * @def TAB_HEIGHT
  * @brief Height of the tabs in the main menu (pixels).
  */
 #define TAB_HEIGHT                      (20)
+#define TAB_SELECTED_LIFT               (5)
 
 /**
  * @def BORDER_THICKNESS
@@ -253,6 +256,47 @@
 #define LIST_SCROLLBAR_Y                (VISIBLE_AREA_Y0 + TAB_HEIGHT + BORDER_THICKNESS)
 
 /**
+ * @def SETTINGS_RAIL_X0
+ * @brief X coordinate of the settings category rail.
+ */
+#define SETTINGS_RAIL_X0                (VISIBLE_AREA_X0 + 4)
+/**
+ * @def SETTINGS_RAIL_X1
+ * @brief X coordinate of the divider between the category rail and the pane.
+ */
+#define SETTINGS_RAIL_X1                (VISIBLE_AREA_X0 + 136)
+/**
+ * @def SETTINGS_PANE_X0
+ * @brief X coordinate of the left edge of the settings pane.
+ */
+#define SETTINGS_PANE_X0                (SETTINGS_RAIL_X1 + 8)
+/**
+ * @def SETTINGS_PANE_X1
+ * @brief X coordinate of the right edge of the settings pane.
+ */
+#define SETTINGS_PANE_X1                (VISIBLE_AREA_X1 - 4)
+/**
+ * @def SETTINGS_PANE_Y0
+ * @brief Y coordinate of the top edge of the settings pane.
+ */
+#define SETTINGS_PANE_Y0                (VISIBLE_AREA_Y0 + TAB_HEIGHT + BORDER_THICKNESS + 8)
+/**
+ * @def SETTINGS_PANE_Y1
+ * @brief Y coordinate of the bottom edge of the settings pane.
+ */
+#define SETTINGS_PANE_Y1                (LAYOUT_ACTIONS_SEPARATOR_Y - 6)
+/**
+ * @def SETTINGS_ROW_HEIGHT
+ * @brief Height of a single label/value row in a settings pane (pixels).
+ */
+#define SETTINGS_ROW_HEIGHT             (28)
+/**
+ * @def SETTINGS_ROWS
+ * @brief Maximum number of label/value rows visible in a settings pane.
+ */
+#define SETTINGS_ROWS                   ((SETTINGS_PANE_Y1 - SETTINGS_PANE_Y0) / SETTINGS_ROW_HEIGHT)
+
+/**
  * @def LIST_ENTRIES
  * @brief Maximum number of file list entries.
  */
@@ -277,7 +321,7 @@
  * @def BACKGROUND_EMPTY_COLOR
  * @brief Color used when no background image is present (RGBA8888).
  */
-#define BACKGROUND_EMPTY_COLOR          RGBA32(0x00, 0x00, 0x00, 0xFF)
+#define BACKGROUND_EMPTY_COLOR          (theme_get()->background)
 /**
  * @def BACKGROUND_OVERLAY_COLOR
  * @brief Overlay color for the background (RGBA8888, semi-transparent).
@@ -288,78 +332,78 @@
  * @def BORDER_COLOR
  * @brief Color of UI borders (RGBA8888).
  */
-#define BORDER_COLOR                    RGBA32(0xFF, 0xFF, 0xFF, 0xFF)
+#define BORDER_COLOR                    (theme_get()->border)
 
 /**
  * @def PROGRESSBAR_BG_COLOR
  * @brief Background color of the progress bar (RGBA8888).
  */
-#define PROGRESSBAR_BG_COLOR            RGBA32(0x00, 0x00, 0x00, 0xFF)
+#define PROGRESSBAR_BG_COLOR            (theme_get()->panel)
 /**
  * @def PROGRESSBAR_DONE_COLOR
  * @brief Color of the completed portion of the progress bar (RGBA8888).
  */
-#define PROGRESSBAR_DONE_COLOR          RGBA32(0x3B, 0x7C, 0xF5, 0xFF)
+#define PROGRESSBAR_DONE_COLOR          (theme_get()->accent)
 
 /**
  * @def SCROLLBAR_BG_COLOR
  * @brief Background color of the scrollbar (RGBA8888).
  */
-#define SCROLLBAR_BG_COLOR              RGBA32(0x3F, 0x3F, 0x3F, 0xFF)
+#define SCROLLBAR_BG_COLOR              (theme_get()->panel)
 /**
  * @def SCROLLBAR_INACTIVE_COLOR
  * @brief Inactive color of the scrollbar (RGBA8888).
  */
-#define SCROLLBAR_INACTIVE_COLOR        RGBA32(0x5F, 0x5F, 0x5F, 0xFF)
+#define SCROLLBAR_INACTIVE_COLOR        (theme_get()->tab_inactive)
 /**
  * @def SCROLLBAR_POSITION_COLOR
  * @brief Color of the scrollbar position indicator (RGBA8888).
  */
-#define SCROLLBAR_POSITION_COLOR        RGBA32(0x7F, 0x7F, 0x7F, 0xFF)
+#define SCROLLBAR_POSITION_COLOR        (theme_get()->accent)
 
 /**
  * @def DIALOG_BG_COLOR
  * @brief Background color for dialog boxes (RGBA8888).
  */
-#define DIALOG_BG_COLOR                 RGBA32(0x00, 0x00, 0x00, 0xFF)
+#define DIALOG_BG_COLOR                 (theme_get()->panel)
 
 /**
  * @def BOXART_LOADING_COLOR
  * @brief Color used while boxart is loading (RGBA8888).
  */
-#define BOXART_LOADING_COLOR            RGBA32(0x00, 0x00, 0x00, 0xFF)
+#define BOXART_LOADING_COLOR            (theme_get()->background)
 
 /**
  * @def FILE_LIST_HIGHLIGHT_COLOR
  * @brief Highlight color for file list entries (RGBA8888).
  */
-#define FILE_LIST_HIGHLIGHT_COLOR       RGBA32(0x7F, 0x7F, 0x7F, 0xFF)
+#define FILE_LIST_HIGHLIGHT_COLOR       (theme_get()->highlight)
 
 /**
  * @def CONTEXT_MENU_HIGHLIGHT_COLOR
  * @brief Highlight color for context menu entries (RGBA8888).
  */
-#define CONTEXT_MENU_HIGHLIGHT_COLOR    RGBA32(0x7F, 0x7F, 0x7F, 0xFF)
+#define CONTEXT_MENU_HIGHLIGHT_COLOR    (theme_get()->highlight)
 
 /**
  * @def TAB_INACTIVE_BORDER_COLOR
  * @brief Border color for inactive tabs (RGBA8888).
  */
-#define TAB_INACTIVE_BORDER_COLOR       RGBA32(0x5F, 0x5F, 0x5F, 0xFF)
+#define TAB_INACTIVE_BORDER_COLOR       (theme_get()->muted_text)
 /**
  * @def TAB_ACTIVE_BORDER_COLOR
  * @brief Border color for active tabs (RGBA8888).
  */
-#define TAB_ACTIVE_BORDER_COLOR         RGBA32(0xFF, 0xFF, 0xFF, 0xFF)
+#define TAB_ACTIVE_BORDER_COLOR         (theme_get()->border)
 /**
  * @def TAB_INACTIVE_BACKGROUND_COLOR
  * @brief Background color for inactive tabs (RGBA8888).
  */
-#define TAB_INACTIVE_BACKGROUND_COLOR   RGBA32(0x3F, 0x3F, 0x3F, 0xFF)
+#define TAB_INACTIVE_BACKGROUND_COLOR   (theme_get()->tab_inactive)
 /**
  * @def TAB_ACTIVE_BACKGROUND_COLOR
  * @brief Background color for active tabs (RGBA8888).
  */
-#define TAB_ACTIVE_BACKGROUND_COLOR     RGBA32(0x6F, 0x6F, 0x6F, 0xFF)
+#define TAB_ACTIVE_BACKGROUND_COLOR     (theme_get()->tab_active)
 
 #endif /* COMPONENTS_CONSTANTS_H__ */

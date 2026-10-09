@@ -1,3 +1,8 @@
 ## Menu information
 ![N64FlashcartMenu menu information](./images/menu-information.png "N64FlashcartMenu menu information")  
-This screen will show you various information regarding the N64FlashcartMenu you have booted, such as its version, its build date, and the developer credits.
+The Information pane in Settings shows the menu version, build date, libdragon
+version, project URL, developer credits, and license. The third-party software
+license summary appears inline below the credits.
+
+Select Information and press `A`, then use Up and Down to scroll. Press `B` to
+return to categories or `L` and `R` to switch tabs.

@@ -1,6 +1,12 @@
 #include "views.h"
 #include "../sound.h"
+#include "../ui_components/constants.h"
 #include <libcart/cart.h>
+
+/** @brief Number of rows the flashcart pane shows. */
+#define FLASHCART_ROWS  (12)
+
+_Static_assert(FLASHCART_ROWS <= SETTINGS_ROWS, "Flashcart rows no longer fit the settings pane");
 
 static bool show_extra_info_message = false;
 
@@ -82,60 +88,40 @@ static const char *format_voltage_temperature (void) {
     return buffer;
 }
 
-static void process (menu_t *menu) {
-    bool has_button_support = flashcart_has_button_state();
-    bool has_diagnostics_support = flashcart_has_voltage_temperature();
-    bool has_extra_info = has_button_support || has_diagnostics_support;
-
-    if (menu->actions.back) {
-        sound_play_effect(SFX_EXIT);
-        menu->next_mode = MENU_MODE_BROWSER;
-    } else if (menu->actions.lz_context && has_extra_info) {
-        show_extra_info_message = !show_extra_info_message;
-        sound_play_effect(SFX_SETTING);
-    }
+static bool has_extra_info (void) {
+    return flashcart_has_button_state() || flashcart_has_voltage_temperature();
 }
 
-static void draw (menu_t *menu, surface_t *d) {
-    bool has_button_support = flashcart_has_button_state();
-    bool has_diagnostics_support = flashcart_has_voltage_temperature();
-    bool has_extra_info = has_button_support || has_diagnostics_support;
+static void pane_enter (menu_t *menu) {
+    show_extra_info_message = false;
+}
 
-    rdpq_attach(d, NULL);
+static bool pane_process (menu_t *menu) {
+    if (show_extra_info_message) {
+        if (menu->actions.back || menu->actions.context) {
+            show_extra_info_message = false;
+            sound_play_effect(SFX_EXIT);
+        }
+        return true;
+    }
 
-    ui_components_background_draw();
+    if (menu->actions.back) {
+        return false;
+    } else if (menu->actions.context && has_extra_info()) {
+        show_extra_info_message = true;
+        sound_play_effect(SFX_SETTING);
+    }
 
-    ui_components_layout_draw();
+    return true;
+}
 
-    ui_components_main_text_draw(
-        STL_DEFAULT,
-        ALIGN_CENTER, VALIGN_TOP,
-        "FLASHCART INFORMATION"
-        "\n"
-        "\n"
-    );
-
-    ui_components_main_text_draw(
-        STL_DEFAULT,
-        ALIGN_LEFT, VALIGN_TOP,
-        "\n"
-        "\n"
-        "Type:\n"
-        "  %s\n\n"
-        "Firmware:\n"
-        "  Version: %s\n\n"
-        "Features:\n"
-        "  Virtual 64DD:     %s.\n"
-        "  Real Time Clock:  %s.\n"
-        "  USB Debugging:    %s.\n"
-        "  Automatic CIC:    %s.\n"
-        "  Region Detection: %s.\n"
-        "  Save Writeback:   %s.\n"
-        "  Auto F/W Updates: %s.\n"
-        "  Fast ROM Reboots: %s.\n"
-        "  Button:           %s.\n"
-        "  Diagnostics:      %s.\n"
-        "\n\n",
+static void pane_draw (menu_t *menu, bool focused) {
+    static const char *labels[FLASHCART_ROWS] = {
+        "Type", "Firmware", "Virtual 64DD", "Real Time Clock", "USB Debugging",
+        "Automatic CIC", "Region Detection", "Save Writeback", "Auto F/W Updates",
+        "Fast ROM Reboots", "Button", "Diagnostics",
+    };
+    const char *values[FLASHCART_ROWS] = {
         format_cart_type(),
         format_cart_version(),
         format_boolean_type(flashcart_has_feature(FLASHCART_FEATURE_64DD)),
@@ -146,27 +132,20 @@ static void draw (menu_t *menu, surface_t *d) {
         format_boolean_type(flashcart_has_feature(FLASHCART_FEATURE_SAVE_WRITEBACK)),
         format_boolean_type(flashcart_has_feature(FLASHCART_FEATURE_BIOS_UPDATE_FROM_MENU)),
         format_boolean_type(flashcart_has_feature(FLASHCART_FEATURE_ROM_REBOOT_FAST)),
-        format_boolean_type(has_button_support),
-        format_boolean_type(has_diagnostics_support)
-    );
+        format_boolean_type(flashcart_has_button_state()),
+        format_boolean_type(flashcart_has_voltage_temperature()),
+    };
+    int y = SETTINGS_PANE_Y0 + 4;
 
-    ui_components_actions_bar_text_draw(
-        STL_DEFAULT,
-        ALIGN_LEFT, VALIGN_TOP,
-        "\n"
-        "B: Back"
-    );
 
-    if (has_extra_info) {
-        ui_components_actions_bar_text_draw(
-            STL_DEFAULT,
-            ALIGN_RIGHT, VALIGN_TOP,
-            "\n"
-            "L|Z: Diagnostics"
-        );
+    for (int i = 0; i < FLASHCART_ROWS; i++) {
+        ui_components_settings_row_draw(y, labels[i], values[i], false);
+        y += SETTINGS_ROW_HEIGHT;
     }
+}
 
-    if (show_extra_info_message && has_extra_info) {
+static void pane_overlay (menu_t *menu) {
+    if (show_extra_info_message) {
         ui_components_messagebox_draw(
             "FLASHCART DIAGNOSTICS\n"
             "\n"
@@ -174,21 +153,33 @@ static void draw (menu_t *menu, surface_t *d) {
             "  Button Realtime: %s\n"
             "  Voltage / Temp: %s\n"
             "\n"
-            "Press L|Z to return.\n",
+            "Press Z or B to return.\n",
             format_button_state(),
             format_voltage_temperature()
         );
     }
-
-    rdpq_detach_show();
 }
 
-
-void view_flashcart_info_init (menu_t *menu) {
-    show_extra_info_message = false;
+static bool pane_blocks_tabs (menu_t *menu) {
+    (void) menu;
+    return show_extra_info_message;
 }
 
-void view_flashcart_info_display (menu_t *menu, surface_t *display) {
-    process(menu);
-    draw(menu, display);
+static const char *pane_hint (menu_t *menu, settings_hint_t slot) {
+    switch (slot) {
+        case SETTINGS_HINT_LEFT: return "B: Categories\n";
+        case SETTINGS_HINT_CENTER: return "◀L Tab R▶\n";
+        case SETTINGS_HINT_RIGHT: return has_extra_info() ? "Z: Diagnostics\n" : NULL;
+        default: return NULL;
+    }
 }
+
+const settings_pane_t settings_pane_flashcart = {
+    .label = "Flashcart",
+    .enter = pane_enter,
+    .process = pane_process,
+    .draw = pane_draw,
+    .overlay = pane_overlay,
+    .blocks_tabs = pane_blocks_tabs,
+    .hint = pane_hint,
+};

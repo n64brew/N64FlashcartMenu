@@ -85,21 +85,21 @@ static void process(menu_t *menu) {
             menu->next_mode = MENU_MODE_LOAD_ROM;
             sound_play_effect(SFX_ENTER);
         }
-    } else if (menu->actions.go_left) {
+    } else if (menu->actions.tab_left) {
         if(tab_context == BOOKKEEPING_TAB_CONTEXT_FAVORITE) {
             menu->next_mode = MENU_MODE_HISTORY;
         } else if(tab_context == BOOKKEEPING_TAB_CONTEXT_HISTORY) {
             menu->next_mode = MENU_MODE_BROWSER;
         }
         sound_play_effect(SFX_CURSOR);       
-    } else if (menu->actions.go_right) {
+    } else if (menu->actions.tab_right) {
         if(tab_context == BOOKKEEPING_TAB_CONTEXT_FAVORITE) {
-            menu->next_mode = MENU_MODE_BROWSER;
+            menu->next_mode = MENU_MODE_SETTINGS;
         } else if(tab_context == BOOKKEEPING_TAB_CONTEXT_HISTORY) {
             menu->next_mode = MENU_MODE_FAVORITE;
         }
         sound_play_effect(SFX_CURSOR);
-    }else if(tab_context == BOOKKEEPING_TAB_CONTEXT_FAVORITE && menu->actions.options && selected_item != -1) {
+    }else if(tab_context == BOOKKEEPING_TAB_CONTEXT_FAVORITE && menu->actions.context && selected_item != -1) {
         bookkeeping_favorite_remove(&menu->bookkeeping, selected_item);
         item_reset_selected(menu);
         sound_play_effect(SFX_SETTING);
@@ -160,9 +160,9 @@ static void draw(menu_t *menu, surface_t *display) {
     ui_components_background_draw();
 
     if(tab_context == BOOKKEEPING_TAB_CONTEXT_FAVORITE) {
-        ui_components_tabs_common_draw(2);
+        ui_components_tabs_common_draw(menu, 3);
     } else if(tab_context == BOOKKEEPING_TAB_CONTEXT_HISTORY) {
-        ui_components_tabs_common_draw(1);
+        ui_components_tabs_common_draw(menu, 2);
     }
 
     ui_components_layout_draw_tabbed();
@@ -173,7 +173,7 @@ static void draw(menu_t *menu, surface_t *display) {
         ui_components_actions_bar_text_draw(
             STL_DEFAULT,
             ALIGN_LEFT, VALIGN_TOP,
-            "A: Load Game\n"
+            "A: Launch\n"
             "\n"
         );
         
@@ -181,7 +181,7 @@ static void draw(menu_t *menu, surface_t *display) {
             ui_components_actions_bar_text_draw(
                 STL_DEFAULT,
                 ALIGN_RIGHT, VALIGN_TOP,
-                "R: Remove item\n"
+                "Z: Remove item\n"
                 "\n"
             );
         }
@@ -190,8 +190,9 @@ static void draw(menu_t *menu, surface_t *display) {
     ui_components_actions_bar_text_draw(
         STL_DEFAULT,
         ALIGN_CENTER, VALIGN_TOP,
-        "◀ Change Tab ▶\n"
-        "\n"
+        "▼▲ Scroll | ◀L Tab R▶\n"
+        "%s",
+        ctime(&menu->current_time)
     );    
 
     rdpq_detach_show();   
