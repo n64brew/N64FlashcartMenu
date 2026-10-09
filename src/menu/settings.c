@@ -42,6 +42,8 @@ static settings_t init = {
     .boot_into_grid = false,
     .grid_directory = "/",
     .use_saves_folder = true,
+    .use_global_saves_folder = false,
+    .migrate_saves_to_global_folder = false,
     .show_saves_folder = false,
     .show_save_files = false,
     .show_cheat_files = false,
@@ -91,6 +93,8 @@ void settings_load (settings_t *settings) {
     free(settings->grid_directory);
     settings->grid_directory = strdup(ini_get_string(ini, "menu", "grid_directory", settings->default_directory));
     settings->use_saves_folder = ini_get_bool(ini, "menu", "use_saves_folder", init.use_saves_folder);
+    settings->use_global_saves_folder = ini_get_bool(ini, "menu", "use_global_saves_folder", init.use_global_saves_folder);
+    settings->migrate_saves_to_global_folder = ini_get_bool(ini, "menu", "migrate_saves_to_global_folder", init.migrate_saves_to_global_folder);
     settings->show_saves_folder = ini_get_bool(ini, "menu", "show_saves_folder", init.show_saves_folder);
     settings->show_save_files = ini_get_bool(ini, "menu", "show_save_files", init.show_save_files);
     settings->show_cheat_files = ini_get_bool(ini, "menu", "show_cheat_files", init.show_cheat_files);
@@ -137,6 +141,8 @@ void settings_save (settings_t *settings) {
     ini_set_bool(ini, "menu", "boot_into_grid", settings->boot_into_grid);
     ini_set_string(ini, "menu", "grid_directory", settings->grid_directory);
     ini_set_bool(ini, "menu", "use_saves_folder", settings->use_saves_folder);
+    ini_set_bool(ini, "menu", "use_global_saves_folder", settings->use_global_saves_folder);
+    ini_set_bool(ini, "menu", "migrate_saves_to_global_folder", settings->migrate_saves_to_global_folder);
     ini_set_bool(ini, "menu", "show_saves_folder", settings->show_saves_folder);
     ini_set_bool(ini, "menu", "show_save_files", settings->show_save_files);
     ini_set_bool(ini, "menu", "show_cheat_files", settings->show_cheat_files);

@@ -39,6 +39,12 @@ typedef struct {
     /** @brief Put saves into separate directory */
     bool use_saves_folder;
 
+    /** @brief Keep every save in one global folder (/saves), shared by all copies of a ROM */
+    bool use_global_saves_folder;
+
+    /** @brief Move a ROM's existing per-folder save into the global saves folder the first time the ROM is launched */
+    bool migrate_saves_to_global_folder;
+
     /** @brief Show saves folder in file browser */ 
     bool show_saves_folder;
 
