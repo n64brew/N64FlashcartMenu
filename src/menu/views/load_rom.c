@@ -172,8 +172,7 @@ static const char *format_rom_media_type (rom_category_type_t media_type) {
 }
 
 static const char *format_rom_destination_market (rom_destination_type_t market_type) {
-    // TODO: These are all assumptions and should be corrected if required.
-    // From http://n64devkit.square7.ch/info/submission/pal/01-01.html
+    // From https://ultra64.ca/files/documentation/online-manuals/man-v5-2/allman52/
     switch (market_type) {
         case MARKET_JAPANESE_MULTI: return "Japanese & English"; // 1080 Snowboarding JPN
         case MARKET_BRAZILIAN: return "Brazilian (Portuguese)";
@@ -192,9 +191,9 @@ static const char *format_rom_destination_market (rom_destination_type_t market_
         case MARKET_GATEWAY64_NTSC: return "LodgeNet/Gateway (NTSC)";
         case MARKET_GATEWAY64_PAL: return "LodgeNet/Gateway (PAL)";
         case MARKET_EUROPEAN_BASIC: return "PAL (includes English)"; // Mostly EU but is used on some Australian ROMs
-        case MARKET_OTHER_X: return "Regional (non specific)"; // FIXME: AUS HSV Racing ROM's and Asia Top Gear Rally use this so not only EUR
-        case MARKET_OTHER_Y: return "European (non specific)";
-        case MARKET_OTHER_Z: return "Regional (unknown)";
+        case MARKET_OTHER_X: return "PAL (Regional)"; // AUS HSV Racing ROM's and Asia Top Gear Rally but it's PAL specific
+        case MARKET_OTHER_Y: return "European (Regional)"; //Used on language variations of european ROMs
+        case MARKET_OTHER_Z: return "PAL (Miscellaneous)"; //Some australian ROMs use this, but also some European ROMs.
         default: return "Unknown";
     }
 }
