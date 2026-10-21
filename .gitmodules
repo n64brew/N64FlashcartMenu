@@ -7,10 +7,6 @@
 	path = src/libs/libspng
 	url = https://github.com/randy408/libspng.git
 	ignore = dirty
-[submodule "src/libs/minimp3"]
-	path = src/libs/minimp3
-	url = https://github.com/lieff/minimp3.git
-	ignore = dirty
 [submodule "src/libs/miniz"]
 	path = src/libs/miniz
 	url = https://github.com/richgel999/miniz.git
