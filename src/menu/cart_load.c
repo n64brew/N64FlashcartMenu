@@ -315,7 +315,10 @@ cart_load_err_t cart_load_emulator (menu_t *menu, cart_load_emu_type_t emu_type,
             if (rom_offset_str) {
                 char *end = NULL;
                 unsigned long parsed = strtoul(rom_offset_str, &end, 0);
-                if (end != rom_offset_str && *end == '\0') {
+                // flashcart_load_file() writes to ROM_ADDRESS + rom_offset within the primary
+                // 64MB SDRAM window on every flashcart (no extended-region support in load_file),
+                // so reject offsets that would make (MiB(64) - rom_offset) wrap.
+                if (end != rom_offset_str && *end == '\0' && parsed < MiB(64)) {
                     emulated_rom_offset = (uint32_t) parsed;
                 }
             }
