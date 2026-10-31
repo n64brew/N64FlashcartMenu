@@ -240,7 +240,7 @@ static const char *format_rom_expansion_pak_info (rom_expansion_pak_t expansion_
     switch (expansion_pak_info) {
         case EXPANSION_PAK_REQUIRED: return "Required"; // This ROM requires the Expansion Pak to run.
         case EXPANSION_PAK_RECOMMENDED: return "Recommended"; // This ROM will run without the Expansion Pak, but will have limited functionality or performance.
-        case EXPANSION_PAK_UNUSED: return "Not used"; // This ROM will does not use the Expansion Pak.
+        case EXPANSION_PAK_UNUSED: return "Not used"; // This ROM does not use the Expansion Pak.
         case EXPANSION_PAK_FAULTY: return "May require ROM patch";
         default: return "Unspecified"; // This ROM will probably run without the Expansion Pak, and will have full functionality.
     }
