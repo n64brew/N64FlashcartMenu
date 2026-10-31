@@ -721,10 +721,18 @@ static rom_tv_type_t determine_tv_type (rom_destination_type_t rom_destination_c
 
 static void extract_rom_info (match_t *match, rom_header_t *rom_header, rom_info_t *rom_info) {
     rom_info->cic_type = detect_cic_type(rom_header->ipl3);
+    rom_info->features.region_free = false;
 
     if (match->type == MATCH_TYPE_HOMEBREW_HEADER) {
         if (rom_header->version & (1 << 0)) {
             match->data.feat |= FEAT_RTC;
+        }
+        rom_info->features.region_free = (rom_header->version & (1 << 1)) != 0;
+        switch ((rom_header->version & 0x0C) >> 2) {
+            case 1: match->data.feat |= FEAT_EXP_PAK_UNUSED; break;
+            case 2: match->data.feat |= FEAT_EXP_PAK_RECOMMENDED; break;
+            case 3: match->data.feat |= FEAT_EXP_PAK_REQUIRED; break;
+            default: break;
         }
         switch ((rom_header->version & 0xF0) >> 4) {
             case 0: match->data.save = SAVE_TYPE_NONE; break;

@@ -157,6 +157,7 @@ typedef struct {
         bool transfer_pak;          /**< Supports Transfer Pak */
         bool voice_recognition_unit; /**< Supports Voice Recognition Unit */
         bool real_time_clock;       /**< Supports Real Time Clock */
+        bool region_free;           /**< Homebrew ROM is configured as region-free */
         bool disk_conversion;       /**< Supports Disk Conversion */
         bool combo_rom_disk_game;   /**< Supports Combo ROM/Disk Game */
         rom_expansion_pak_t expansion_pak; /**< Expansion Pak requirements */
