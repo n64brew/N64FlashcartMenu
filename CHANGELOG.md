@@ -19,6 +19,9 @@
 - **Bug Fixes**
 	- Some users have reported crashes in Zelda OOT (anti-piracy checks), The boot function now resets the VI (mainly H-Sync) registers to fix the issue.
 	- Certain Aleck64 conversions failed to boot.
+	- `DE` cheat codes no longer consume the next cheat line like other conditional opcodes (`D0`, `D1`, `D2`, `D3`).
+  	- `DE` opcodes are still ignored by the cheat engine, but they don't prevent the next line from executing anymore.
+  	- E.g., `DE000400 0000` followed by `EE000000 0000` (for 1080° Snowboarding) would previously skip the `EE` line, causing the game to freeze at startup.
 
 - **Documentation**
 	- Improve documents with new features.

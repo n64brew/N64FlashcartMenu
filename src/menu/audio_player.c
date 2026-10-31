@@ -3,7 +3,7 @@
  * @brief Audio player with MP3 and FLAC support
  * @ingroup ui_components
  *
- * Format is detected by file extension. MP3 uses minimp3,
+ * Format is detected by file extension. MP3 uses dr_mp3,
  * FLAC uses dr_flac.
  */
 
@@ -19,10 +19,10 @@
 #include "utils/fs.h"
 #include "utils/utils.h"
 
-#define MINIMP3_IMPLEMENTATION
-#define MINIMP3_ONLY_MP3
-#include <minimp3/minimp3_ex.h>
-#include <minimp3/minimp3.h>
+#define DR_MP3_IMPLEMENTATION
+#define DR_MP3_ONLY_MP3
+#define DR_MP3_NO_STDIO
+#include <dr_libs/dr_mp3.h>
 
 #define DR_FLAC_IMPLEMENTATION
 #define DR_FLAC_NO_STDIO  /* we use our own file I/O callbacks */
@@ -66,8 +66,8 @@ typedef struct {
     uint8_t buffer[16 * 1024];
     uint8_t *buffer_ptr;
     size_t buffer_left;
-    mp3dec_t dec;
-    mp3dec_frame_info_t info;
+    drmp3dec dec;
+    drmp3dec_frame_info info;
 
     /* FLAC-specific */
     flac_io_t *flac_io;  /* heap-allocated; drflac stores this pointer internally */
@@ -86,6 +86,68 @@ typedef struct {
 } mp3player_t;
 
 static mp3player_t *p = NULL;
+
+static size_t mp3_skip_id3v2 (const uint8_t *buffer, size_t size) {
+    if (size < 10 || memcmp(buffer, "ID3", 3) != 0 || (buffer[5] & 0x0F)
+        || (buffer[6] & 0x80) || (buffer[7] & 0x80)
+        || (buffer[8] & 0x80) || (buffer[9] & 0x80)) {
+        return 0;
+    }
+
+    size_t tag_size = ((size_t)(buffer[6] & 0x7F) << 21)
+                    | ((size_t)(buffer[7] & 0x7F) << 14)
+                    | ((size_t)(buffer[8] & 0x7F) << 7)
+                    | (size_t)(buffer[9] & 0x7F);
+    tag_size += 10;
+    if (buffer[5] & 0x10) tag_size += 10;
+    return tag_size;
+}
+
+static int mp3_find_first_frame (audio_track_t *t) {
+    for (size_t offset = 0; offset + 4 <= t->buffer_left; offset++) {
+        if (t->buffer_ptr[offset] != 0xFF || (t->buffer_ptr[offset + 1] & 0xE0) != 0xE0) {
+            continue;
+        }
+
+        drmp3dec_frame_info info = {0};
+        drmp3dec_init(&t->dec);
+        int samples = drmp3dec_decode_frame(&t->dec, t->buffer_ptr + offset,
+            (int)(t->buffer_left - offset), NULL, &info);
+        if (samples > 0 && info.frame_bytes > 0) {
+            t->buffer_ptr += offset;
+            t->buffer_left -= offset;
+            info.frame_bytes -= (int)offset;
+            t->info = info;
+            drmp3dec_init(&t->dec);
+            return samples;
+        }
+    }
+    return 0;
+}
+
+static bool mp3_get_vbr_frame_count (const uint8_t *frame, int frame_size,
+                                    uint32_t *frame_count) {
+    if (frame_size < 4) return false;
+
+    bool mpeg1 = ((frame[1] >> 3) & 3) == 3;
+    bool mono = ((frame[3] >> 6) & 3) == 3;
+    size_t tag_offset = 4 + ((frame[1] & 1) ? 0 : 2)
+                      + (mpeg1 ? (mono ? 17 : 32) : (mono ? 9 : 17));
+    if (tag_offset > (size_t)frame_size || (size_t)frame_size - tag_offset < 12) {
+        return false;
+    }
+
+    const uint8_t *tag = frame + tag_offset;
+    if (memcmp(tag, "Xing", 4) != 0 && memcmp(tag, "Info", 4) != 0) return false;
+    uint32_t flags = ((uint32_t)tag[4] << 24) | ((uint32_t)tag[5] << 16)
+                   | ((uint32_t)tag[6] << 8) | tag[7];
+    if (!(flags & 1)) return false;
+
+    tag += 8;
+    *frame_count = ((uint32_t)tag[0] << 24) | ((uint32_t)tag[1] << 16)
+                 | ((uint32_t)tag[2] << 8) | tag[3];
+    return *frame_count > 0;
+}
 
 
 /* --- dr_flac I/O and metadata callbacks --- */
@@ -194,7 +256,7 @@ static void flac_metadata_callback (void *userdata, drflac_metadata *metadata) {
 /* --- MP3 track helpers --- */
 
 static void mp3_reset_decoder (audio_track_t *t) {
-    mp3dec_init(&t->dec);
+    drmp3dec_init(&t->dec);
     t->seek_predecode_frames = 0;
     t->buffer_ptr = t->buffer;
     t->buffer_left = 0;
@@ -202,7 +264,7 @@ static void mp3_reset_decoder (audio_track_t *t) {
 
 static void mp3_fill_buffer (audio_track_t *t) {
     if (feof(t->f)) return;
-    if (t->buffer_left >= ALIGN(MAX_FREE_FORMAT_FRAME_SIZE, FS_SECTOR_SIZE)) return;
+    if (t->buffer_left >= ALIGN(DRMP3_MAX_FREE_FORMAT_FRAME_SIZE, FS_SECTOR_SIZE)) return;
 
     if ((t->buffer_ptr != t->buffer) && (t->buffer_left > 0)) {
         memmove(t->buffer, t->buffer_ptr, t->buffer_left);
@@ -213,20 +275,21 @@ static void mp3_fill_buffer (audio_track_t *t) {
 }
 
 static void mp3_calculate_duration (audio_track_t *t, int samples) {
-    uint32_t frames;
-    int delay, padding;
+    uint32_t frame_count;
+    size_t data_size = t->file_size > t->data_start ? t->file_size - t->data_start : 0;
 
-    long data_size = (t->file_size - t->data_start);
-    if (mp3dec_check_vbrtag((const uint8_t *)(t->buffer_ptr), t->info.frame_bytes, &frames, &delay, &padding) > 0) {
-        if (t->info.hz > 0 && frames > 0 && samples > 0) {
-            t->duration = (frames * samples) / (float)(t->info.hz);
-            t->bitrate = (data_size * 8) / t->duration;
-        }
+    if (mp3_get_vbr_frame_count(t->buffer_ptr, t->info.frame_bytes, &frame_count)
+        && t->info.sample_rate > 0 && samples > 0) {
+        t->duration = (frame_count * samples) / (float)t->info.sample_rate;
     } else {
-        t->bitrate = t->info.bitrate_kbps * 1000;
-        if (t->bitrate > 0) {
-            t->duration = data_size / (t->bitrate / 8);
+        t->bitrate = t->info.bitrate_kbps * 1000.0f;
+        if (t->bitrate > 0.0f) {
+            t->duration = (data_size * 8.0f) / t->bitrate;
         }
+    }
+
+    if (t->duration > 0.0f) {
+        t->bitrate = (data_size * 8.0f) / t->duration;
     }
 }
 
@@ -269,6 +332,11 @@ static void track_unload (audio_track_t *t) {
 static audioplayer_err_t track_load_mp3 (audio_track_t *t, int id3_flags) {
     id3_parse(t->f, t->file_size, &t->metadata, id3_flags);
 
+    if (fseek(t->f, 0, SEEK_SET)) {
+        fclose(t->f);
+        t->f = NULL;
+        return AUDIOPLAYER_ERR_IO;
+    }
     mp3_reset_decoder(t);
 
     while (!(feof(t->f) && t->buffer_left == 0)) {
@@ -280,9 +348,10 @@ static audioplayer_err_t track_load_mp3 (audio_track_t *t, int id3_flags) {
             return AUDIOPLAYER_ERR_IO;
         }
 
-        size_t id3v2_skip = mp3dec_skip_id3v2((const uint8_t *)(t->buffer_ptr), t->buffer_left);
+        size_t id3v2_skip = mp3_skip_id3v2(t->buffer_ptr, t->buffer_left);
         if (id3v2_skip > 0) {
-            if (fseek(t->f, (-t->buffer_left) + id3v2_skip, SEEK_CUR)) {
+            long skip_delta = (long)id3v2_skip - (long)t->buffer_left;
+            if (fseek(t->f, skip_delta, SEEK_CUR)) {
                 fclose(t->f);
                 t->f = NULL;
                 return AUDIOPLAYER_ERR_IO;
@@ -291,24 +360,22 @@ static audioplayer_err_t track_load_mp3 (audio_track_t *t, int id3_flags) {
             continue;
         }
 
-        int samples = mp3dec_decode_frame(&t->dec, t->buffer_ptr, t->buffer_left, NULL, &t->info);
+        int samples = mp3_find_first_frame(t);
         if (samples > 0) {
             t->loaded = true;
             t->file_pos = ftell(t->f);
-            t->data_start = t->file_pos - t->buffer_left + t->info.frame_offset;
-
-            t->buffer_ptr += t->info.frame_offset;
-            t->buffer_left -= t->info.frame_offset;
+            t->data_start = t->file_pos - t->buffer_left;
 
             t->channels = t->info.channels;
-            t->samplerate = t->info.hz;
+            t->samplerate = t->info.sample_rate;
             mp3_calculate_duration(t, samples);
 
             return AUDIOPLAYER_OK;
         }
 
-        t->buffer_ptr += t->info.frame_bytes;
-        t->buffer_left -= t->info.frame_bytes;
+        if (t->buffer_left <= 3) break;
+        t->buffer_ptr += t->buffer_left - 3;
+        t->buffer_left = 3;
     }
 
     fclose(t->f);
@@ -457,9 +524,7 @@ static void mp3player_wave_read (void *ctx, samplebuffer_t *sbuf, int wpos, int 
             return;
         }
 
-        /* Fixed-size stack buffer. When downsampling, we reduce the output
-         * frame count so the raw read (output * downsample) fits in the buffer. */
-        int16_t pcm_buf[FLAC_READ_FRAMES * 2];  /* max 2 channels */
+        int16_t pcm_buf[FLAC_READ_FRAMES * 2];
         int max_output = FLAC_READ_FRAMES / t->downsample;
         if (max_output < 1) max_output = 1;
 
@@ -516,13 +581,15 @@ static void mp3player_wave_read (void *ctx, samplebuffer_t *sbuf, int wpos, int 
         return;
     }
 
-    int16_t pcm_buf[MINIMP3_MAX_SAMPLES_PER_FRAME];
+    int16_t pcm_buf[DRMP3_MAX_SAMPLES_PER_FRAME];
 
     while (wlen > 0) {
         mp3_fill_buffer(t);
         t->file_pos = ftell(t->f);
 
-        int samples = mp3dec_decode_frame(&t->dec, t->buffer_ptr, t->buffer_left, pcm_buf, &t->info);
+        memset(&t->info, 0, sizeof(t->info));
+        int samples = drmp3dec_decode_frame(&t->dec, t->buffer_ptr,
+            (int)t->buffer_left, pcm_buf, &t->info);
 
         if (samples > 0) {
             int pcm_bytes = samples * t->info.channels * sizeof(int16_t);
@@ -537,14 +604,16 @@ static void mp3player_wave_read (void *ctx, samplebuffer_t *sbuf, int wpos, int 
             wlen -= samples;
         }
 
-        t->buffer_ptr += t->info.frame_bytes;
-        t->buffer_left -= t->info.frame_bytes;
-
-        if (t->info.frame_bytes == 0) {
+        if (t->info.frame_bytes <= 0 || (size_t)t->info.frame_bytes > t->buffer_left) {
             /* MP3 track exhausted — fill remaining with silence. */
-            short *out = (short *)(samplebuffer_append(sbuf, wlen));
-            memset(out, 0, wlen * sizeof(short) * t->channels);
-            wlen = 0;
+            if (wlen > 0) {
+                short *out = (short *)(samplebuffer_append(sbuf, wlen));
+                memset(out, 0, wlen * sizeof(short) * t->channels);
+            }
+            break;
+        } else {
+            t->buffer_ptr += t->info.frame_bytes;
+            t->buffer_left -= t->info.frame_bytes;
         }
     }
 }
@@ -567,7 +636,7 @@ audioplayer_err_t audioplayer_init (void) {
         .frequency = 44100,
         .len = WAVEFORM_MAX_LEN - 1,
         .loop_len = WAVEFORM_MAX_LEN - 1,
-        .append_units = MINIMP3_MAX_SAMPLES_PER_FRAME / 2,
+        .append_units = DRMP3_MAX_SAMPLES_PER_FRAME / 2,
         .read = mp3player_wave_read,
         .ctx = p,
     };

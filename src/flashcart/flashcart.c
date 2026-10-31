@@ -13,8 +13,10 @@
 #include "utils/utils.h"
 #include "flashcart.h"
 #include "flashcart_utils.h"
+#include "daisydrive/daisydrive.h"
 #include "ed64/ed64_vseries.h"
 #include "ed64/ed64_xseries.h"
+#include "ed64_pro/ed64_pro.h"
 #include "64drive/64drive.h"
 #include "sc64/sc64.h"
 
@@ -157,16 +159,35 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         }
         return FLASHCART_OK;
     }
+    
+    if (daisydrive_detected()) {
+        *storage_prefix = "sd:/";
+        daisydrive_init_sdfs(*storage_prefix, -1);
+        flashcart = daisydrive_get_flashcart();
+        if ((err = flashcart->init()) != FLASHCART_OK) {
+            return err;
+        }
+        return FLASHCART_OK;
+    }
+    else if (ed64_pro_detected()) {
+        *storage_prefix = "sd:/";
+        ed64_pro_init_sdfs(*storage_prefix, -1);
+        flashcart = ed64_pro_get_flashcart();
+        if ((err = flashcart->init()) != FLASHCART_OK) {
+            return err;
+        }
+        return FLASHCART_OK;
+    }
 
     *storage_prefix = "sd:/";
     bool sd_card_initialized = debug_init_sdfs(*storage_prefix, -1);
 
-    switch (cart_type) {
+    switch (cart_type) { //libCart detected flashcart type
         case CART_CI:   // 64drive
             flashcart = d64_get_flashcart();
             break;
 
-        case CART_EDX:  // Official EverDrive 64 Series X 
+        case CART_EDX:  // Official EverDrive 64 Series X
             flashcart = ed64_xseries_get_flashcart();
             break;
 
@@ -178,7 +199,7 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
             flashcart = sc64_get_flashcart();
             break;
 
-        default:        // Probably emulator
+        default: // These are not available in libCart, but we can still try to detect them
             *storage_prefix = "rom:/";
             debug_init_isviewer();
             break;
