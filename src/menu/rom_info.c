@@ -711,9 +711,8 @@ static rom_tv_type_t determine_tv_type (rom_destination_type_t rom_destination_c
             // But they are mainly PAL regions.
             case MARKET_OTHER_X:
             case MARKET_OTHER_Y:
-                return ROM_TV_TYPE_PAL;
-            // FIXME: We cannot be sure on these markets, so just return the default for the moment!
             case MARKET_OTHER_Z:
+                return ROM_TV_TYPE_PAL;
             default:
                 return ROM_TV_TYPE_UNKNOWN;
         }
