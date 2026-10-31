@@ -217,7 +217,7 @@ static const char *format_rom_tv_type (rom_tv_type_t tv_type, bool region_free) 
         case ROM_TV_TYPE_PAL: return region_free ? "PAL (Region-free)" : "PAL";
         case ROM_TV_TYPE_NTSC: return region_free ? "NTSC (Region-free)" : "NTSC";
         case ROM_TV_TYPE_MPAL: return region_free ? "MPAL (Region-free)" : "MPAL";
-        default: return region_free ? "Unknown (Region-free)" : "Unknown";
+        default: return region_free ? "Global (Region-free)" : "Unknown";
     }
 }
 
