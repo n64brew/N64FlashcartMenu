@@ -8,7 +8,6 @@
 /output
 /docs/api
 /_site
-/src/libs/libjpeg-turbo/build/**
 
 # Ignore generated files in the libdragon FS
 /filesystem/Firple-Bold.font64

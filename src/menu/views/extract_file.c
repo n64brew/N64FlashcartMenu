@@ -52,6 +52,7 @@ static void extract(menu_t *menu) {
             }
             fclose(file);
             utime(path_get(path), &mtime);
+            view_grid_library_changed();
             menu->browser.select_file = path_clone(path);
             menu->next_mode = MENU_MODE_BROWSER;
         } else {

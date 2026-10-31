@@ -26,8 +26,8 @@ static int max_scroll;
 #define OSS_LIBRARIES_TEXT \
     "\tlibdragon (UNLICENSE License)\n" \
     "\tlibspng (BSD 2-Clause License)\n" \
-    "\tlibjpeg-turbo (BSD 3-Clause License)\n" \
-    "\tminimp3 (CC0 1.0 Universal)\n" \
+    "\tTJpgDec (ChaN permissive license)\n" \
+    "\tdr_mp3 (Public domain or MIT-0)\n" \
     "\tdr_flac (MIT License)\n" \
     "\tminiz (MIT License)\n"
 
@@ -77,7 +77,7 @@ static void process (menu_t *menu) {
     if (menu->actions.back) {
         show_oss_lib_info_message = false;
         sound_play_effect(SFX_EXIT);
-        menu->next_mode = MENU_MODE_BROWSER; 
+        menu->next_mode = menu->settings.boot_into_grid && menu->grid_enabled ? MENU_MODE_GRID : MENU_MODE_BROWSER;
     } else if (menu->actions.context) {
         if (show_oss_lib_info_message) {
             show_oss_lib_info_message = false;

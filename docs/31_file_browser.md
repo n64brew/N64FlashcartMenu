@@ -25,7 +25,14 @@ The File Browser allows you to navigate and manage files on your N64 flashcart. 
 2. **Performing File Operations**:
    - Highlight the file or directory you want to operate on.
    - Press the `Z` Button to open the operations menu.
-   - Select the desired operation (delete, show properties, set as default, extract) and follow the on-screen prompts.
+   - Select the desired operation and follow the on-screen prompts:
+     - **Show entry properties**: Shows file information for the highlighted entry; inside a ZIP archive it opens the extract screen instead.
+     - **Delete selected entry**: Deletes the highlighted file, or the highlighted directory if it is empty.
+     - **Extract selected entry**: Only inside a ZIP archive; extracts the highlighted file.
+     - **Controller Pak manager**: Opens the Controller Pak pane of Settings.
+     - **Set current directory as Files start**: Files opens in the directory currently being shown (not the highlighted entry) at startup. Stored as `default_directory`.
+     - **Set current directory as Grid library**: Grid shows the ROMs directly inside the directory currently being shown (not the highlighted entry). Stored as `grid_directory`, and listed as **Grid Library** in Settings > Menu. Only present when the SD card has a `menu/metadata` folder. See [Grid](./34_grid.md#library).
+   - To choose a directory with either "Set current directory" option, press `A` on it first so its contents are listed, then press `Z`.
 
 3. **Viewing Settings menu**:
    - Use `L` and `R` to reach the Settings tab, then select a category and press `A`.

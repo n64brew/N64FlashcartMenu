@@ -39,6 +39,8 @@ static settings_t init = {
     .force_progressive_scan = false,
     .show_protected_entries = false,
     .default_directory = "/",
+    .boot_into_grid = false,
+    .grid_directory = "/",
     .use_saves_folder = true,
     .show_saves_folder = false,
     .show_save_files = false,
@@ -85,6 +87,9 @@ void settings_load (settings_t *settings) {
     settings->show_protected_entries = ini_get_bool(ini, "menu", "show_protected_entries", init.show_protected_entries);
     free(settings->default_directory);
     settings->default_directory = strdup(ini_get_string(ini, "menu", "default_directory", init.default_directory));
+    settings->boot_into_grid = ini_get_bool(ini, "menu", "boot_into_grid", init.boot_into_grid);
+    free(settings->grid_directory);
+    settings->grid_directory = strdup(ini_get_string(ini, "menu", "grid_directory", settings->default_directory));
     settings->use_saves_folder = ini_get_bool(ini, "menu", "use_saves_folder", init.use_saves_folder);
     settings->show_saves_folder = ini_get_bool(ini, "menu", "show_saves_folder", init.show_saves_folder);
     settings->show_save_files = ini_get_bool(ini, "menu", "show_save_files", init.show_save_files);
@@ -129,6 +134,8 @@ void settings_save (settings_t *settings) {
     ini_set_bool(ini, "menu", "force_progressive_scan", settings->force_progressive_scan);
     ini_set_bool(ini, "menu", "show_protected_entries", settings->show_protected_entries);
     ini_set_string(ini, "menu", "default_directory", settings->default_directory);
+    ini_set_bool(ini, "menu", "boot_into_grid", settings->boot_into_grid);
+    ini_set_string(ini, "menu", "grid_directory", settings->grid_directory);
     ini_set_bool(ini, "menu", "use_saves_folder", settings->use_saves_folder);
     ini_set_bool(ini, "menu", "show_saves_folder", settings->show_saves_folder);
     ini_set_bool(ini, "menu", "show_save_files", settings->show_save_files);

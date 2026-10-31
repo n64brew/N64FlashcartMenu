@@ -20,7 +20,7 @@ ENV PATH=$PATH:$DOTNET_ROOT:$DOTNET_ROOT/tools
 RUN npx playwright install-deps
 
 # Install libdragon toolchain (packaged .deb)
-RUN wget https://github.com/DragonMinded/libdragon/releases/download/toolchain-continuous-prerelease/gcc-toolchain-mips64-x86_64.deb && \
+RUN wget https://github.com/n64brew/libdragon/releases/download/toolchain-continuous-prerelease/gcc-toolchain-mips64-x86_64.deb && \
     dpkg -i gcc-toolchain-mips64-x86_64.deb && \
     rm gcc-toolchain-mips64-x86_64.deb
 

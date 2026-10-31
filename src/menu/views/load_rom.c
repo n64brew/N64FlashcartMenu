@@ -213,12 +213,12 @@ static const char *format_rom_save_type (rom_save_type_t save_type, bool support
     }
 }
 
-static const char *format_rom_tv_type (rom_tv_type_t tv_type) {
+static const char *format_rom_tv_type (rom_tv_type_t tv_type, bool region_free) {
     switch (tv_type) {
-        case ROM_TV_TYPE_PAL: return "PAL";
-        case ROM_TV_TYPE_NTSC: return "NTSC";
-        case ROM_TV_TYPE_MPAL: return "MPAL";
-        default: return "Unknown";
+        case ROM_TV_TYPE_PAL: return region_free ? "PAL (Region-free)" : "PAL";
+        case ROM_TV_TYPE_NTSC: return region_free ? "NTSC (Region-free)" : "NTSC";
+        case ROM_TV_TYPE_MPAL: return region_free ? "MPAL (Region-free)" : "MPAL";
+        default: return region_free ? "Unknown (Region-free)" : "Unknown";
     }
 }
 
@@ -226,7 +226,7 @@ static const char *format_rom_expansion_pak_info (rom_expansion_pak_t expansion_
     switch (expansion_pak_info) {
         case EXPANSION_PAK_REQUIRED: return "Required"; // This ROM requires the Expansion Pak to run.
         case EXPANSION_PAK_RECOMMENDED: return "Recommended"; // This ROM will run without the Expansion Pak, but will have limited functionality or performance.
-        case EXPANSION_PAK_UNUSED: return "Unused"; // This ROM will does not use the Expansion Pak.
+        case EXPANSION_PAK_UNUSED: return "Not used"; // This ROM will does not use the Expansion Pak.
         case EXPANSION_PAK_FAULTY: return "May require ROM patch";
         default: return "Unspecified"; // This ROM will probably run without the Expansion Pak, and will have full functionality.
     }
@@ -668,7 +668,7 @@ static void process (menu_t *menu) {
         } else if (show_extra_info_message) {
             show_extra_info_message = false;
         } else {
-            menu->next_mode = MENU_MODE_BROWSER;
+            menu->next_mode = menu->load.from_grid ? MENU_MODE_GRID : MENU_MODE_BROWSER;
         }
     } else if (menu->actions.options) {
         ui_components_context_menu_show(&options_context_menu);
@@ -741,7 +741,7 @@ static void draw (menu_t *menu, surface_t *d) {
             ,
             
             format_rom_save_type(rom_info_get_save_type(&menu->load.rom_info), menu->load.rom_info.features.controller_pak),
-            format_rom_tv_type(rom_info_get_tv_type(&menu->load.rom_info)),
+            format_rom_tv_type(rom_info_get_tv_type(&menu->load.rom_info), menu->load.rom_info.features.region_free),
             format_rom_expansion_pak_info(menu->load.rom_info.features.expansion_pak),
             format_rom_pak_feature_info(menu->load.rom_info.features.rumble_pak),
             format_rom_pak_feature_info(menu->load.rom_info.features.transfer_pak),
@@ -952,11 +952,9 @@ static void deinit (void) {
 
 
 void view_load_rom_init (menu_t *menu) {
-    /* Only startup autoload supplies a path and requests an immediate launch.
-     * The saved setting must not bypass path selection for manual Details. */
-#ifdef FEATURE_AUTOLOAD_ROM_ENABLED
-    if (!menu->load_pending.rom_file) {
-#endif
+    /* Startup autoload and Grid supply rom_path, which also survives the
+     * cheat editor; otherwise resolve the current selection. */
+    if (!menu->load_pending.rom_file && !menu->load.from_grid) {
         if (menu->load.rom_path) {
             rom_info_free_meta(&menu->load.rom_info);
             path_free(menu->load.rom_path);
@@ -971,9 +969,7 @@ void view_load_rom_init (menu_t *menu) {
             menu->load.rom_path = path_clone_push(menu->browser.directory, menu->browser.entry->name);
         }
 
-#ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     }
-#endif
     rom_filename = path_last_get(menu->load.rom_path);
 
     if (show_extra_info_message) {
@@ -1001,6 +997,13 @@ void view_load_rom_init (menu_t *menu) {
 
     if (!is_memory_expanded()) {
         menu->load.rom_info.settings.cheats_enabled = false;
+    }
+
+    /* Launching from Grid must not skip the confirmation that Details shows. */
+    if (menu->load_pending.rom_file && menu->load.from_grid && rom_requires_missing_expansion_pak(menu)) {
+        menu->load_pending.rom_file = false;
+        show_expansion_pak_warning = true;
+        sound_play_effect(SFX_ERROR);
     }
 
     if (menu->load.rom_info.meta.size_limit_exceeded) {
@@ -1069,5 +1072,9 @@ void view_load_rom_display (menu_t *menu, surface_t *display) {
         menu->load.load_history_id = -1;
         menu->load.load_favorite_id = -1;
         deinit();
+        /* The error view returns to Grid and clears the flag itself. */
+        if (menu->next_mode != MENU_MODE_ERROR) {
+            menu->load.from_grid = false;
+        }
     }
 }

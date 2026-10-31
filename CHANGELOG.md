@@ -18,6 +18,10 @@
 
 - **Bug Fixes**
 	- Some users have reported crashes in Zelda OOT (anti-piracy checks), The boot function now resets the VI (mainly H-Sync) registers to fix the issue.
+	- Certain Aleck64 conversions failed to boot.
+	- `DE` cheat codes no longer consume the next cheat line like other conditional opcodes (`D0`, `D1`, `D2`, `D3`).
+  	- `DE` opcodes are still ignored by the cheat engine, but they don't prevent the next line from executing anymore.
+  	- E.g., `DE000400 0000` followed by `EE000000 0000` (for 1080° Snowboarding) would previously skip the `EE` line, causing the game to freeze at startup.
 
 - **Documentation**
 	- Improve documents with new features.
@@ -25,12 +29,14 @@
 - **Refactor**
 	- Settings is now a tab.
 	- Expansion Pak requirements now aligns with homebrew spec.
+	- Generation of DFS has been reorganised to use folders rather than a flat filesystem.
 
 - **Other**
 	- Change the default BGM to a different (more subtle) tune. The original is still included in the ROM image.
 	- Menu will now show an error if it detects a low voltage on startup.
 	- Fast Reboot support has been disabled in favour of ROM autoload due to too many issues being reported.
 	- Added ED64 OS3.06 firmware files.
+	- Deprecated functions have been removed.
 
 ### Breaking changes
 - None.
