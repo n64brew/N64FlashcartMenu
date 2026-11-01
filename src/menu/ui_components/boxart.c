@@ -5,6 +5,7 @@
  */
 
 #include <stdlib.h>
+#include <stdint.h>
 
 #include "../ui_components.h"
 #include "../path.h"
@@ -44,11 +45,8 @@ static void jpeg_decoder_callback(jpeg_err_t err, surface_t *decoded_image, void
  * Used to decode images (e.g. box/cart art, screenshots) extracted directly from a ROM's
  * embedded metadata ZIP, rather than loaded from an SD card file path.
  *
- * @note Only PNG is supported; JPEG decoding is not yet implemented on this menu
- * (jpeg_decoder.c is currently a stub). Callers are expected to have already validated
- * that `data` is PNG content (e.g. via rom_info_metadata_image_is_png()) before calling
- * this; it no longer re-checks the filename extension, since the embedded ZIP entry's
- * actual filename may not reflect its real content (see scan_metadata_images()).
+ * @note The image format is detected from the content signature, not the filename, since
+ * an embedded ZIP entry's actual filename may not reflect its real content.
  *
  * @param filename Filename of the image within the ZIP; kept for API compatibility, not
  * used to decide the decoding format.
@@ -67,7 +65,20 @@ component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *da
     }
     b->loading = true;
 
-    bool is_jpeg = file_has_extensions((char *)filename, (const char *[]) { "jpg", "jpeg", NULL });
+    (void)filename;
+    const uint8_t *image_data = data;
+    bool is_jpeg = image_data != NULL && size >= 3 && image_data[0] == 0xFF &&
+                   image_data[1] == 0xD8 && image_data[2] == 0xFF;
+    bool is_png = image_data != NULL && size >= 8 && image_data[0] == 0x89 &&
+                  image_data[1] == 0x50 && image_data[2] == 0x4E && image_data[3] == 0x47 &&
+                  image_data[4] == 0x0D && image_data[5] == 0x0A && image_data[6] == 0x1A &&
+                  image_data[7] == 0x0A;
+    if (!is_jpeg && !is_png) {
+        free(data);
+        free(b);
+        return NULL;
+    }
+
     if (is_jpeg) {
         jpeg_err_t jpeg_err = jpeg_decoder_start_mem(data, size, max_width, max_height,
                                                    jpeg_decoder_callback, b);
