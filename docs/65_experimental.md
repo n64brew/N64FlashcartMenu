@@ -73,7 +73,7 @@ short-desc=Shoot your way to the heaven, fighting against birds and aliens
 If the `.meta` file (or the metadata appended to a homebrew ROM) is itself a `ZIP` archive containing a `metadata.ini` plus image files, the menu can show box art, cart art, and screenshots straight from that archive instead of requiring separate files under `sd:/menu/metadata/` (see [Game Art and Metadata](./19_gamepak_boxart.md)).
 
 > [!WARNING]
-> `PNG` and `JPEG` images are supported. Embedded image formats are detected from their content, not their filename extension.
+> Only `PNG` and `JPEG` images are supported. Embedded image formats are detected from their content, not their filename extension.
 
 ```ini
 [boxart]
