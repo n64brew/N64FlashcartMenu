@@ -9,7 +9,6 @@
 ## Release Notes 2026-x-x
 
 - **New Features**
-	- ~~Browser now allows hiding files and folders with hidden attributes set (thanks [Xeroxxx](https://github.com/Xeroxxx)).~~ Awaiting performance enhancement.
 	- Improve homebrew ROM detection text for "region free", and "Expansion Pak".
 	- Add JPEG decoding support.
 
