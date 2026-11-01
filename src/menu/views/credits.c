@@ -50,7 +50,7 @@ static void draw (menu_t *menu, surface_t *d) {
         "libdragon SDK: \t%s%s (%s, %.7s)\n"
         "\n"
         "Get the latest menu version:\n"
-        "\thttps://github.com/Polprzewodnikowy/N64FlashcartMenu\n"
+        "\thttps://github.com/n64brew/N64FlashcartMenu\n"
         "\n"
         "Authors:\n"
         "\tRobin Jones / NetworkFusion\n"
