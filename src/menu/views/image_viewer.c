@@ -3,18 +3,33 @@
 #include <libdragon.h>
 #include "../sound.h"
 
+#include "../jpeg_decoder.h"
 #include "../png_decoder.h"
+#include "utils/fs.h"
 #include "views.h"
 
+static const char *jpeg_extensions[] = { "jpg", "jpeg", NULL };
 
 static bool show_message;
 static bool image_loading;
 static bool image_set_as_background;
+static bool is_jpeg;
 static surface_t *image;
 
 
-static char *convert_error_message (png_err_t err) {
-    switch (err) {
+static char *convert_error_message (int err, bool jpeg) {
+    if (jpeg) {
+        switch ((jpeg_err_t) err) {
+            case JPEG_ERR_INT: return "Internal JPEG decoder error";
+            case JPEG_ERR_BUSY: return "JPEG decode already in process";
+            case JPEG_ERR_OUT_OF_MEM: return "Image too large for available memory";
+            case JPEG_ERR_NO_FILE: return "JPEG decoder couldn't open file";
+            case JPEG_ERR_BAD_FILE: return "Invalid JPEG file";
+            default: return "Unknown JPEG decoder error";
+        }
+    }
+
+    switch ((png_err_t) err) {
         case PNG_ERR_INT: return "Internal PNG decoder error";
         case PNG_ERR_BUSY: return "PNG decode already in process";
         case PNG_ERR_OUT_OF_MEM: return "PNG decode failed due to insufficient memory";
@@ -24,7 +39,7 @@ static char *convert_error_message (png_err_t err) {
     }
 }
 
-static void image_callback (png_err_t err, surface_t *decoded_image, void *callback_data) {
+static void png_callback (png_err_t err, surface_t *decoded_image, void *callback_data) {
     menu_t *menu = (menu_t *) (callback_data);
 
     image_loading = false;
@@ -33,7 +48,19 @@ static void image_callback (png_err_t err, surface_t *decoded_image, void *callb
     if (err != PNG_OK) {
         // Restore background before handing off to error view — deinit may not run
         ui_components_background_reload();
-        menu_show_error(menu, convert_error_message(err));
+        menu_show_error(menu, convert_error_message(err, false));
+    }
+}
+
+static void jpeg_callback (jpeg_err_t err, surface_t *decoded_image, void *callback_data) {
+    menu_t *menu = (menu_t *) (callback_data);
+
+    image_loading = false;
+    image = decoded_image;
+
+    if (err != JPEG_OK) {
+        ui_components_background_reload();
+        menu_show_error(menu, convert_error_message(err, true));
     }
 }
 
@@ -64,7 +91,8 @@ static void draw (menu_t *menu, surface_t *d) {
 
         ui_components_background_draw();
 
-        ui_components_loader_draw(png_decoder_get_progress(), "Loading image...");
+        float progress = is_jpeg ? jpeg_decoder_get_progress() : png_decoder_get_progress();
+        ui_components_loader_draw(progress, "Loading image...");
     } else {
         rdpq_attach_clear(d, NULL);
 
@@ -102,7 +130,11 @@ static void draw (menu_t *menu, surface_t *d) {
 
 static void deinit (menu_t *menu) {
     if (image_loading) {
-        png_decoder_abort();
+        if (is_jpeg) {
+            jpeg_decoder_abort();
+        } else {
+            png_decoder_abort();
+        }
     }
 
     if (image) {
@@ -126,6 +158,7 @@ void view_image_viewer_init (menu_t *menu) {
     show_message = false;
     image_loading = true;
     image_set_as_background = false;
+    is_jpeg = file_has_extensions(menu->browser.entry->name, jpeg_extensions);
     image = NULL;
     // Free the background image temporarily so the PNG decoder has its full memory budget;
     // ui_components_background_reload() restores it if the user does not set a new background
@@ -135,11 +168,16 @@ void view_image_viewer_init (menu_t *menu) {
 
     path_t *path = path_clone_push(menu->browser.directory, menu->browser.entry->name);
 
-    png_err_t err = png_decoder_start(path_get(path), max_w, max_h, image_callback, menu);
-    if (err != PNG_OK) {
+    int err;
+    if (is_jpeg) {
+        err = jpeg_decoder_start(path_get(path), max_w, max_h, jpeg_callback, menu);
+    } else {
+        err = png_decoder_start(path_get(path), max_w, max_h, png_callback, menu);
+    }
+    if (err != (is_jpeg ? JPEG_OK : PNG_OK)) {
         image_loading = false;
         ui_components_background_reload();
-        menu_show_error(menu, convert_error_message(err));
+        menu_show_error(menu, convert_error_message(err, is_jpeg));
     }
 
     path_free(path);

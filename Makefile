@@ -43,6 +43,7 @@ SRCS = \
 	flashcart/sc64/sc64_ll.c \
 	flashcart/sc64/sc64.c \
 	libs/libspng/spng/spng.c \
+	libs/tjpgd/tjpgd.c \
 	libs/miniz/miniz_tdef.c \
 	libs/miniz/miniz_tinfl.c \
 	libs/miniz/miniz_zip.c \
