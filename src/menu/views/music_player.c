@@ -311,7 +311,6 @@ static bool try_cover_path (const char *path, int max_size) {
                                                cover_art_cb, NULL);
         if (err != JPEG_OK) {
             cover_state = COVER_IDLE;
-            free(buf);
             return false;
         }
     } else {
@@ -523,7 +522,6 @@ static void load_cover_art (path_t *directory) {
                 started = (err == JPEG_OK);
                 if (!started) {
                     cover_state = COVER_IDLE;
-                    free(buf); /* jpeg_decoder_start_mem never takes ownership of buf (stub) */
                 }
             }
 
