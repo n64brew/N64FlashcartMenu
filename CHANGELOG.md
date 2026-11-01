@@ -1,8 +1,43 @@
+# This project is developed and maintained in free time. Please consider sponsoring it.
+
 # Release Notes
 
 - For the SummerCart64, use the `sc64menu.n64` file in the root of your SD card.
 - For the 64Drive, use the `menu.bin` file in the root of your SD card.
 - For the ares emulator, use the `N64FlashcartMenu.n64` file.
+
+## Release Notes 2026-x-x
+
+- **New Features**
+	- ~~Browser now allows hiding files and folders with hidden attributes set (thanks [Xeroxxx](https://github.com/Xeroxxx)).~~ Awaiting performance enhancement.
+	- Improve homebrew ROM detection text for "region free", and "Expansion Pak".
+	- Add JPEG decoding support.
+
+- **Bug Fixes**
+	- TBD
+
+- **Documentation**
+	- TBD.
+
+- **Refactor**
+	- TBD
+
+- **Other**
+	- TBD
+
+### Breaking changes
+- None.
+
+### Notes
+- dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
+
+### Current known Issues
+- Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- PixelFX HDMI mods may need to be updated to latest FW to support display.
+
+### Deprecation notices
+- None.
+
 
 ## Release Notes 2026-10-30 - Tagged 0.3.6
 
