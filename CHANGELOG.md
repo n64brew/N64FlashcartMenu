@@ -1,28 +1,28 @@
 # This project is developed and maintained in free time. Please consider sponsoring it.
 
 # Release Notes
+Files are made available:
+- **For the SummerCart64**, download and use the `sc64menu.n64` file in the root of your SD card.
+- **For the 64Drive**, download and use the `menu.bin` file in the root of your SD card.
+- **For compatible Emulators**, download and use the `N64FlashcartMenu.n64` file.
 
-- For the SummerCart64, use the `sc64menu.n64` file in the root of your SD card.
-- For the 64Drive, use the `menu.bin` file in the root of your SD card.
-- For the ares emulator, use the `N64FlashcartMenu.n64` file.
-
-## Release Notes 2026-x-x
+## Release Notes 2026-11-01 - Tagged 0.3.7
 
 - **New Features**
 	- Improve homebrew ROM detection text for "region free", and "Expansion Pak".
 	- Add JPEG decoding support.
 
 - **Bug Fixes**
-	- TBD
+	- None
 
 - **Documentation**
-	- TBD.
+	- Updated for JPEG support.
 
 - **Refactor**
-	- TBD
+	- None.
 
 - **Other**
-	- TBD
+	- None.
 
 ### Breaking changes
 - None.
@@ -33,6 +33,7 @@
 ### Current known Issues
 - Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
 - PixelFX HDMI mods may need to be updated to latest FW to support display.
+- Setting Background Images (for consoles with a Jumper Pak) is more restrictive due to other features taking priority.
 
 ### Deprecation notices
 - None.
@@ -84,7 +85,7 @@
 ## Release Notes 2026-10-17 - Tagged 0.3.5
 
 - **New Features**
-	- ~~Browser now allows hiding files and folders with hidden attributes set (thanks [Xeroxxx](https://github.com/Xeroxxx)).~~ Awaiting performance enhancement.
+	- None.
 
 - **Bug Fixes**
 	- Fix: Certain libdragon ROMs between August 2023 and April 2025 stopped working. Added VI->CR reset to boot.c
@@ -115,7 +116,7 @@
 ## Release Notes 2026-09-12 - Tagged 0.3.4
 
 - **New Features**
-	- ~~Browser now allows hiding files and folders with hidden attributes set (thanks [Xeroxxx](https://github.com/Xeroxxx)).~~ Awaiting performance enhancement.
+	- None.
 
 - **Bug Fixes**
 	- Fix potential crashes in Zelda OOT, The boot function now resets the VI (mainly H-Sync) registers to fix the issue.
