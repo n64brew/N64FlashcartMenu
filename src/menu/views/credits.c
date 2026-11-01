@@ -67,8 +67,8 @@ static void format_information (char *buffer, size_t size, bool include_librarie
         sdk_version.commit_date,
         sdk_version.hash,
         include_libraries
-            ? "\thttps://github.com/\n\tPolprzewodnikowy/N64FlashcartMenu\n"
-            : "\thttps://github.com/Polprzewodnikowy/N64FlashcartMenu\n",
+            ? "\thttps://github.com/\n\tn64brew/N64FlashcartMenu\n"
+            : "\thttps://github.com/n64brew/N64FlashcartMenu\n",
         include_libraries ? "\nOSS library software used:\n" OSS_LIBRARIES_TEXT : ""
     );
 }
