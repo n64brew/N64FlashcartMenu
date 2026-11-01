@@ -1,9 +1,5 @@
-/**
- * @file jpeg_decoder.h
- * @brief JPEG decoder component stub - For now, we only support PNG, so this is a stub to avoid linker errors.
- */
-
 #ifndef JPEG_DECODER_H__
+/** @file jpeg_decoder.h JPEG decoder component. */
 #define JPEG_DECODER_H__
 
 #include <stddef.h>
@@ -21,6 +17,7 @@ typedef enum {
 
 typedef void jpeg_callback_t (jpeg_err_t err, surface_t *decoded_image, void *callback_data);
 
+jpeg_err_t jpeg_decoder_start (char *path, int max_width, int max_height, jpeg_callback_t *callback, void *callback_data);
 jpeg_err_t jpeg_decoder_start_mem (void *buf, size_t buf_size, int max_width, int max_height, jpeg_callback_t *callback, void *callback_data);
 void jpeg_decoder_abort (void);
 float jpeg_decoder_get_progress (void);

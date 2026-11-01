@@ -49,7 +49,7 @@ static void draw (menu_t *menu, surface_t *d) {
         "Build timestamp:  %s\n"
         "libdragon SDK: \t%s%s (%s, %.7s)\n"
         "\n"
-        "Get the latest menu version:\n"
+                    "\tTJpgDec (ChaN permissive license)\n"
         "\thttps://github.com/Polprzewodnikowy/N64FlashcartMenu\n"
         "\n"
         "Authors:\n"

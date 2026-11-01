@@ -35,11 +35,11 @@ static bool metadata_image_available[METADATA_IMAGE_CACHE_MAX];
 static uint16_t metadata_image_count;
 static bool metadata_images_scanned = false;
 
-/** Embedded metadata images only support PNG; JPEG decoding is not implemented (jpeg_decoder.c is a stub).
- *  Validated by content (PNG file signature), not by filename, so a mis-named or
- *  extension-less entry isn't wrongly excluded or accepted. */
+/** Embedded metadata images may be PNG or JPEG. Validated by content (file signature),
+ * not by filename, so a mis-named or extension-less entry isn't wrongly excluded or accepted. */
 static bool is_unsupported_embedded_image(const rom_info_t *rom_info, const char *filename) {
-    return !rom_info_metadata_image_is_png(rom_info, filename);
+    return !rom_info_metadata_image_is_png(rom_info, filename) &&
+           !rom_info_metadata_image_is_jpeg(rom_info, filename);
 }
 
 static void scan_metadata_images(menu_t *menu) {
