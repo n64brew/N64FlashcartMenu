@@ -111,9 +111,9 @@ static void draw_list(menu_t *menu, surface_t *display) {
         float highlight_y = VISIBLE_AREA_Y0 + TEXT_MARGIN_VERTICAL + TAB_HEIGHT +  TEXT_OFFSET_VERTICAL + (selected_item * 19 * 2);
 
         ui_components_box_draw(
-            VISIBLE_AREA_X0,
+            VISIBLE_AREA_X0 + LAYOUT_FRAME_INSET,
             highlight_y,
-            VISIBLE_AREA_X0 + FILE_LIST_HIGHLIGHT_WIDTH + LIST_SCROLLBAR_WIDTH,
+            VISIBLE_AREA_X1 - LAYOUT_FRAME_INSET,
             highlight_y + 39,
             FILE_LIST_HIGHLIGHT_COLOR
         );
