@@ -15,9 +15,6 @@
 #include "../ui_components/constants.h"
 #include "views.h"
 
-/** @brief Index of the Settings tab in the common tab bar. */
-#define SETTINGS_TAB_INDEX  (4)
-
 /** @brief Height of a single entry in the category rail. */
 #define RAIL_ENTRY_HEIGHT   (37)
 
@@ -155,7 +152,7 @@ static void hint_draw (menu_t *menu, settings_hint_t slot, rdpq_align_t align) {
 static void draw (menu_t *menu, surface_t *display) {
     rdpq_attach(display, NULL);
 
-    ui_components_background_draw();
+    ui_components_background_draw_layout(true);
     ui_components_tabs_common_draw(menu, SETTINGS_TAB_INDEX);
     ui_components_layout_draw_tabbed();
 
@@ -196,4 +193,7 @@ void view_settings_init (menu_t *menu) {
 void view_settings_display (menu_t *menu, surface_t *display) {
     process(menu);
     draw(menu, display);
+    if (pane_focused && panes[selected_pane]->after_frame) {
+        panes[selected_pane]->after_frame(menu);
+    }
 }

@@ -8,6 +8,7 @@
 
 #include "../ui_components.h"
 #include "../fonts.h"
+#include "../sound.h"
 #include "constants.h"
 
 /**
@@ -89,43 +90,24 @@ void ui_components_border_draw (int x0, int y0, int x1, int y1) {
 /**
  * @brief Draw the layout with tabs.
  */
-void ui_components_layout_draw_tabbed (void) {
-    ui_components_panel_draw(VISIBLE_AREA_X0, VISIBLE_AREA_Y0 + TAB_HEIGHT + BORDER_THICKNESS,
-        VISIBLE_AREA_X1, VISIBLE_AREA_Y1);
-    ui_components_border_draw(
-        VISIBLE_AREA_X0,
-        VISIBLE_AREA_Y0 + TAB_HEIGHT + BORDER_THICKNESS,
-        VISIBLE_AREA_X1,
-        VISIBLE_AREA_Y1
-    );
-
-    ui_components_box_draw(
-        VISIBLE_AREA_X0,
-        LAYOUT_ACTIONS_SEPARATOR_Y,
-        VISIBLE_AREA_X1,
-        LAYOUT_ACTIONS_SEPARATOR_Y + BORDER_THICKNESS,
-        BORDER_COLOR
-    );
+static void layout_draw(int y0) {
+    if (!ui_components_background_panel_integrated())
+        ui_components_panel_draw(VISIBLE_AREA_X0, y0, VISIBLE_AREA_X1, VISIBLE_AREA_Y1);
+    if (!ui_components_theme_frame_draw(VISIBLE_AREA_X0, y0, VISIBLE_AREA_X1, VISIBLE_AREA_Y1))
+        ui_components_border_draw(VISIBLE_AREA_X0, y0, VISIBLE_AREA_X1, VISIBLE_AREA_Y1);
+    if (!ui_components_theme_frame_draw(VISIBLE_AREA_X0, LAYOUT_ACTIONS_SEPARATOR_Y,
+                                        VISIBLE_AREA_X1, VISIBLE_AREA_Y1))
+        ui_components_box_draw(VISIBLE_AREA_X0, LAYOUT_ACTIONS_SEPARATOR_Y,
+                               VISIBLE_AREA_X1, LAYOUT_ACTIONS_SEPARATOR_Y + BORDER_THICKNESS,
+                               BORDER_COLOR);
 }
 
-/**
- * @brief Draw the layout.
- */
-void ui_components_layout_draw (void) {
-    ui_components_panel_draw(VISIBLE_AREA_X0, VISIBLE_AREA_Y0, VISIBLE_AREA_X1, VISIBLE_AREA_Y1);
-    ui_components_border_draw(
-        VISIBLE_AREA_X0,
-        VISIBLE_AREA_Y0,
-        VISIBLE_AREA_X1,
-        VISIBLE_AREA_Y1
-    );
-    ui_components_box_draw(
-        VISIBLE_AREA_X0,
-        LAYOUT_ACTIONS_SEPARATOR_Y,
-        VISIBLE_AREA_X1,
-        LAYOUT_ACTIONS_SEPARATOR_Y + BORDER_THICKNESS,
-        BORDER_COLOR
-    );
+void ui_components_layout_draw_tabbed(void) {
+    layout_draw(VISIBLE_AREA_Y0 + TAB_HEIGHT);
+}
+
+void ui_components_layout_draw(void) {
+    layout_draw(VISIBLE_AREA_Y0);
 }
 
 /**
@@ -238,8 +220,10 @@ void ui_components_dialog_draw (int width, int height) {
     int x1 = DISPLAY_CENTER_X + (width / 2);
     int y1 = DISPLAY_CENTER_Y + (height / 2);
 
-    ui_components_border_draw(x0, y0, x1, y1);
-    ui_components_box_draw(x0, y0, x1, y1, DIALOG_BG_COLOR);
+    if (!ui_components_theme_dialog_draw(x0, y0, x1, y1)) {
+        ui_components_border_draw(x0, y0, x1, y1);
+        ui_components_box_draw(x0, y0, x1, y1, DIALOG_BG_COLOR);
+    }
 }
 
 /**
@@ -429,75 +413,57 @@ void ui_components_settings_row_draw (int y, const char *label, const char *valu
  * @param text Array of tab text.
  * @param count Number of tabs.
  * @param selected Index of the selected tab.
- * @param width Width of each tab.
+ * @param total_width Total width occupied by all tabs.
  */
-void ui_components_tabs_draw(const char **text, int count, int selected, float width ) {
-    float starting_x = VISIBLE_AREA_X0;
-
-    float x = starting_x;
-    float y = OVERSCAN_HEIGHT;    
-    float height = TAB_HEIGHT;
-
-    // first draw the tabs that are not selected
-    for(int i=0;i< count;i++) {
-        if(i != selected) {
-            ui_components_box_draw(
-                x,
-                y,
-                x + width,
-                y + height,
-                TAB_INACTIVE_BACKGROUND_COLOR
-            );
-
-            ui_components_border_draw_internal(
-                x,
-                y,
-                x + width,
-                y + height,
-                TAB_INACTIVE_BORDER_COLOR
-            );
+void ui_components_tabs_draw(const char **text, int count, int selected, int total_width) {
+    int starting_x = VISIBLE_AREA_X0;
+    int y = OVERSCAN_HEIGHT;
+    const menu_theme_t *theme = theme_get();
+    const menu_theme_border_descriptor_t *border = theme_border_descriptor(theme);
+    bool plain_border = !theme_has_package_border(theme) && theme->border_style == THEME_BORDER_PLAIN;
+    int decorated_lift = plain_border ? 0 : TAB_DECORATED_HEIGHT_ADJUSTMENT;
+    int tab_y = y - decorated_lift;
+    int overlap_left = border->tab_overlap / 2;
+    int overlap_right = border->tab_overlap - overlap_left;
+    /* Draw inactive tabs first and the selected tab last, above its neighbors. */
+    for (int step = 0; step <= count; step++) {
+        int i = step == count ? selected : step;
+        if (i < 0 || i >= count || (step < count && i == selected)) continue;
+        bool active = i == selected;
+        int x0 = starting_x + (total_width * i) / count;
+        int x1 = starting_x + (total_width * (i + 1)) / count;
+        int y0 = tab_y - (active ? TAB_SELECTED_LIFT : 0);
+        int y1 = y + TAB_HEIGHT + border->tab_join_depth;
+        int expansion = active ? border->selected_expansion : 0;
+        int extend_left = i > 0 ? overlap_left + expansion : 0;
+        int extend_right = i + 1 < count ? overlap_right + expansion : 0;
+        color_t fill = active ? TAB_ACTIVE_BACKGROUND_COLOR : TAB_INACTIVE_BACKGROUND_COLOR;
+        color_t tint = active ? theme->accent : theme->muted_text;
+        if (!ui_components_theme_tab_draw(x0, y0, x1, y1, extend_left, extend_right, fill, tint)) {
+            ui_components_box_draw(x0 - extend_left, y0, x1 + extend_right, y1, fill);
+            ui_components_border_draw_internal(x0 - extend_left, y0, x1 + extend_right, y1,
+                active ? TAB_ACTIVE_BORDER_COLOR : TAB_INACTIVE_BORDER_COLOR);
         }
-        x += width;
-    }
-    
-    // draw the selected tab (so it shows up on top of the others)
-    if(selected >= 0 && selected < count) {
-        x = starting_x + (width * selected);
-
-        ui_components_box_draw(
-            x,
-            y - TAB_SELECTED_LIFT,
-            x + width,
-            y + height,
-            TAB_ACTIVE_BACKGROUND_COLOR
-        );
-
-        ui_components_border_draw_internal(
-            x,
-            y - TAB_SELECTED_LIFT,
-            x + width,
-            y + height,
-            TAB_ACTIVE_BORDER_COLOR
-        );
     }
 
     // write the text on the tabs
-    rdpq_textparms_t tab_textparms = {
-        .width = width,
-        .height = 24,
-        .align = ALIGN_CENTER,
-        .wrap = WRAP_NONE
-    };
-    x = starting_x;
     for(int i=0;i< count;i++) {
+        int x0 = starting_x + (total_width * i) / count;
+        int x1 = starting_x + (total_width * (i + 1)) / count;
+        rdpq_textparms_t tab_textparms = {
+            .style_id = i == selected ? STL_DEFAULT : STL_GRAY,
+            .width = x1 - x0,
+            .height = 24,
+            .align = ALIGN_CENTER,
+            .wrap = WRAP_NONE
+        };
         rdpq_text_print(
             &tab_textparms,
             FNT_DEFAULT,
-            x,
-            y,
+            x0,
+            y + TAB_TEXT_Y_OFFSET,
             text[i]
         );
-        x += width;
     }
 }
 
@@ -565,4 +531,29 @@ void ui_component_value_editor(const char **header_text, const char **value_text
 
     // draw the border around the value boxes
     ui_components_border_draw (starting_x, y, x, y + height + 24);
+}
+
+#define SCAN_PROGRESS_DELAY_US    150000
+#define SCAN_PROGRESS_INTERVAL_US 33000
+
+void ui_components_scan_progress_draw(ui_components_scan_progress_t *scan, menu_t *menu, int tab,
+                                      const char *label, int done, int total) {
+    uint64_t now = get_ticks_us();
+    if (now - scan->start_us < SCAN_PROGRESS_DELAY_US || now - scan->drawn_us < SCAN_PROGRESS_INTERVAL_US) {
+        return;
+    }
+    surface_t *display = display_try_get();
+    if (!display) {
+        return;
+    }
+    scan->drawn_us = now;
+    sound_poll();
+    char message[48];
+    snprintf(message, sizeof(message), "%s %d/%d", label, done, total);
+    rdpq_attach(display, NULL);
+    ui_components_background_draw_layout(true);
+    ui_components_tabs_common_draw(menu, tab);
+    ui_components_layout_draw_tabbed();
+    ui_components_loader_draw(total ? (float)done / total : 0.0f, message);
+    rdpq_detach_show();
 }

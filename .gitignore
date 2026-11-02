@@ -13,6 +13,7 @@
 /filesystem/Firple-Bold.font64
 /filesystem/FiraMonoBold.font64
 /filesystem/menu/**
+/filesystem/themes/**
 
 # Ignore external development tools
 /tools/*

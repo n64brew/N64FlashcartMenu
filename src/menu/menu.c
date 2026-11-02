@@ -15,6 +15,7 @@
 #include "flashcart/flashcart.h"
 #include "fonts.h"
 #include "theme.h"
+#include "external_theme.h"
 #include "hdmi.h"
 #include "menu_state.h"
 #include "menu.h"
@@ -87,6 +88,8 @@ static void menu_init (boot_params_t *boot_params) {
     path_push(path, MENU_SETTINGS_FILE);
     settings_init(path_get(path));
     settings_load(&menu->settings);
+    if (menu->settings.theme && strcmp(menu->settings.theme, "Custom") != 0)
+        external_theme_load_selected(menu->settings.theme_path, menu->settings.theme);
     theme_set_by_name(menu->settings.theme);
     path_pop(path);
 
@@ -180,6 +183,7 @@ static void menu_deinit (menu_t *menu) {
     free(menu->browser.list);
     path_free(menu->browser.directory);
     view_grid_shutdown();
+    external_themes_close();
     free(menu);
 
     display_close();
@@ -285,6 +289,7 @@ void menu_run (boot_params_t *boot_params) {
 
         png_decoder_poll();
         jpeg_decoder_poll();
+        external_theme_poll();
 
         usb_comm_poll(menu);
     }

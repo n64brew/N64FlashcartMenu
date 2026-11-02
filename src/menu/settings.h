@@ -65,6 +65,8 @@ typedef struct {
 
     /** @brief Selected theme name; NULL when loaded from settings that predate themes. */
     char *theme;
+    /** @brief Source package of an external theme, or an empty string. */
+    char *theme_path;
 
     /** @brief Enable Sound effects within the menu */
     bool soundfx_enabled;

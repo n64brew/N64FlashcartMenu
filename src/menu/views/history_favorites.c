@@ -157,7 +157,7 @@ static void draw_list(menu_t *menu, surface_t *display) {
 static void draw(menu_t *menu, surface_t *display) {
     rdpq_attach(display, NULL);
 
-    ui_components_background_draw();
+    ui_components_background_draw_layout(true);
 
     if(tab_context == BOOKKEEPING_TAB_CONTEXT_FAVORITE) {
         ui_components_tabs_common_draw(menu, 3);

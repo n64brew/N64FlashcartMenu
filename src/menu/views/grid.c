@@ -54,8 +54,6 @@
 #define GRID_MARQUEE_PIXELS_PER_SECOND 60.0f
 #define GRID_ART_CACHE_BYTES    (2 * 1024 * 1024)
 #define GRID_ART_CACHE_ENTRIES  64
-#define GRID_PROGRESS_DELAY_US  150000
-#define GRID_PROGRESS_INTERVAL_US 33000
 
 #define GRID_TILE_COLOR         (theme_get()->tab_inactive)
 #define GRID_TILE_SELECTED      (theme_get()->highlight)
@@ -769,8 +767,7 @@ typedef struct {
     int32_t reads;
     int32_t total;
     menu_t *menu;
-    uint64_t start_us;
-    uint64_t drawn_us;
+    ui_components_scan_progress_t progress;
 } grid_scan_t;
 
 static int scan_callback(const char *full_path, dir_t *info, void *data) {
@@ -803,35 +800,14 @@ static int scan_callback(const char *full_path, dir_t *info, void *data) {
     return DIR_WALK_CONTINUE;
 }
 
-/* Long scans show their progress in place of the grid. */
-static void draw_scan_progress(grid_scan_t *scan) {
-    uint64_t now = get_ticks_us();
-    if (now - scan->start_us < GRID_PROGRESS_DELAY_US || now - scan->drawn_us < GRID_PROGRESS_INTERVAL_US) {
-        return;
-    }
-    surface_t *display = display_try_get();
-    if (!display) {
-        return;
-    }
-    scan->drawn_us = now;
-    sound_poll();
-    char message[32];
-    snprintf(message, sizeof(message), "Scanning ROMs %ld/%ld", (long)scan->reads, (long)scan->total);
-    rdpq_attach(display, NULL);
-    ui_components_background_draw();
-    ui_components_tabs_common_draw(scan->menu, 0);
-    ui_components_layout_draw_tabbed();
-    ui_components_loader_draw((float)scan->reads / scan->total, message);
-    rdpq_detach_show();
-}
-
 static void read_entry(grid_scan_t *scan, grid_entry_t *entry) {
     path_t *full_path = path_init(grid.storage_prefix, entry->path);
     read_header(path_get(full_path), entry);
     path_free(full_path);
     load_metadata(entry);
     scan->reads++;
-    draw_scan_progress(scan);
+    /* Long scans show their progress in place of the grid. */
+    ui_components_scan_progress_draw(&scan->progress, scan->menu, 0, "Scanning ROMs", scan->reads, scan->total);
 }
 
 static int compare_entries(const void *left, const void *right) {
@@ -965,7 +941,7 @@ static void refresh_index(menu_t *menu) {
         grid.entries[i].seen = false;
     }
 
-    grid_scan_t scan = { .menu = menu, .start_us = get_ticks_us() };
+    grid_scan_t scan = { .menu = menu, .progress.start_us = get_ticks_us() };
     scan.added = malloc(GRID_MAX_ENTRIES * sizeof(*scan.added));
     grid.scan_error = !scan.added || !walk_library(menu, &scan);
     if (!grid.scan_error) {
@@ -1010,7 +986,7 @@ static void refresh_index(menu_t *menu) {
             cache_save();
         }
         debugf("[GRID] Sync: %ld ROMs, %ld read in %lu ms\n", (long)grid.count, (long)scan.reads,
-               (unsigned long)((get_ticks_us() - scan.start_us) / 1000));
+               (unsigned long)((get_ticks_us() - scan.progress.start_us) / 1000));
     }
     if (scan.added) {
         for (int32_t i = 0; i < scan.added_count; i++) {
@@ -1576,7 +1552,7 @@ static void draw_tile(int slot) {
 
 static void draw(menu_t *menu, surface_t *display) {
     rdpq_attach(display, NULL);
-    ui_components_background_draw();
+    ui_components_background_draw_layout(true);
     ui_components_tabs_common_draw(menu, 0);
     ui_components_layout_draw_tabbed();
 

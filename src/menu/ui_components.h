@@ -144,6 +144,29 @@ void ui_components_seekbar_draw(float progress);
  */
 void ui_components_loader_draw(float progress, const char *msg);
 
+/** Throttling state for ui_components_scan_progress_draw(); zero it, then set start_us. */
+typedef struct {
+    uint64_t start_us; /**< When the scan began, from get_ticks_us(). */
+    uint64_t drawn_us; /**< When progress was last shown. */
+} ui_components_scan_progress_t;
+
+/**
+ * @brief Show the progress of a long synchronous scan over the tabbed layout.
+ *
+ * Draws a whole frame itself, so call it between steps of the scan. Nothing
+ * is shown until the scan has run for a moment, and then at most about 30
+ * times a second, so short scans cost nothing.
+ *
+ * @param scan Throttling state for this scan.
+ * @param menu Menu whose tabs are drawn.
+ * @param tab Index of the selected tab.
+ * @param label Shown with the counts, e.g. "Scanning ROMs".
+ * @param done Items finished.
+ * @param total Items in all.
+ */
+void ui_components_scan_progress_draw(ui_components_scan_progress_t *scan, menu_t *menu, int tab,
+                                      const char *label, int done, int total);
+
 /**
  * @brief Draw a scrollbar component.
  * 
@@ -232,6 +255,23 @@ void ui_components_background_replace_image(surface_t *image);
  * @brief Draw the background component.
  */
 void ui_components_background_draw(void);
+/** Draw a static-layout background with its translucent panel folded into the source. */
+void ui_components_background_draw_layout(bool tabbed);
+/** True when the current background draw already produced the panel fill. */
+bool ui_components_background_panel_integrated(void);
+/** @brief Reload the active theme's assets and image after a theme change or edit. */
+void ui_components_background_apply_theme(void);
+
+/** @brief Draw an atlas-backed nine-patch dialog. Returns false without an atlas. */
+bool ui_components_theme_dialog_draw(int x0, int y0, int x1, int y1);
+
+/** @brief Draw only the edges of the active theme's nine-patch. */
+bool ui_components_theme_frame_draw(int x0, int y0, int x1, int y1);
+
+/** @brief Draw an open-bottom tab, extending only its side patches into neighbors. */
+bool ui_components_theme_tab_draw(int x0, int y0, int x1, int y1,
+                                  int extend_left, int extend_right,
+                                  color_t fill, color_t tint);
 
 /**
  * @brief Return the current background image surface, or NULL if none is set.
@@ -395,9 +435,9 @@ void ui_components_settings_row_draw(int y, const char *label, const char *value
  * @param text Array of tab labels.
  * @param count Number of tabs.
  * @param selected Index of the selected tab.
- * @param width Width of the tabs.
+ * @param total_width Total width occupied by the tabs.
  */
-void ui_components_tabs_draw(const char **text, int count, int selected, float width);
+void ui_components_tabs_draw(const char **text, int count, int selected, int total_width);
 
 /**
  * @brief Draw the common part of the tabs component.

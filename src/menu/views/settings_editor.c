@@ -198,6 +198,8 @@ static void setting_activate (menu_t *menu) {
     if (setting->flags & SETTING_CLEAR_BACKGROUND) {
         ui_components_background_clear();
         theme_custom_clear_background_image();
+        /* Clearing Custom's image releases the decoded theme assets. */
+        ui_components_background_apply_theme();
         settings_save(&menu->settings);
         return;
     }
