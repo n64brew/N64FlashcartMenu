@@ -83,7 +83,7 @@ The features in this project were made possible by the [contributors](https://gi
 
 # License
 This project is released under the [GNU AFFERO GENERAL PUBLIC LICENSE](LICENSE.md) as compatible with all other dependent project licenses.  
-Other license options may be available upon request with permissions of the original `N64FlashcartMenu` project authors / maintainers.  
+Other compatible or commercial license options may be available upon request with permissions of the original `N64FlashcartMenu` project authors / maintainers.  
 * [Mateusz Faderewski / Polprzewodnikowy](https://github.com/Polprzewodnikowy)
 * [Robin Jones / NetworkFusion](https://github.com/networkfusion)
 

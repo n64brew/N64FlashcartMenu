@@ -5,6 +5,7 @@
  */
 
 #include <stdlib.h>
+#include <stdint.h>
 
 #include "../ui_components.h"
 #include "../path.h"
@@ -38,6 +39,23 @@ static void jpeg_decoder_callback(jpeg_err_t err, surface_t *decoded_image, void
     b->image = (err == JPEG_OK) ? decoded_image : NULL;
 }
 
+/**
+ * @brief Initialize a boxart component from an in-memory image buffer.
+ *
+ * Used to decode images (e.g. box/cart art, screenshots) extracted directly from a ROM's
+ * embedded metadata ZIP, rather than loaded from an SD card file path.
+ *
+ * @note The image format is detected from the content signature, not the filename, since
+ * an embedded ZIP entry's actual filename may not reflect its real content.
+ *
+ * @param filename Filename of the image within the ZIP; kept for API compatibility, not
+ * used to decide the decoding format.
+ * @param data Heap buffer containing the raw image data; ownership is transferred to this function.
+ * @param size Size of `data` in bytes.
+ * @param max_width Maximum width to decode the image to.
+ * @param max_height Maximum height to decode the image to.
+ * @return Pointer to the initialized boxart component, or NULL on failure (in which case `data` is freed).
+ */
 component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *data, size_t size,
                                                   int max_width, int max_height) {
     component_boxart_t *b = calloc(1, sizeof(component_boxart_t));
@@ -47,14 +65,26 @@ component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *da
     }
     b->loading = true;
 
-    jpeg_err_t jpeg_err = JPEG_ERR_BAD_FILE;
-    png_err_t png_err = PNG_ERR_BAD_FILE;
-    bool is_jpeg = file_has_extensions((char *) filename, (const char *[]) { "jpg", "jpeg", NULL });
+    (void)filename;
+    const uint8_t *image_data = data;
+    bool is_jpeg = image_data != NULL && size >= 3 && image_data[0] == 0xFF &&
+                   image_data[1] == 0xD8 && image_data[2] == 0xFF;
+    bool is_png = image_data != NULL && size >= 8 && image_data[0] == 0x89 &&
+                  image_data[1] == 0x50 && image_data[2] == 0x4E && image_data[3] == 0x47 &&
+                  image_data[4] == 0x0D && image_data[5] == 0x0A && image_data[6] == 0x1A &&
+                  image_data[7] == 0x0A;
+    if (!is_jpeg && !is_png) {
+        free(data);
+        free(b);
+        return NULL;
+    }
+
     if (is_jpeg) {
-        jpeg_err = jpeg_decoder_start_mem(data, size, max_width, max_height, jpeg_decoder_callback, b);
+        jpeg_err_t jpeg_err = jpeg_decoder_start_mem(data, size, max_width, max_height,
+                                                   jpeg_decoder_callback, b);
         if (jpeg_err == JPEG_OK) return b;
     } else {
-        png_err = png_decoder_start_mem(data, size, max_width, max_height, png_decoder_callback, b);
+        png_err_t png_err = png_decoder_start_mem(data, size, max_width, max_height, png_decoder_callback, b);
         if (png_err == PNG_OK) return b;
         if (png_err == PNG_ERR_BUSY) free(data);
     }
@@ -172,6 +202,7 @@ void ui_components_boxart_free(component_boxart_t *b) {
         if (b->loading) {
             jpeg_decoder_abort();
             png_decoder_abort();
+            jpeg_decoder_abort();
         }
         if (b->image) {
             rspq_wait();
