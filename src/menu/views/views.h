@@ -172,6 +172,9 @@ void view_credits_init(menu_t *menu);
  */
 void view_credits_display(menu_t *menu, surface_t *display);
 
+/** @brief Index of the Settings tab in the common tab bar. */
+#define SETTINGS_TAB_INDEX  (4)
+
 /**
  * @brief Action bar hint slots a settings pane can describe.
  */
@@ -195,6 +198,13 @@ typedef struct {
     void (*enter)(menu_t *menu);
     /** @brief Called when the pane loses focus. */
     void (*leave)(menu_t *menu);
+    /**
+     * @brief Called after each frame is shown while the pane has focus.
+     *
+     * No framebuffer is held here, so slow work such as a scan can draw its
+     * own progress frames (see ui_components_scan_progress_draw()).
+     */
+    void (*after_frame)(menu_t *menu);
     /**
      * @brief Handle input while the pane has focus.
      *

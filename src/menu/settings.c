@@ -3,6 +3,7 @@
 #include "ini_parser.h"
 
 #include "settings.h"
+#include "external_theme.h"
 #include "utils/fs.h"
 
 
@@ -49,6 +50,7 @@ static settings_t init = {
     .soundfx_enabled = false,
     .bgm_enabled = false,
     .theme = "N64",
+    .theme_path = "",
 #ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     .rom_autoload_enabled = false,
     .rom_autoload_path = "",
@@ -73,6 +75,7 @@ void settings_init (char *path) {
 }
 
 void settings_load (settings_t *settings) {
+    if (!theme_registry_init()) return;
     theme_custom_reset();
     if (!file_exists(settings_path)) {
         settings_save(&init);
@@ -98,13 +101,21 @@ void settings_load (settings_t *settings) {
     settings->soundfx_enabled = ini_get_bool(ini, "menu", "soundfx_enabled", init.soundfx_enabled);
     settings->bgm_enabled = ini_get_bool(ini, "menu", "bgm_enabled", init.bgm_enabled);
 
-    theme_custom_copy_from(theme_get_by_name(ini_get_string(ini, "custom_theme", "base", "Custom")));
+    if (!external_theme_load_selected(ini_get_string(ini, "custom_theme", "base_path", ""), "Custom"))
+        theme_custom_copy_from(theme_get_by_name(ini_get_string(ini, "custom_theme", "base", "Custom")));
+    /* -1 keeps the base package's own border sheet. */
+    int border_style = ini_get_int(ini, "custom_theme", "border_style", -1);
+    if (border_style >= 0) theme_custom_set_border_style(border_style);
     load_custom_palette(ini);
     theme_custom_set_hue_shift(ini_get_int(ini, "custom_theme", "hue_shift", 0));
+    menu_theme_package_t *package = theme_custom()->package;
+    if (package) package->parameter_mask &= (uint32_t)ini_get_int(ini, "custom_theme", "parameter_mask", package->parameter_mask);
     if (ini_get_bool(ini, "custom_theme", "background_image", false)) theme_custom_use_background_image();
     free(settings->theme);
     const char *theme = ini_get_string(ini, "menu", "theme", NULL);
     settings->theme = theme ? strdup(theme) : NULL;
+    free(settings->theme_path);
+    settings->theme_path = strdup(ini_get_string(ini, "menu", "theme_path", init.theme_path));
 
 #ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     settings->rom_autoload_enabled = ini_get_bool(ini, "menu", "autoload_rom_enabled", init.rom_autoload_enabled);
@@ -144,7 +155,12 @@ void settings_save (settings_t *settings) {
     ini_set_bool(ini, "menu", "soundfx_enabled", settings->soundfx_enabled);
     ini_set_bool(ini, "menu", "bgm_enabled", settings->bgm_enabled);
     ini_set_string(ini, "menu", "theme", settings->theme);
+    ini_set_string(ini, "menu", "theme_path", settings->theme_path);
+    const menu_theme_t *custom = theme_custom();
     ini_set_string(ini, "custom_theme", "base", theme_custom_base_name());
+    ini_set_string(ini, "custom_theme", "base_path", custom->package ? custom->package->path : "");
+    ini_set_int(ini, "custom_theme", "border_style", theme_has_package_border(custom) ? -1 : theme_custom_border_style());
+    ini_set_int(ini, "custom_theme", "parameter_mask", custom->package ? custom->package->parameter_mask : 0);
     save_custom_palette(ini);
     ini_set_int(ini, "custom_theme", "hue_shift", theme_custom_hue_shift());
     ini_set_bool(ini, "custom_theme", "background_image", theme_custom_has_background_image());

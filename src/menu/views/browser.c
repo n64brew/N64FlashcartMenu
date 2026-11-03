@@ -682,7 +682,7 @@ static void process (menu_t *menu) {
 static void draw (menu_t *menu, surface_t *d) {
     rdpq_attach(d, NULL);
 
-    ui_components_background_draw();
+    ui_components_background_draw_layout(true);
 
     ui_components_tabs_common_draw(menu, 1);
 

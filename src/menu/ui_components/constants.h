@@ -15,8 +15,10 @@
  * @def TAB_HEIGHT
  * @brief Height of the tabs in the main menu (pixels).
  */
-#define TAB_HEIGHT                      (20)
+#define TAB_HEIGHT                      (28)
+#define TAB_DECORATED_HEIGHT_ADJUSTMENT (2)
 #define TAB_SELECTED_LIFT               (5)
+#define TAB_TEXT_Y_OFFSET               (6)
 
 /**
  * @def BORDER_THICKNESS
@@ -50,7 +52,7 @@
  * @def OVERSCAN_WIDTH
  * @brief Overscan margin on the X axis (pixels).
  */
-#define OVERSCAN_WIDTH                  (32)
+#define OVERSCAN_WIDTH                  (28)
 /**
  * @def OVERSCAN_HEIGHT
  * @brief Overscan margin on the Y axis (pixels).
@@ -88,6 +90,9 @@
  * @brief Height of the visible display area (pixels).
  */
 #define VISIBLE_AREA_HEIGHT             (VISIBLE_AREA_Y1 - VISIBLE_AREA_Y0)
+
+/** Interior clearance reserved for the themed eight-pixel frame. */
+#define LAYOUT_FRAME_INSET              (8)
 
 /**
  * @def LAYOUT_ACTIONS_SEPARATOR_Y
@@ -243,17 +248,17 @@
  * @def LIST_SCROLLBAR_HEIGHT
  * @brief Height of the list scrollbar (pixels).
  */
-#define LIST_SCROLLBAR_HEIGHT           (LAYOUT_ACTIONS_SEPARATOR_Y - OVERSCAN_HEIGHT - TAB_HEIGHT - BORDER_THICKNESS)
+#define LIST_SCROLLBAR_HEIGHT           (LAYOUT_ACTIONS_SEPARATOR_Y - LIST_SCROLLBAR_Y)
 /**
  * @def LIST_SCROLLBAR_X
  * @brief X coordinate of the list scrollbar.
  */
-#define LIST_SCROLLBAR_X                (VISIBLE_AREA_X1 - LIST_SCROLLBAR_WIDTH)
+#define LIST_SCROLLBAR_X                (VISIBLE_AREA_X1 - LAYOUT_FRAME_INSET - LIST_SCROLLBAR_WIDTH)
 /**
  * @def LIST_SCROLLBAR_Y
  * @brief Y coordinate of the list scrollbar.
  */
-#define LIST_SCROLLBAR_Y                (VISIBLE_AREA_Y0 + TAB_HEIGHT + BORDER_THICKNESS)
+#define LIST_SCROLLBAR_Y                (VISIBLE_AREA_Y0 + TAB_HEIGHT + LAYOUT_FRAME_INSET)
 
 /**
  * @def SETTINGS_RAIL_X0
@@ -289,7 +294,7 @@
  * @def SETTINGS_ROW_HEIGHT
  * @brief Height of a single label/value row in a settings pane (pixels).
  */
-#define SETTINGS_ROW_HEIGHT             (28)
+#define SETTINGS_ROW_HEIGHT             (27)
 /**
  * @def SETTINGS_ROWS
  * @brief Maximum number of label/value rows visible in a settings pane.
@@ -310,12 +315,12 @@
  * @def FILE_LIST_HIGHLIGHT_WIDTH
  * @brief Width of the file list highlight (pixels).
  */
-#define FILE_LIST_HIGHLIGHT_WIDTH       (VISIBLE_AREA_X1 - VISIBLE_AREA_X0 - LIST_SCROLLBAR_WIDTH)
+#define FILE_LIST_HIGHLIGHT_WIDTH       (LIST_SCROLLBAR_X - FILE_LIST_HIGHLIGHT_X)
 /**
  * @def FILE_LIST_HIGHLIGHT_X
  * @brief X coordinate of the file list highlight.
  */
-#define FILE_LIST_HIGHLIGHT_X           (VISIBLE_AREA_X0)
+#define FILE_LIST_HIGHLIGHT_X           (VISIBLE_AREA_X0 + LAYOUT_FRAME_INSET)
 
 /**
  * @def BACKGROUND_EMPTY_COLOR

@@ -10,10 +10,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../external_theme.h"
 #include "../fonts.h"
 #include "../settings.h"
 #include "../sound.h"
 #include "../theme.h"
+#include "../theme_text.h"
 #include "../ui_components.h"
 #include "../ui_components/constants.h"
 #include "views.h"
@@ -28,7 +30,7 @@ typedef struct {
 } theme_family_t;
 
 typedef enum { PICKER_FAMILIES, PICKER_THEMES, PICKER_CUSTOM } theme_picker_layer_t;
-typedef enum { CUSTOM_ROW_HUE, CUSTOM_ROW_COLORS,
+typedef enum { CUSTOM_ROW_BASE, CUSTOM_ROW_HUE, CUSTOM_ROW_BORDER, CUSTOM_ROW_COLORS,
     CUSTOM_ROW_COUNT = CUSTOM_ROW_COLORS + THEME_CUSTOM_COLOR_COUNT } custom_row_t;
 typedef enum { CUSTOM_CHANNEL_NONE = -1, CUSTOM_CHANNEL_RED, CUSTOM_CHANNEL_GREEN,
     CUSTOM_CHANNEL_BLUE, CUSTOM_CHANNEL_ALPHA, CUSTOM_CHANNEL_COUNT } custom_channel_t;
@@ -41,6 +43,14 @@ static custom_channel_t custom_channel;
 static bool menu_hidden;
 /** Theme restored when leaving a preset list without choosing one with A. */
 static const menu_theme_t *chosen_theme;
+
+/* Image-backed packages Custom can use as its base. Borrowed catalog pointers,
+ * stable until this pane is left. */
+static const menu_theme_t **custom_bases;
+static int custom_base_count;
+/* Index into custom_bases, or one of these. */
+enum { CUSTOM_BASE_USER_IMAGE = -2, CUSTOM_BASE_NONE = -1 };
+static int custom_base_index;
 
 static bool category_has_themes(int category_index) {
     const menu_theme_t *catalog = theme_catalog();
@@ -86,24 +96,65 @@ static int family_for_theme(const menu_theme_t *theme) {
 }
 
 static void preview_theme(const menu_theme_t *selected) {
+    if (!external_theme_prepare(selected)) return;
     theme_set(selected);
     fonts_apply_theme();
-    ui_components_background_reload();
+    ui_components_background_apply_theme();
 }
 
 static void choose_theme(const menu_theme_t *selected) {
     preview_theme(selected);
-    chosen_theme = theme_get();
+    chosen_theme = theme_selected();
+}
+
+static void custom_bases_build(void) {
+    free(custom_bases);
+    custom_bases = calloc(theme_catalog_count(), sizeof(*custom_bases));
+    custom_base_count = 0;
+    if (!custom_bases) return;
+    const menu_theme_t *catalog = theme_catalog();
+    for (int i = 0; i < theme_catalog_count(); i++)
+        if (theme_is_custom_base(&catalog[i])) custom_bases[custom_base_count++] = &catalog[i];
+}
+
+static int custom_base_find(void) {
+    const menu_theme_t *custom = theme_custom();
+    if (theme_custom_has_background_image()) return CUSTOM_BASE_USER_IMAGE;
+    for (int i = 0; custom->package && i < custom_base_count; i++)
+        if (strcmp(custom_bases[i]->package->path, custom->package->path) == 0) return i;
+    return CUSTOM_BASE_NONE;
+}
+
+/* Cycle Custom's base through None and the image-backed packages. Leaving the
+ * saved user image always returns to None. */
+static void custom_select_base(int direction) {
+    int positions = custom_base_count + 1;
+    int position = custom_base_index == CUSTOM_BASE_USER_IMAGE ? 0
+        : (custom_base_index + 1 + direction + positions) % positions;
+    if (position == 0) theme_custom_clear_base();
+    else if (!theme_custom_copy_from(custom_bases[position - 1])) return;
+    theme_custom_set_hue_shift(0);
+    custom_base_index = position - 1;
+    preview_theme(theme_custom());
 }
 
 static bool is_custom_family(theme_family_t family) {
     return family.themes == theme_custom();
 }
 
+static bool prepared;
+
 static void pane_leave(menu_t *menu) {
-    if (theme_get() != chosen_theme) preview_theme(chosen_theme);
+    /* Left before the themes were discovered: nothing was previewed or chosen. */
+    if (!prepared) return;
+    if (theme_selected() != chosen_theme) preview_theme(chosen_theme);
+    free(custom_bases);
+    custom_bases = NULL;
+    custom_base_count = 0;
     free(menu->settings.theme);
     menu->settings.theme = strdup(theme_get()->name);
+    free(menu->settings.theme_path);
+    menu->settings.theme_path = strdup(theme_get()->package ? theme_get()->package->path : "");
     settings_save(&menu->settings);
 }
 
@@ -114,28 +165,57 @@ static void row_draw(int x0, int x1, int y, const char *label,
             focused ? theme_get()->highlight : theme_get()->tab_active);
         if (focused) ui_components_focus_draw(x0, y, x1, y + SETTINGS_ROW_HEIGHT - 2);
     }
-    int value_width = value && value[0] ? (strlen(value) > 13 ? 174 : 146) : 0;
+    /* Package names are plain text, not font/style markup. */
+    char safe_label[128], safe_value[128];
+    theme_text_escape(safe_label, sizeof(safe_label), label);
+    theme_text_escape(safe_value, sizeof(safe_value), value);
+    int value_width = value[0] ? (strlen(value) > 13 ? 174 : 146) : 0;
     ui_components_text_draw(x0 + 8, y + 4, x1 - x0 - 16 - value_width,
         SETTINGS_ROW_HEIGHT, selected ? STL_DEFAULT : STL_GRAY,
-        ALIGN_LEFT, WRAP_ELLIPSES, label);
+        ALIGN_LEFT, WRAP_ELLIPSES, safe_label);
     if (value_width) {
         ui_components_text_draw(x1 - value_width, y + 4, value_width - 8,
             SETTINGS_ROW_HEIGHT, selected ? STL_DEFAULT : STL_GRAY,
-            ALIGN_RIGHT, WRAP_ELLIPSES, value);
+            ALIGN_RIGHT, WRAP_ELLIPSES, safe_value);
     }
 }
 
+typedef struct {
+    menu_t *menu;
+    ui_components_scan_progress_t progress;
+} theme_scan_t;
+
+static void theme_scan_progress(int done, int total, void *data) {
+    theme_scan_t *scan = data;
+    ui_components_scan_progress_draw(&scan->progress, scan->menu, SETTINGS_TAB_INDEX,
+                                     "Scanning themes", done, total);
+}
+
+/* Entering only marks the pane unprepared: discovering themes can take a
+ * while, so it runs after the frame, where scan progress can be drawn. */
 static void pane_enter(menu_t *menu) {
+    prepared = false;
+    menu_hidden = false;
+}
+
+static void pane_after_frame(menu_t *menu) {
+    if (prepared) return;
+    prepared = true;
+    /* The first visit after themes change parses every package; show progress. */
+    theme_scan_t scan = { .menu = menu, .progress.start_us = get_ticks_us() };
+    external_themes_init(menu->storage_prefix, theme_scan_progress, &scan);
+    custom_bases_build();
     choose_theme(theme_get_by_name(menu->settings.theme));
     layer = PICKER_FAMILIES;
-    family_index = family_for_theme(theme_get());
+    family_index = family_for_theme(theme_selected());
     theme_row = 0;
-    custom_row = CUSTOM_ROW_HUE;
+    custom_row = CUSTOM_ROW_BASE;
     custom_channel = CUSTOM_CHANNEL_NONE;
     menu_hidden = false;
 }
 
 static bool pane_process(menu_t *menu) {
+    if (!prepared) return true;
     if (menu_hidden) {
         if (menu->actions.context || menu->actions.back) menu_hidden = false;
         return true;
@@ -162,11 +242,12 @@ static bool pane_process(menu_t *menu) {
             theme_family_t family = family_get(family_index);
             if (is_custom_family(family)) {
                 choose_theme(theme_custom());
+                custom_base_index = custom_base_find();
                 layer = PICKER_CUSTOM;
             } else {
                 theme_row = 0;
                 for (int i = 0; i < family.count; i++) {
-                    if (theme_get() == &family.themes[i]) theme_row = i;
+                    if (theme_selected() == &family.themes[i]) theme_row = i;
                 }
                 preview_theme(&family.themes[theme_row]);
                 layer = PICKER_THEMES;
@@ -182,9 +263,10 @@ static bool pane_process(menu_t *menu) {
         if (menu->actions.settings) {
             if (!theme_custom_copy_from(&family.themes[theme_row])) return true;
             choose_theme(theme_custom());
+            custom_base_index = custom_base_find();
             family_index = family_for_theme(theme_custom());
             layer = PICKER_CUSTOM;
-            custom_row = CUSTOM_ROW_HUE;
+            custom_row = CUSTOM_ROW_BASE;
             custom_channel = CUSTOM_CHANNEL_NONE;
             sound_play_effect(SFX_ENTER);
             return true;
@@ -192,7 +274,7 @@ static bool pane_process(menu_t *menu) {
         if (menu->actions.go_up) next = (theme_row + family.count - 1) % family.count;
         else if (menu->actions.go_down) next = (theme_row + 1) % family.count;
         else if (menu->actions.enter) {
-            chosen_theme = theme_get();
+            chosen_theme = theme_selected();
             return false;
         }
         if (next != theme_row) {
@@ -206,12 +288,21 @@ static bool pane_process(menu_t *menu) {
     bool panel = custom_row == CUSTOM_ROW_COLORS + THEME_CUSTOM_PANEL;
     int channel_count = panel ? CUSTOM_CHANNEL_COUNT : CUSTOM_CHANNEL_ALPHA;
     if (custom_channel < 0) {
+        int step = menu->actions.go_left ? -1 : menu->actions.go_right || menu->actions.enter ? 1 : 0;
         if (menu->actions.go_up) custom_row = (custom_row + CUSTOM_ROW_COUNT - 1) % CUSTOM_ROW_COUNT;
         else if (menu->actions.go_down) custom_row = (custom_row + 1) % CUSTOM_ROW_COUNT;
-        else if (custom_row == CUSTOM_ROW_HUE
-                && (menu->actions.go_left || menu->actions.go_right || menu->actions.enter)) {
-            theme_custom_set_hue_shift(theme_custom_hue_shift() + (menu->actions.go_left ? -5 : 5));
-            preview_theme(theme_get());
+        else if (step && custom_row == CUSTOM_ROW_BASE) custom_select_base(step);
+        else if (step && custom_row == CUSTOM_ROW_HUE) {
+            theme_custom_set_hue_shift(theme_custom_hue_shift() + step * 5);
+            preview_theme(theme_selected());
+        } else if (step && custom_row == CUSTOM_ROW_BORDER) {
+            /* The package's own border, when it has one, follows the built-in styles. */
+            int positions = THEME_BORDER_COUNT + theme_custom_has_package_border();
+            int position = theme_has_package_border(theme_custom()) ? THEME_BORDER_COUNT : theme_custom_border_style();
+            position = (position + step + positions) % positions;
+            if (position == THEME_BORDER_COUNT) theme_custom_use_package_border();
+            else theme_custom_set_border_style(position);
+            preview_theme(theme_selected());
         } else if (menu->actions.enter || menu->actions.go_right) {
             custom_channel = CUSTOM_CHANNEL_RED;
         }
@@ -225,7 +316,7 @@ static bool pane_process(menu_t *menu) {
         int value = *channel + (menu->actions.go_up ? 8 : -8);
         *channel = value < 0 ? 0 : value > 255 ? 255 : value;
         theme_custom_set_color(custom_row - CUSTOM_ROW_COLORS, color);
-        preview_theme(theme_get());
+        preview_theme(theme_selected());
     }
     return true;
 }
@@ -257,12 +348,20 @@ static void pane_draw(menu_t *menu, bool focused) {
         return;
     }
 
-    static const char *const labels[] = { "Hue Shift", "Border Color", "Panel", "Text",
+    static const char *const labels[] = { "Base Theme", "Hue Shift", "Border Style", "Border Color", "Panel", "Text",
         "Selection", "Gradient TL", "Gradient TR", "Gradient BL", "Gradient BR" };
+    static const char *const borders[THEME_BORDER_COUNT] = { "Plain", "Double", "Facets", "Beads",
+        "Brackets", "Stitches", "Nodes", "Scallops", "Soft" };
     y = SETTINGS_PANE_Y0 + 4;
     for (int i = 0; i < CUSTOM_ROW_COUNT; i++, y += SETTINGS_ROW_HEIGHT + 1) {
-        char value[32];
-        if (i == CUSTOM_ROW_HUE) snprintf(value, sizeof(value), "%d deg", theme_custom_hue_shift());
+        char value[64];
+        if (i == CUSTOM_ROW_BASE) {
+            /* Also drawn after leaving the pane, when custom_bases is released. */
+            snprintf(value, sizeof(value), "%s", theme_custom_has_background_image() ? "User Image"
+                : theme_custom()->package ? theme_custom_base_name() : "None");
+        } else if (i == CUSTOM_ROW_HUE) snprintf(value, sizeof(value), "%d deg", theme_custom_hue_shift());
+        else if (i == CUSTOM_ROW_BORDER) snprintf(value, sizeof(value), "%s",
+            theme_has_package_border(theme_custom()) ? "Package" : borders[theme_custom_border_style()]);
         else {
             color_t color = theme_custom_color(i - CUSTOM_ROW_COLORS);
             int used = 0;
@@ -299,6 +398,7 @@ const settings_pane_t settings_pane_theme = {
     .label = "Theme",
     .enter = pane_enter,
     .leave = pane_leave,
+    .after_frame = pane_after_frame,
     .process = pane_process,
     .draw = pane_draw,
     .overlay = pane_overlay,

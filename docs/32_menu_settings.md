@@ -79,30 +79,45 @@ The menu has default sound effects to improve the user experience. See the [soun
 
 ### Themes
 
-The Theme pane contains Simple and Hardware presets plus one editable Custom
-palette. Presets use static four-corner gradients or a solid background.
+The Theme pane contains Simple and Hardware presets, image-backed theme
+packages, and one editable Custom palette. Presets use animated four-corner
+gradients or a solid background; packages add scrolling or animated textures.
 Use Up/Down to choose a family, then A or Right to open it. Up/Down previews its
-presets; A selects one and returns to categories. B or Left returns to families
-and restores the previous theme. Press Start on a preset to copy its palette
-into Custom. Leaving the Theme pane saves the current selection and Custom palette.
+themes; A selects one and returns to categories. B or Left returns to families
+and restores the previous theme. Press Start on a theme to copy it into Custom.
+Leaving the Theme pane saves the current selection and Custom palette.
 
-In Custom, choose Hue Shift and use Left/Right to adjust all colors by five
-degrees. The remaining rows edit border, panel, text, selection, and the four
-gradient corners. Press A to edit a color, Left/Right to choose R, G, or B, and
-Up/Down to change the value. Panel also offers A (alpha): 0 is transparent and
-255 is opaque. A or B finishes editing. A black-and-white outline marks the
-focused row. Z hides the menu to preview the background; B or Z restores it.
+In Custom, Base Theme chooses an image-backed package for the background, or
+None for an animated gradient; Left/Right cycles through them. Hue Shift adjusts
+all colors and textures by five degrees, and Border Style chooses the frame
+decoration, with Package keeping the border drawn by the base theme's package.
+Choosing a new base resets Hue Shift. The remaining rows edit
+border, panel, text, selection, and the four gradient corners. Press A to edit
+a color, Left/Right to choose R, G, or B, and Up/Down to change the value.
+Panel also offers A (alpha): 0 is transparent and 255 is opaque. A or B
+finishes editing. A black-and-white outline marks the focused row. Z hides the
+menu to preview the background; B or Z restores it.
+
+Theme packages are discovered in `menu/themes` on the SD card, alongside the
+bundled catalog. A gallery of ready-made packages is available from
+[N64FlashcartMenuThemes](https://github.com/rmmh/N64FlashcartMenuThemes); copy
+the PNG files you want into `menu/themes`. See
+[the PNG theme format](external_theme_format.md) for authoring. Build with
+`BUNDLE_EXTERNAL_THEMES=0` to omit the bundled packages.
 
 To use an image, open a PNG or JPEG in Files and press A twice to confirm it as
 the background. This copies the current palette into Custom and selects the
 image background. Custom hue changes also affect the image. Menu → Remove
-Background removes the saved image and restores Custom's static gradient while
+Background removes the saved image and restores Custom's gradient while
 keeping its colors.
 
-The selected theme is stored as `theme` in `[menu]`. `[custom_theme]` stores the
-preset copied into Custom (`base`), its exact RGBA `palette`, `hue_shift`, and
-whether the saved background image is enabled (`background_image`). Settings
-files from before themes existed keep showing a previously set background image.
+The selected theme is stored as `theme` in `[menu]`, with `theme_path` naming
+its package. `[custom_theme]` stores the theme copied into Custom (`base`, and
+`base_path` for a package), its exact RGBA `palette`, `hue_shift`,
+`border_style` (-1 keeps the package's own border), the package's still-animated
+color channels (`parameter_mask`), and whether the saved background image is
+enabled (`background_image`). Settings files from before themes existed keep
+showing a previously set background image.
 
 ### Grid
 

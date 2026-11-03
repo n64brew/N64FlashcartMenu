@@ -4,6 +4,7 @@ PROJECT_NAME = N64FlashcartMenu
 
 SOURCE_DIR = src
 ASSETS_DIR = assets
+THEME_ASSETS_DIR ?= $(ASSETS_DIR)/themes
 FILESYSTEM_DIR = filesystem
 BUILD_DIR = build
 OUTPUT_DIR = output
@@ -60,6 +61,7 @@ SRCS = \
 	menu/cart_load.c \
 	menu/datel_codes.c \
 	menu/disk_info.c \
+	menu/external_theme.c \
 	menu/fonts.c \
 	menu/hdmi.c \
 	menu/id3_parser.c \
@@ -122,6 +124,12 @@ SOUNDS_WAV = \
 	error.wav \
 	settings.wav
 
+THEME_PNGS = $(notdir $(wildcard $(THEME_ASSETS_DIR)/*.png))
+BUNDLE_EXTERNAL_THEMES ?= 1
+ifeq ($(BUNDLE_EXTERNAL_THEMES),0)
+THEME_PNGS =
+endif
+
 SOUNDS_XM ?=
 
 IMAGES = \
@@ -135,6 +143,8 @@ IMAGES = \
 	filetype_save.png \
 	filetype_unknown.png
 
+IMAGES += $(notdir $(wildcard $(ASSETS_DIR)/images/theme-border-*.png))
+
 OBJS = $(addprefix $(BUILD_DIR)/, $(addsuffix .o,$(basename $(SRCS))))
 MINIZ_OBJS = $(filter $(BUILD_DIR)/libs/miniz/%.o,$(OBJS))
 SPNG_OBJS = $(filter $(BUILD_DIR)/libs/libspng/%.o,$(OBJS))
@@ -145,12 +155,14 @@ FILESYSTEM = \
 	$(FILESYSTEM_DIR)/menu/fonts/digits/Firple-Bold.font64 \
 	$(addprefix $(FILESYSTEM_DIR)/menu/sounds/, $(notdir $(SOUNDS_WAV:%.wav=%.wav64))) \
 	$(addprefix $(FILESYSTEM_DIR)/menu/sounds/, $(notdir $(SOUNDS_XM:%.xm=%.xm64))) \
-	$(addprefix $(FILESYSTEM_DIR)/menu/sprites/, $(notdir $(IMAGES:%.png=%.sprite)))
+	$(addprefix $(FILESYSTEM_DIR)/menu/sprites/, $(notdir $(IMAGES:%.png=%.sprite))) \
+	$(addprefix $(FILESYSTEM_DIR)/themes/, $(THEME_PNGS))
 
 $(MINIZ_OBJS): N64_CFLAGS+=-Wno-unused-function -fcompare-debug-second
 $(SPNG_OBJS): N64_CFLAGS+=-DSPNG_USE_MINIZ -fcompare-debug-second
 $(FILESYSTEM_DIR)/menu/fonts/Firple-Bold.font64: MKFONT_FLAGS+=--compress 1 --outline 1 --size 15 --charset $(ASSETS_DIR)/fonts/charset.txt --ellipsis 2026,1
 $(FILESYSTEM_DIR)/menu/sounds/%.wav64: AUDIOCONV_FLAGS=--wav-compress 1
+$(FILESYSTEM_DIR)/menu/sprites/theme-%.sprite: MKSPRITE_FLAGS+=--format CI4 --compress 1
 # Large digits for Grid group counts. mkfont names its output after the source,
 # and needs the ellipsis glyph (.) even though the counts never truncate.
 $(FILESYSTEM_DIR)/menu/fonts/digits/Firple-Bold.font64: $(ASSETS_DIR)/fonts/Firple-Bold.ttf
@@ -180,7 +192,22 @@ $(FILESYSTEM_DIR)/menu/sprites/%.sprite: $(ASSETS_DIR)/images/%.png
 	@mkdir -p $(dir $@)
 	@$(N64_MKSPRITE) $(MKSPRITE_FLAGS) -o $(dir $@) "$<"
 
-$(BUILD_DIR)/$(PROJECT_NAME).dfs: $(FILESYSTEM)
+$(FILESYSTEM_DIR)/themes/%.png: $(THEME_ASSETS_DIR)/%.png
+	@echo "    [THEME PNG] $@"
+	@mkdir -p $(dir $@)
+	@cp "$<" "$@"
+
+.PHONY: sync-themes
+sync-themes:
+	@mkdir -p $(FILESYSTEM_DIR)/themes
+	@for file in $(FILESYSTEM_DIR)/themes/*.png; do \
+		case " $(THEME_PNGS) " in \
+			*" $${file##*/} "*) ;; \
+			*) rm -f "$$file" ;; \
+		esac; \
+	done
+
+$(BUILD_DIR)/$(PROJECT_NAME).dfs: sync-themes $(FILESYSTEM)
 
 $(BUILD_DIR)/menu/views/credits.o: .FORCE
 $(BUILD_DIR)/menu/views/credits.o: FLAGS+=-DMENU_VERSION=\"$(MENU_VERSION)\" -DBUILD_TIMESTAMP=\"$(BUILD_TIMESTAMP)\"
@@ -230,6 +257,7 @@ all: $(OUTPUT_DIR)/$(PROJECT_NAME).n64 64drive ed64 ed64-clone sc64 ed64-pro dai
 clean:
 	@rm -f ./$(FILESYSTEM)
 	@find ./$(FILESYSTEM_DIR)/menu/ -type d -empty -delete
+	@rm -rf ./$(FILESYSTEM_DIR)/themes
 	@rm -rf ./$(BUILD_DIR) ./$(OUTPUT_DIR)
 .PHONY: clean
 
