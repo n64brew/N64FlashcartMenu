@@ -931,22 +931,26 @@ static void load (menu_t *menu) {
     menu->boot_params->clear_rdram = menu->load.rom_info.settings.clear_rdram_enabled;
 }
 
+/* The cached names point into rom_info.meta, so the cache is dropped whenever
+ * that metadata is freed or reloaded, not only when the view is torn down. */
+static void metadata_images_reset (void) {
+    current_metadata_image_index = 0;
+    metadata_images_scanned = false;
+    metadata_image_count = 0;
+    for (uint16_t i = 0; i < METADATA_IMAGE_CACHE_MAX; i++) {
+        metadata_image_available[i] = false;
+        metadata_image_embedded[i] = false;
+        metadata_image_names[i] = NULL;
+    }
+}
+
 static void deinit (void) {
     ui_components_boxart_free(pending_boxart);
     pending_boxart = NULL;
     ui_components_boxart_free(boxart);
     boxart = NULL;
     ui_components_background_reload();
-    current_metadata_image_index = 0;
-    metadata_images_scanned = false;
-    metadata_image_count = 0;
-
-    // Clear availability cache
-    for (uint16_t i = 0; i < METADATA_IMAGE_CACHE_MAX; i++) {
-        metadata_image_available[i] = false;
-        metadata_image_embedded[i] = false;
-        metadata_image_names[i] = NULL;
-    }
+    metadata_images_reset();
 }
 
 
@@ -979,6 +983,8 @@ void view_load_rom_init (menu_t *menu) {
     }
     show_expansion_pak_warning = false;
 
+    /* Returning from the cheat editor skips deinit but still reloads the metadata. */
+    metadata_images_reset();
     debugf("Load ROM: loading ROM info from %s\n", path_get(menu->load.rom_path));
     rom_err_t err = rom_config_load(menu->load.rom_path, &menu->load.rom_info);
     if (err != ROM_OK) {
