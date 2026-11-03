@@ -1005,6 +1005,7 @@ static void refresh_index(menu_t *menu) {
             qsort(&grid.entries[survivors], grid.count - survivors, sizeof(*grid.entries), compare_entries);
         }
 
+        free(grid.scan_directory);
         grid.scan_directory = strdup(menu->settings.grid_directory);
         if (changed) {
             cache_save();
@@ -1149,7 +1150,8 @@ static void queue_thumbnail(void) {
             }
             error = png_decoder_start_mem(data, size, GRID_ART_DECODE_SIZE, GRID_ART_DECODE_SIZE,
                 thumbnail_callback, thumbnail);
-            if (error != PNG_OK) {
+            /* The decoder owns the buffer unless it was busy. */
+            if (error == PNG_ERR_BUSY) {
                 free(data);
             }
         } else {
