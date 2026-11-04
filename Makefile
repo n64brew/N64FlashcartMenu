@@ -230,7 +230,9 @@ all: $(OUTPUT_DIR)/$(PROJECT_NAME).n64 64drive ed64 ed64-clone sc64 ed64-pro dai
 
 clean:
 	@rm -f ./$(FILESYSTEM)
-	@find ./$(FILESYSTEM_DIR)/menu/ -type d -empty -delete
+	@if [ -d "./$(FILESYSTEM_DIR)/menu/" ]; then \
+		find ./$(FILESYSTEM_DIR)/menu/ -type d -empty -delete; \
+	fi
 	@rm -rf ./$(BUILD_DIR) ./$(OUTPUT_DIR)
 .PHONY: clean
 
