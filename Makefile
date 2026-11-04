@@ -39,6 +39,7 @@ SRCS = \
 	flashcart/daisydrive/daisydrive.c \
 	flashcart/flashcart_utils.c \
 	flashcart/ed64_pro/ed64_pro.c \
+	flashcart/ed64_pro/ed64_pro_ll.c \
 	flashcart/ed64/ed64_vseries.c \
 	flashcart/ed64/ed64_vseries_ll.c \
 	flashcart/ed64/ed64_xseries.c \
