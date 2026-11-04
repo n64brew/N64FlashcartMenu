@@ -661,7 +661,7 @@ static void test_probe_identity (void) {
         TEST_CHECK(result.outcome == (matches ? ED64_PRO_PROBE_IDENTIFIED : ED64_PRO_PROBE_ABSENT));
         TEST_CHECK(result.id_valid && result.id == ids[i] && result.error == ED64_PRO_LL_OK);
         TEST_CHECK(mock.bus_count == 1 && mock.bus[0].address == 0x1F800014u && mock.bus[0].length == 4);
-        TEST_CHECK(mock.cart_writes == 0 && !ed64_pro_detected());
+        TEST_CHECK(mock.cart_writes == 0);
         TEST_CHECK(ed64_pro_probe().outcome == result.outcome && mock.bus_count == 1);
         if (!matches) {
             ed64_pro_ll_transaction_t transaction;
@@ -692,7 +692,7 @@ static void test_probe_failures (void) {
         mock_pi_status = i == 2 ? PI_STATUS_ERROR : 0;
         ed64_pro_probe_t result = ed64_pro_probe();
         TEST_CHECK(result.outcome == ED64_PRO_PROBE_IO_ERROR && result.error == errors[i] && !result.id_valid);
-        TEST_CHECK(mock.cart_writes == 0 && !ed64_pro_detected());
+        TEST_CHECK(mock.cart_writes == 0);
         unsigned enqueues = mock.enqueues;
         size_t events = mock.event_count;
         TEST_CHECK(ed64_pro_probe().error == errors[i]);
@@ -1072,7 +1072,7 @@ static void test_init_transcript (void) {
     }
     TEST_CHECK(diagnostics->attempt_ticks < TICKS_FROM_MS(15000));
     TEST_CHECK(strstr(ed64_pro_get_error_message(), "not implemented") != NULL);
-    TEST_CHECK(!ed64_pro_detected() && mock.irq_depth == 0 && pro_ll.owner == NULL);
+    TEST_CHECK(mock.irq_depth == 0 && pro_ll.owner == NULL);
 
     ed64_pro_diagnostics_t before = *diagnostics;
     size_t bus_count = mock.bus_count;
@@ -1096,7 +1096,6 @@ static void test_init_failure_boundaries (void) {
         TEST_CHECK(diagnostics->probe.id_valid == (i != 0));
         TEST_CHECK(diagnostics->inherited_status_valid == (i >= 9));
         TEST_CHECK(mock.bus_count == i + 1 && mock.irq_depth == 0 && pro_ll.owner == NULL);
-        TEST_CHECK(!ed64_pro_detected());
         if (i == 0) {
             TEST_CHECK(mock.cart_writes == 0);
             TEST_CHECK(strstr(ed64_pro_get_error_message(), "identity unknown") != NULL);
@@ -1274,7 +1273,7 @@ static void test_init_absent_and_context (void) {
     TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_NOT_IDENTIFIED);
     TEST_CHECK(ed64_pro_get_diagnostics()->state == ED64_PRO_ABSENT && mock.enqueues == 1);
     TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_NOT_IDENTIFIED && mock.enqueues == 1);
-    TEST_CHECK(mock.cart_writes == 0 && !ed64_pro_detected());
+    TEST_CHECK(mock.cart_writes == 0);
 }
 
 static void test_init_serialization (void) {

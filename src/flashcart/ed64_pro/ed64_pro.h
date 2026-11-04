@@ -7,7 +7,6 @@
 #ifndef FLASHCART_ED64_PRO_H__
 #define FLASHCART_ED64_PRO_H__
 
-#include "../flashcart.h"
 #include "ed64_pro_ll.h"
 
 typedef enum {
@@ -52,15 +51,12 @@ typedef struct {
  * @{
  */
 
-bool ed64_pro_init_sdfs (const char *storage_prefix, int max_files);
-bool ed64_pro_detected ();
 ed64_pro_probe_t ed64_pro_probe (void);
 /* READY is transport/MCU readiness only, never a mounted or usable backend. */
 ed64_pro_ll_error_t ed64_pro_init_transport (void);
 const ed64_pro_diagnostics_t *ed64_pro_get_diagnostics (void);
 const char *ed64_pro_phase_name (ed64_pro_phase_t phase);
 char *ed64_pro_get_error_message (void);
-flashcart_t *ed64_pro_get_flashcart (void);
 
 /** @} */ /* ed64_pro */
 

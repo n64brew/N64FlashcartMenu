@@ -138,6 +138,7 @@ char *flashcart_convert_error_message (flashcart_err_t err) {
         case FLASHCART_ERR_LOAD: return "Error during loading data into flashcart";
         case FLASHCART_ERR_INT: return "Internal flashcart error";
         case FLASHCART_ERR_FUNCTION_NOT_SUPPORTED: return "Flashcart doesn't support this function";
+        case FLASHCART_ERR_ED64_PRO: return ed64_pro_get_error_message();
         default: return "Unknown flashcart error";
     }
 }
@@ -159,6 +160,16 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         }
         return FLASHCART_OK;
     }
+
+    ed64_pro_probe_t pro = ed64_pro_probe();
+    if (pro.outcome != ED64_PRO_PROBE_ABSENT) {
+        *storage_prefix = NULL;
+        if (pro.outcome == ED64_PRO_PROBE_IDENTIFIED) {
+            /* Even READY is not an implemented storage backend. Diagnostics retain failures. */
+            (void)ed64_pro_init_transport();
+        }
+        return FLASHCART_ERR_ED64_PRO;
+    }
     
     if (daisydrive_detected()) {
         *storage_prefix = "sd:/";
@@ -169,16 +180,6 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         }
         return FLASHCART_OK;
     }
-    else if (ed64_pro_detected()) {
-        *storage_prefix = "sd:/";
-        ed64_pro_init_sdfs(*storage_prefix, -1);
-        flashcart = ed64_pro_get_flashcart();
-        if ((err = flashcart->init()) != FLASHCART_OK) {
-            return err;
-        }
-        return FLASHCART_OK;
-    }
-
     *storage_prefix = "sd:/";
     bool sd_card_initialized = debug_init_sdfs(*storage_prefix, -1);
 

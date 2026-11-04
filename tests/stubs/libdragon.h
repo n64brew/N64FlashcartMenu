@@ -43,4 +43,10 @@ void data_cache_hit_writeback_invalidate (volatile void *ram, unsigned long leng
 void data_cache_hit_writeback (const volatile void *ram, unsigned long length);
 void data_cache_hit_invalidate (volatile void *ram, unsigned long length);
 
+bool sys_bbplayer (void);
+int bbfs_init (void);
+bool debug_init_sdfs (const char *prefix, int npart);
+bool debug_init_isviewer (void);
+bool debug_init_usblog (void);
+
 #endif

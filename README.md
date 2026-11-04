@@ -25,7 +25,7 @@ The current state of support is:
 ### Help wanted (Work in Progress)
 * EverDrive-64 (X and V series)
 * DaisyDrive
-* EverDrive-64 Pro series
+* EverDrive-64 Pro: detection/transport and MCU SD-readiness check only; no usable storage backend
 * ED64P (clones)
 
 ### Not yet planned
@@ -77,6 +77,14 @@ Download the latest `sc64menu.n64` file from the [releases](https://github.com/P
 * Ensure the cart has the latest [firmware](https://64drive.retroactive.be/support.php) installed.
 * Download the latest `menu.bin` file from the [releases](https://github.com/Polprzewodnikowy/N64FlashcartMenu/releases/) page, then put it in the root directory of your SD card.
 
+### EverDrive-64 Pro
+The menu identifies the Pro and checks its transport/MCU SD readiness, then
+intentionally stops at a built-in-font error screen. It does not mount storage,
+enter the browser, load ROMs, or handle saves/USB. Power-cycle to return to stock
+firmware; transport failures are not retried. Test only as an ordinary ROM from
+stock firmware, not as a replacement OS. See [Pro limitations](docs/98_flashcart_wip.md#everdrive-64-pro-detectiontransport-only)
+and the [qualification record](docs/91_test_plan_matrix.md#everdrive-64-pro-transport-qualification).
+
 
 # Contributors
 The features in this project were made possible by the [contributors](https://github.com/Polprzewodnikowy/N64FlashcartMenu/graphs/contributors).
@@ -95,6 +103,7 @@ Other license options may be available upon request with permissions of the orig
 * [dr_mp3](https://github.com/mackron/dr_libs) - [Public domain or MIT-0](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 * [dr_flac](https://github.com/mackron/dr_libs) - [MIT License](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 * [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
+* [Krikzz EverDrive-64 Pro API](https://github.com/krikzz/ed64-pro-pub/tree/43014e290f85140d4c5ca84fbf5ae48ac755a23d) - selected protocol routines adapted under [MIT](src/flashcart/ed64_pro/LICENSE.krikzz)
 
 
 ## Sounds

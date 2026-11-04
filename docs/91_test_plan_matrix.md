@@ -128,14 +128,17 @@ This matrix verifies that the menu displays correctly at boot and when launching
 - [ ] Extended features with Expansion Pak (8MB)
 - [ ] Metadata
 
-## EverDrive-64 Pro transport qualification (inert foundation)
+## EverDrive-64 Pro transport qualification
 
 The Pro implementation is **detection/transport only, not a storage backend**.
-The production selector still uses the false-returning legacy detector, so the
-normal menu does not execute the new probe or transport. Do not enable that
-route until the pre-integration hardware gate below has recorded passing
-results. The eventual Pro-only terminal startup screen and facade integration
-are deliberately gated, not implemented as an unqualified browser/backend.
+The pre-integration gate passed on the recorded Pro/X7 configurations below.
+The production selector now probes after the iQue bypass and before other
+cartridge/filesystem initialization. Every recognized-Pro or indeterminate
+probe result clears the storage prefix and returns a non-OK Pro category,
+without selecting a backend or falling back. The actual menu handles it
+immediately with a non-returning, built-in-font terminal screen, before
+filesystem/assets, controller setup, normal USB polling, or menu cleanup.
+Other cartridge families and memory/firmware configurations remain unqualified.
 
 The new [driver](../src/flashcart/ed64_pro/ed64_pro.c) performs a passive EDID
 read, bounded initial RX cleanup, a framed inherited-status request, mailbox
@@ -213,6 +216,15 @@ docker exec --workdir /work n64-libdragon-prebuilt \
 
 docker exec --workdir /work n64-libdragon-prebuilt make ed64-pro
 cmp output/N64FlashcartMenu.n64 output/menu.n64
+
+# Instrument the actual menu, not a duplicate startup implementation.
+docker exec --workdir /work n64-libdragon-prebuilt \
+  make -f tests/Makefile.startup -j2
+
+docker exec --workdir /work n64-libdragon-prebuilt \
+  make -f tests/Makefile.startup -j2 \
+  BUILD_DIR=build/ed64-pro-startup-timeout OUTPUT_DIR=output/ed64-pro-startup-timeout \
+  FLAGS="-DFEATURE_AUTOLOAD_ROM_ENABLED -DED64_PRO_TEST_FORCE_TIMEOUT"
 ```
 
 Reconfirm the existing container, `/work` mount, `N64_INST=/n64_toolchain`, and
@@ -237,12 +249,34 @@ failure at all 27 DMA boundaries of the golden initialization transcript.
 The SDK stub intentionally exposes no blocking/fixup DMA or CPU-PI API.
 Host models do not establish physical bus or R4300 cache/interrupt behavior.
 
+The [lifecycle suite](../tests/ed64_pro_lifecycle_test.c) compiles the real
+flashcart facade against spies in debug and release modes. It checks every
+recognized-Pro outcome and indeterminate probe failure for a non-OK result,
+cleared prefix, unchanged backend pointer, and zero legacy selection,
+filesystem, USB initialization, or callback calls. It also checks iQue,
+libcart families, ROM fallback, DaisyDrive dispatch, non-Pro SD/init errors,
+mandatory/optional callbacks, and stable public error values. Legacy facade
+warnings are scoped out only around its inclusion in the host test; production
+code and default build flags are not weakened.
+
+[Makefile.startup](../tests/Makefile.startup) builds the actual menu with
+[link-time guards](../tests/ed64_pro_startup_guard.c). Only the menu, facade,
+low-level transport, and guard translation units disable LTO, preserving the
+external boundaries to wrap. Other sources retain their normal flags. The
+wrapper arms after a Pro startup result; further PI DMA/CPU I/O, filesystem
+initialization/file access, debug/USB initialization/traffic, or controller
+setup displays `STARTUP GUARD FAILED` instead of performing that operation.
+The normal terminal renderer is unchanged. Check the ELF call sites to
+confirm wrapping, then observe both the healthy and timeout-injected variants
+on hardware; a successful build alone is not a hardware result.
+
 ### Hardware procedure (approval and physical operator required)
 
 1. Obtain explicit approval for a non-destructive SD copy and ordinary-ROM
    launch from stock firmware. Do not overwrite the stock OS/menu, update
-   MCU/FPGA firmware, or use the SC64 deployment script on a Pro. Power off
-   before host-side SD changes.
+   MCU/FPGA firmware, or use the SC64 deployment script on a Pro. MCU-managed
+   edlink copies are permitted with the stock menu idle; power off before
+   removing SD cards or swapping cartridges/capture connections.
 2. Record the on-screen build ID (including any `-dirty` suffix), actual EDID,
    cart revision, stock firmware, SD make/format, console region, memory size,
    and cold/warm-launch history. Stock firmware `26.1014` returning inherited
@@ -270,30 +304,80 @@ Host models do not establish physical bus or R4300 cache/interrupt behavior.
 
 ### Qualification record
 
-Software record on 2026-11-04; hardware coverage is not implied by these tests.
+Software and hardware record on 2026-11-04. Hardware results below are observed
+from user-supplied HDMI screenshots, not inferred from upload-tool exit codes.
 
 | Gate / case | Result |
 |---|---|
-| 39 host cases, normal and AddressSanitizer/UndefinedBehaviorSanitizer | PASS on macOS/Apple Clang and container Linux/GCC; includes all listed parameterized cases |
-| Targeted N64 debug menu build | PASS with the inspected installed SDK; production Pro selection remains inactive |
+| 39 transport + 10 facade cases, normal and AddressSanitizer/UndefinedBehaviorSanitizer | PASS on macOS/Apple Clang and container Linux/GCC; facade runs in both debug and release modes, including all listed parameterized cases |
+| Targeted N64 debug menu build | PASS with the inspected installed SDK, including terminal startup integration |
 | Hardware test ROM and timeout-injection ROM builds | PASS; separate output/object directories, production driver linked, no asset filesystem |
 | N64 ELF buffer ownership | PASS: 512-byte staging aligned to 512, metadata outside its lines, two 16-byte aligned shared caller-line fixtures |
 | Separate release menu and byte-identical Pro packaging | PASS; `cmp` confirms the Pro copy is byte-identical |
-| Passive reads and normal boot: 64drive, ED64 V/X, SC64, other/unknown carts | NOT RUN; each unavailable family remains unqualified |
-| Pro identity variants, stock handoff, repeated healthy launches, FIFO-count assumptions | NOT RUN |
-| Real 100,000-operation cache/IRQ stress with actual DMA overlap | NOT RUN |
-| Runtime timing margins across firmware / SD combinations | NOT RUN |
+| Passive reads and normal boot: 64drive, ED64 V/X, SC64, other/unknown carts | X7 passive non-Pro read and terminal display PASS on original N64; original stock menu observed after power cycling. Other families and normal-menu regression remain unqualified |
+| Pro identity variants, stock handoff, repeated healthy launches, FIFO-count assumptions | PASS on one Pro/stock 26.1014: A3D, original N64 cold + healthy warm relaunch; EDID `ED640027`, inherited `5A 07 27 B0`, drains 0 + 0, RX peak 4. Other ID/firmware/SD variants and full FIFO capacity unqualified |
+| Real 100,000-operation cache/IRQ stress with actual DMA overlap | PASS on A3D and native R4300 cold/warm runs: 100,000 operations each, nonzero overlap, zero canary errors |
+| Runtime timing margins across firmware / SD combinations | All three recorded Pro runs below limits; no cross-configuration timing guarantee or bound changes |
 | Physical SD-readiness failure | NOT RUN; safe boot arrangement required |
 | RAM-only error rendering after injected timeout, 4 MiB and 8 MiB | NOT RUN |
 | Physical PI failure | NOT RUN; software injection is not physical-failure evidence |
-| Actual menu terminal screen, USB/control exclusion, facade callback spies | DEFERRED to the hardware-gated integration stage |
+| Actual menu terminal screen and USB/control exclusion | Integration built; hardware validation pending |
+| Actual facade callback/filesystem/USB spies | PASS in debug/release and sanitizer variants |
+| Guarded actual-menu startup and timeout variants | Both builds PASS; ELF confirms real-menu call to the arming wrapper and guarded PI call sites. Hardware validation pending |
+
+#### Observed hardware runs
+
+| Property | Original N64 / X7 | Analogue 3D / Pro |
+|---|---|---|
+| Screenshot received | 2026-11-04 09:01 CST | 2026-11-04 09:05 CST |
+| Build ID | `e88a74af` | `e88a74af` |
+| Console / memory | Original NTSC N64, Expansion Pak (8 MiB), UltraHDMI HW2 | Analogue 3D v1.5.1, NTSC, 8 MiB |
+| Cartridge firmware | Latest stock per operator; exact version not recorded | Stock 26.1014 (edlink query), bootloader 26.0613 |
+| EDID | `00140014` (non-Pro) | `ED640027` |
+| Inherited status | Not requested | `5A 07 27 B0` |
+| FIFO drains / RX peak | 0 + 0 / 0 | 0 + 0 / 4 |
+| Stop / SD / whole attempt | Not executed | 2 / 22 / 25 ms |
+| Maximum PI time | 43 us | 104 us |
+| Stress operations | Not executed | 100,000 / 100,000 |
+| Timer IRQs / IRQ-DMA overlaps | Not executed | 231,719 / 35 |
+| Canary errors | Not applicable | 0 |
+| Maximum status / register time | Not applicable | 275 / 128 us |
+| Result | Expected passive non-Pro result | Stress PASS for this launch only |
+
+| Property | Original N64 / Pro cold launch | Original N64 / Pro healthy warm relaunch |
+|---|---|---|
+| Screenshot received | 2026-11-04 09:09 CST | 2026-11-04 09:12 CST |
+| Build / console | `e88a74af`, original NTSC N64, Expansion Pak (8 MiB), UltraHDMI HW2 | Same, returned to stock menu using RESET without power cycling |
+| Firmware / EDID | Stock 26.1014 / `ED640027` | Same |
+| Inherited status | `5A 07 27 B0` | `5A 07 27 B0` |
+| FIFO drains / RX peak | 0 + 0 / 4 | 0 + 0 / 4 |
+| Stop / SD / whole attempt | 2 / 21 / 24 ms | 2 / 21 / 24 ms |
+| Maximum PI time | 104 us | 106 us |
+| Stress operations | 100,000 / 100,000 | 100,000 / 100,000 |
+| Timer IRQs / IRQ-DMA overlaps | 223,695 / 153 | 223,732 / 148 |
+| Canary errors | 0 | 0 |
+| Maximum status / register time | 253 / 117 us | 254 / 136 us |
+| Result | Native R4300 stress PASS | Healthy warm-handoff + native R4300 stress PASS |
+
+Both Pro test ROMs were copied to uniquely named ordinary-ROM SD paths and
+read back byte-identically before launching; stock OS, firmware, and saves
+were not replaced. An initial edlink launch reported `mcmd: no response from
+menu` despite a zero process exit code. After the operator power-cycled the
+Analogue 3D to its stock menu, the next launch succeeded and produced the
+recorded screenshot. Do not equate edlink's process status with command success.
+The X7 was RAM-loaded with `echo | UNFLoader -b -f 3 -r <test-ROM>`; the display
+confirms execution despite UNFLoader returning exit code 1 after reporting a
+successful upload. No debug listener or USB command traffic was run during the
+Pro stress test.
 
 The release build reports the existing unused `start_us` variable warning in
 [grid.c](../src/menu/views/grid.c); that unrelated code was not changed.
 
-**Pre-integration hardware gate: BLOCKED / unqualified.** Keep startup probing
-inactive until the passive non-Pro reads, healthy Pro handoff/repeated starts,
-FIFO assumptions, and real cache/IRQ stress have recorded results. Then add
-the Pro facade error, immediate PI-independent menu terminal branch, facade
-spy tests, and support documentation, and run the actual-menu/non-Pro checks.
-Passing software tests alone does not complete the hardware-dependent milestone.
+**Pre-integration hardware gate: PASS for the recorded configurations.**
+The available X7 passive-read check, Pro handoff/repeated healthy launches,
+observed FIFO counts, and real native cache/IRQ stress have recorded results.
+This permits terminal startup integration, not a claim of general Pro storage
+support. Jumper Pak/4 MiB operation, other supported cart families/regions,
+physical SD/PI failures, and the actual-menu post-integration checks remain
+unqualified until explicitly recorded. Passing software tests alone does not
+complete the hardware-dependent milestone.
