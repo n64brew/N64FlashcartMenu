@@ -202,7 +202,6 @@ void ui_components_boxart_free(component_boxart_t *b) {
         if (b->loading) {
             jpeg_decoder_abort();
             png_decoder_abort();
-            jpeg_decoder_abort();
         }
         if (b->image) {
             rspq_wait();
