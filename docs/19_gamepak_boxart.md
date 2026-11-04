@@ -108,3 +108,31 @@ A short description with a length of 120 characters.
 ; 120 chars.
 short-desc=Shoot your way to the heaven, fighting against birds and aliens
 ```
+
+#### Embedded box/cart art and screenshots
+If the `.meta` file (or the metadata appended to a homebrew ROM) is itself a `ZIP` archive containing a `metadata.ini` plus image files, the menu can show box art, cart art, and screenshots straight from that archive instead of requiring separate files under `sd:/menu/metadata/`.
+
+> [!WARNING]
+> Only `PNG` and `JPEG` images are supported. Embedded image formats are detected from their content, not their filename extension.
+
+```ini
+[boxart]
+; Filenames (within the same ZIP) for the spec-defined boxart faces.
+front=boxart_front.png
+back=boxart_back.png
+top=boxart_top.png
+bottom=boxart_bottom.png
+left=boxart_left.png
+right=boxart_right.png
+
+[cartart]
+; Filenames (within the same ZIP) for the spec-defined cart art faces.
+front=cartart_front.png
+back=cartart_back.png
+
+[meta]
+; Comma-separated list of screenshot filenames (within the same ZIP).
+screenshots=screenshot1.png,screenshot2.png
+```
+
+On the ROM load screen, these embedded images take priority over any files found under `sd:/menu/metadata/` and can be cycled through the same way, using the **D-pad left**/**C-pad left** and **D-pad right**/**C-pad right** buttons.
