@@ -56,8 +56,6 @@ The selected protocol subset is adapted from
 Its complete copyright 2026 krikzz MIT notice and adaptation provenance are in
 [LICENSE.krikzz](../src/flashcart/ed64_pro/LICENSE.krikzz); this project remains
 AGPL. No upstream filesystem/launch/bulk ACK implementation is imported.
-Sleekmenu64's cache-line diagnosis informed exclusive staging ownership;
-its adapter/test implementation was not copied.
 
 Filesystem/file APIs, browsing/loading/saves, cartridge-memory bulk transfers,
 launch/device start, feature/firmware reporting, RTC/64DD/USB, recovery/reset,

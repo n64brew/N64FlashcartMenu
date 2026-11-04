@@ -165,13 +165,10 @@ the attempt (in particular, call `timer_init` beforehand if it is needed).
 | N64FlashcartMenu baseline | `30113a9afab309fefa5384480e2176a1c796331e` |
 | Actual libdragon SDK | `39d0d6096130836a65710da6730290701d060272`; raw DMA tickets, queue-idle check, cache APIs |
 | [Official Krikzz API](https://github.com/krikzz/ed64-pro-pub/tree/43014e290f85140d4c5ca84fbf5ae48ac755a23d) | `43014e290f85140d4c5ca84fbf5ae48ac755a23d`; selected register/framing/stop/SD routines only |
-| Sleekmenu64 reference | `1229b87f011626e8c3ed96b4d6acd219da9d7470`; cache-line ownership diagnosis and historical stock-handoff observation |
-| Sleekmenu64 vendored API | `5d7e96905331a841f97f8c51e0b0cba878e72fe3`; older reference, not the selected upstream revision |
 
 Krikzz's complete MIT notice and adaptation provenance are retained in
 [LICENSE.krikzz](../src/flashcart/ed64_pro/LICENSE.krikzz). The combined project
-retains its existing AGPL license. No Sleekmenu64 implementation or tests were
-copied; its ownership diagnosis informed the private-buffer design.
+retains its existing AGPL license.
 
 | Operation | Runtime failure limit |
 |---|---|
@@ -284,8 +281,7 @@ on hardware; a successful build alone is not a hardware result.
    removing SD cards or swapping cartridges/capture connections.
 2. Record the on-screen build ID (including any `-dirty` suffix), actual EDID,
    cart revision, stock firmware, SD make/format, console region, memory size,
-   and cold/warm-launch history. Stock firmware `26.1014` returning inherited
-   `0xB0` is a historical Sleekmenu64 observation, not a new qualification result.
+   and cold/warm-launch history.
 3. Launch the normal test ROM on available non-Pro carts. Require exactly the
    passive read and an explicit non-Pro result; then confirm their usual menu
    and SD startup remain healthy after power cycling. iQue is bypassed.
