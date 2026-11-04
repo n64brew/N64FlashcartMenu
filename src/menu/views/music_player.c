@@ -319,7 +319,8 @@ static bool try_cover_path (const char *path, int max_size) {
                                               cover_art_png_cb, NULL);
         if (err != PNG_OK) {
             cover_state = COVER_IDLE;
-            free(buf);
+            // png_decoder_start_mem takes ownership of buf except on PNG_ERR_BUSY.
+            if (err == PNG_ERR_BUSY) free(buf);
             return false;
         }
     }
@@ -506,17 +507,25 @@ static void load_cover_art (path_t *directory) {
             bool started = false;
             if (meta->cover_art_is_png) {
                 cover_state = COVER_LOADING_PNG;
-                started = (png_decoder_start_mem(buf, buf_size, max_size, max_size,
-                                                 cover_art_png_cb, NULL) == PNG_OK);
+                png_err_t err = png_decoder_start_mem(buf, buf_size, max_size, max_size,
+                                                      cover_art_png_cb, NULL);
+                started = (err == PNG_OK);
+                if (!started) {
+                    cover_state = COVER_IDLE;
+                    // png_decoder_start_mem takes ownership of buf except on PNG_ERR_BUSY.
+                    if (err == PNG_ERR_BUSY) free(buf);
+                }
             } else {
                 cover_state = COVER_LOADING_JPEG;
-                started = (jpeg_decoder_start_mem(buf, buf_size, max_size, max_size,
-                                                  cover_art_cb, NULL) == JPEG_OK);
+                jpeg_err_t err = jpeg_decoder_start_mem(buf, buf_size, max_size, max_size,
+                                                       cover_art_cb, NULL);
+                started = (err == JPEG_OK);
+                if (!started) {
+                    cover_state = COVER_IDLE;
+                }
             }
 
             if (started) return;
-            cover_state = COVER_IDLE;
-            if (meta->cover_art_is_png) free(buf);
         }
     }
 
