@@ -1,42 +1,32 @@
-# Release Notes
+# This project is developed and maintained in free time. Please consider sponsoring it.
 
-- For the SummerCart64, use the `sc64menu.n64` file in the root of your SD card.
-- For the 64Drive, use the `menu.bin` file in the root of your SD card.
-- For the ares emulator, use the `N64FlashcartMenu.n64` file.
+# Release Notes
+Files are made available:
+- **For the SummerCart64**, download and use the `sc64menu.n64` file in the root of your SD card.
+- **For the 64Drive**, download and use the `menu.bin` file in the root of your SD card.
+- **For compatible Emulators**, download and use the `N64FlashcartMenu.n64` file.
 
 ## Release Notes 202x-vNext
 
 - **New Features**
 	- ~~Browser now allows hiding files and folders with hidden attributes set (thanks [Xeroxxx](https://github.com/Xeroxxx)).~~ Awaiting performance enhancement.
-	- JPEG image decoding.
 	- Added Custom background music support.
 	- File browser filetype images.
-	- Menu now dogfoods embedded metadata.
-	- Menu now shows embedded metadata box/game/screenshot images in the boxart view.
 	- Menu colour themes.
 
-
 - **Bug Fixes**
-	- Some users have reported crashes in Zelda OOT (anti-piracy checks), The boot function now resets the VI (mainly H-Sync) registers to fix the issue.
-	- Certain Aleck64 conversions failed to boot.
-	- `DE` cheat codes no longer consume the next cheat line like other conditional opcodes (`D0`, `D1`, `D2`, `D3`).
-  	- `DE` opcodes are still ignored by the cheat engine, but they don't prevent the next line from executing anymore.
-  	- E.g., `DE000400 0000` followed by `EE000000 0000` (for 1080° Snowboarding) would previously skip the `EE` line, causing the game to freeze at startup.
+	- None.
 
 - **Documentation**
 	- Improve documents with new features.
 
 - **Refactor**
 	- Settings is now a tab.
-	- Expansion Pak requirements now aligns with homebrew spec.
-	- Generation of DFS has been reorganised to use folders rather than a flat filesystem.
 
 - **Other**
 	- Change the default BGM to a different (more subtle) tune. The original is still included in the ROM image.
-	- Menu will now show an error if it detects a low voltage on startup.
 	- Fast Reboot support has been disabled in favour of ROM autoload due to too many issues being reported.
 	- Added ED64 OS3.06 firmware files.
-	- Deprecated functions have been removed.
 
 ### Breaking changes
 - None.
@@ -46,6 +36,141 @@
 
 ### Current known Issues
 - Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- PixelFX HDMI mods may need to be updated to latest FW to support display.
+- Setting Background Images (for consoles with a Jumper Pak) is more restrictive due to other features taking priority.
+
+### Deprecation notices
+- None.
+
+## Release Notes 2026-11-01 - Tagged 0.3.7
+
+- **New Features**
+	- Improve homebrew ROM detection text for "region free", and "Expansion Pak".
+	- Add JPEG decoding support.
+
+- **Bug Fixes**
+	- None
+
+- **Documentation**
+	- Updated for JPEG support.
+
+- **Refactor**
+	- None.
+
+- **Other**
+	- None.
+
+### Breaking changes
+- None.
+
+### Notes
+- dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
+
+### Current known Issues
+- Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- PixelFX HDMI mods may need to be updated to latest FW to support display.
+- Setting Background Images (for consoles with a Jumper Pak) is more restrictive due to other features taking priority.
+
+### Deprecation notices
+- None.
+
+
+## Release Notes 2026-10-30 - Tagged 0.3.6
+
+- **New Features**
+	- ~~Browser now allows hiding files and folders with hidden attributes set (thanks [Xeroxxx](https://github.com/Xeroxxx)).~~ Awaiting performance enhancement.
+	- Add low voltage warning on startup for flashcarts that support it.
+	- Add metadata for the menu ROM.
+	- Add embedded homebrew ROM metadata support.
+
+- **Bug Fixes**
+	- Fix Datel Code Types:
+		- `DE` cheat codes no longer consume the next cheat line like other conditional opcodes (`D0`, `D1`, `D2`, `D3`).
+  		- `DE` opcodes are still ignored by the cheat engine, but they don't prevent the next line from executing anymore.
+  		- E.g., `DE000400 0000` followed by `EE000000 0000` (for 1080° Snowboarding) would previously skip the `EE` line, causing the game to freeze at startup.
+	- Fix (opt-in flag) autoload feature failing to load paths correctly.
+	
+
+- **Documentation**
+	- None.
+
+- **Refactor**
+	- DFS: Each asset type is now contained within a subdirectory rather than a flat file system.
+	- Improve Expansion pak use wording to align with n64brew header support.
+
+- **Other**
+	- Removed deprecated boxart compatibility (it has been an opt-in build flag since V0.3.0)
+	- Update libdragon submodule to latest version.
+	- Update dr_libs submodule to latest version.
+	- Update libspng submodule to latest version.
+	- Update miniz submodule to latest version.
+
+### Breaking changes
+- None.
+
+### Notes
+- dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
+
+### Current known Issues
+- Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- PixelFX HDMI mods may need to be updated to latest FW to support display.
+
+### Deprecation notices
+- None.
+
+## Release Notes 2026-10-17 - Tagged 0.3.5
+
+- **New Features**
+	- None.
+
+- **Bug Fixes**
+	- Fix: Certain libdragon ROMs between August 2023 and April 2025 stopped working. Added VI->CR reset to boot.c
+	- Fix: Certain Aleck64 conversions not working. Added checksum match to boot.c
+
+- **Documentation**
+
+- **Refactor**
+
+- **Other**
+	- Updated the docbuilder Dockerfile.
+	- Updated license options wording for clarity.
+	- Updated PR template checklist items - Add a checkbox for AI helped. 
+
+### Breaking changes
+- None.
+
+### Notes
+- None.
+
+### Current known Issues
+- Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- PixelFX HDMI mods may need to be updated to latest FW to support display.
+
+### Deprecation notices
+- None.
+
+## Release Notes 2026-09-12 - Tagged 0.3.4
+
+- **New Features**
+	- None.
+
+- **Bug Fixes**
+	- Fix potential crashes in Zelda OOT, The boot function now resets the VI (mainly H-Sync) registers to fix the issue.
+
+- **Documentation**
+
+- **Refactor**
+
+- **Other**
+
+### Breaking changes
+- None.
+
+### Notes
+- None.
+
+### Current known Issues
+- Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu. This is expected until disk swapping is fully implemented.
 - PixelFX HDMI mods may need to be updated to latest FW to support display.
 
 ### Deprecation notices
