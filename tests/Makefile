@@ -5,6 +5,7 @@ PRO_TEST_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_transport_test_sanitize
 PRO_SOURCE := tests/ed64_pro_transport_test.c
 PRO_DEPS := $(PRO_SOURCE) tests/stubs/libdragon.h \
 	src/flashcart/ed64_pro/ed64_pro_ll.c src/flashcart/ed64_pro/ed64_pro_ll.h \
+	src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro.h src/flashcart/flashcart.h \
 	src/libs/acutest/acutest.h tests/Makefile
 HOST_FLAGS := -std=gnu11 -Wall -Wextra -Werror -g -Itests/stubs -Isrc -isystem src/libs/acutest
 SANITIZE_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer

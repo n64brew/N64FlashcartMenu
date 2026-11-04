@@ -8,22 +8,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <fatfs/ff.h>
 #include <libdragon.h>
 
-#include "utils/fs.h"
-#include "utils/utils.h"
-
-#include "../flashcart_utils.h"
 #include "ed64_pro.h"
 
-bool ed64_pro_detected() {
-    // TODO: Implementation for detecting ed64_pro
+ed64_pro_probe_t ed64_pro_probe (void) {
+    return ed64_pro_ll_probe(TICKS_READ() + TICKS_FROM_MS(ED64_PRO_ATTEMPT_TIMEOUT_MS));
+}
+
+bool ed64_pro_detected () {
+    /* Production selection stays inactive until the hardware qualification gate. */
     return false;
 }
 
-bool ed64_pro_init_sdfs(const char *storage_prefix, int max_files) {
-    // TODO: Implementation for initializing sdfs on ed64_pro
+bool ed64_pro_init_sdfs (const char *storage_prefix, int max_files) {
+    (void)storage_prefix;
+    (void)max_files;
     return false;
 }
 
@@ -48,7 +48,7 @@ static flashcart_t flashcart_ed64_pro = {
 
 /**
  * @brief Get the flashcart structure for ed64_pro.
- * 
+ *
  * @return flashcart_t* Pointer to the flashcart structure.
  */
 flashcart_t *ed64_pro_get_flashcart (void) {

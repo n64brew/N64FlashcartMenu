@@ -18,9 +18,19 @@ static struct {
     ed64_pro_ll_failure_t failure;
     uint64_t ticket;
     size_t transferred;
+    uint32_t id;
+    bool probed;
+    bool identified;
 } pro_ll;
 
 _Static_assert(sizeof(pro_staging) == 512, "Pro staging must own complete cache lines");
+_Static_assert(sizeof(ed64_pro_status_t) == 4, "Pro status is exactly four protocol bytes");
+
+typedef enum {
+    PRO_CMD_STATUS = 0x10,
+    PRO_CMD_SD_INIT = 0x80,
+    PRO_CMD_STOP = 0x85,
+} pro_command_t;
 
 static bool pro_context_valid (void) {
     uint32_t sr = C0_STATUS();
@@ -43,6 +53,10 @@ static bool pro_pi_busy (void) {
 uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t timeout_ms) {
     uint32_t local = TICKS_READ() + TICKS_FROM_MS(timeout_ms);
     return (int32_t)(local - deadline) < 0 ? local : deadline;
+}
+
+static uint32_t pro_deadline (const ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
+    return (int32_t)(transaction->deadline - deadline) < 0 ? transaction->deadline : deadline;
 }
 
 static ed64_pro_ll_error_t pro_fail (ed64_pro_ll_error_t error) {
@@ -138,9 +152,10 @@ static ed64_pro_ll_error_t pro_transfer (
         return ED64_PRO_LL_ARGUMENT;
     }
 
-    if ((int32_t)(transaction->deadline - deadline) < 0) {
-        deadline = transaction->deadline;
+    if (!pro_ll.identified && (pro_ll.probed || write || reg != ED64_PRO_REG_EDID)) {
+        return ED64_PRO_LL_NOT_IDENTIFIED;
     }
+    deadline = pro_deadline(transaction, deadline);
     deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_PI_TIMEOUT_MS);
     if (pro_expired(deadline)) {
         return pro_fail(ED64_PRO_LL_PI_ACQUIRE_TIMEOUT);
@@ -221,6 +236,11 @@ ed64_pro_ll_read_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg
     }
     ed64_pro_ll_error_t error = pro_transfer(transaction, reg, sizeof(uint32_t), false, deadline);
     if (error == ED64_PRO_LL_OK) {
+        if (reg == ED64_PRO_REG_EDID && !pro_ll.probed) {
+            pro_ll.id = pro_staging[0];
+            pro_ll.probed = true;
+            pro_ll.identified = (pro_ll.id & 0xFFFF00FFu) == 0xED640027u;
+        }
         memcpy(value, pro_staging, sizeof(*value));
     }
     return error;
@@ -237,4 +257,188 @@ ed64_pro_ll_write_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t re
     }
     pro_staging[0] = value;
     return pro_transfer(transaction, reg, sizeof(uint32_t), true, deadline);
+}
+
+ed64_pro_probe_t ed64_pro_ll_probe (uint32_t deadline) {
+    ed64_pro_ll_transaction_t transaction;
+    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+    if (error == ED64_PRO_LL_OK) {
+        if (!pro_ll.probed) {
+            uint32_t id;
+            error = ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &id, deadline);
+        }
+        ed64_pro_ll_error_t release_error = ed64_pro_ll_end(&transaction);
+        if (error == ED64_PRO_LL_OK) {
+            error = release_error;
+        }
+    }
+    return (ed64_pro_probe_t){
+        .outcome = error != ED64_PRO_LL_OK ? ED64_PRO_PROBE_IO_ERROR
+                   : pro_ll.identified     ? ED64_PRO_PROBE_IDENTIFIED
+                                           : ED64_PRO_PROBE_ABSENT,
+        .error = error,
+        .id = pro_ll.id,
+        .id_valid = pro_ll.probed,
+    };
+}
+
+static ed64_pro_ll_error_t
+pro_fifo_available (ed64_pro_ll_transaction_t *transaction, uint32_t *available, uint32_t deadline) {
+    uint32_t value;
+    ed64_pro_ll_error_t error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    value &= 0xFFFFu;
+    if (value > ED64_PRO_FIFO_LIMIT) {
+        return pro_fail(ED64_PRO_LL_FIFO_COUNT);
+    }
+    *available = value;
+    return ED64_PRO_LL_OK;
+}
+
+/* Zero length is a no-op. On failure, any already copied bytes are invalid. */
+static ed64_pro_ll_error_t
+pro_fifo_read (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size_t length, uint32_t deadline) {
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    if (length > ED64_PRO_FIFO_LIMIT || (length && !output)) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    deadline = pro_deadline(transaction, deadline);
+    pro_ll.transferred = 0;
+    while (pro_ll.transferred < length) {
+        if (pro_expired(deadline)) {
+            return pro_fail(ED64_PRO_LL_TIMEOUT);
+        }
+        uint32_t available;
+        error = pro_fifo_available(transaction, &available, deadline);
+        if (error != ED64_PRO_LL_OK) {
+            return error;
+        }
+        if (!available) {
+            continue;
+        }
+        size_t chunk = length - pro_ll.transferred;
+        if (chunk > available) {
+            chunk = available;
+        }
+        if (chunk > ED64_PRO_FIFO_CHUNK) {
+            chunk = ED64_PRO_FIFO_CHUNK;
+        }
+        error = pro_transfer(transaction, ED64_PRO_REG_FIFO, chunk * sizeof(uint32_t), false, deadline);
+        if (error != ED64_PRO_LL_OK) {
+            return error;
+        }
+        for (size_t i = 0; i < chunk; i++) {
+            output[pro_ll.transferred + i] = (uint8_t)pro_staging[i];
+        }
+        pro_ll.transferred += chunk;
+    }
+    return ED64_PRO_LL_OK;
+}
+
+ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, size_t *drained, uint32_t deadline) {
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    if (!drained) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_DRAIN_TIMEOUT_MS);
+    pro_ll.transferred = 0;
+    for (;;) {
+        if (pro_expired(deadline)) {
+            return pro_fail(ED64_PRO_LL_TIMEOUT);
+        }
+        uint32_t available;
+        error = pro_fifo_available(transaction, &available, deadline);
+        if (error != ED64_PRO_LL_OK) {
+            return error;
+        }
+        if (!available) {
+            *drained = pro_ll.transferred;
+            return ED64_PRO_LL_OK;
+        }
+        if (available > ED64_PRO_FIFO_LIMIT - pro_ll.transferred) {
+            return pro_fail(ED64_PRO_LL_DRAIN_LIMIT);
+        }
+        size_t chunk = available < ED64_PRO_FIFO_CHUNK ? available : ED64_PRO_FIFO_CHUNK;
+        error = pro_transfer(transaction, ED64_PRO_REG_FIFO, chunk * sizeof(uint32_t), false, deadline);
+        if (error != ED64_PRO_LL_OK) {
+            return error;
+        }
+        pro_ll.transferred += chunk;
+    }
+}
+
+static ed64_pro_ll_error_t
+pro_send_command (ed64_pro_ll_transaction_t *transaction, pro_command_t command, uint32_t deadline) {
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    if (command != PRO_CMD_STATUS && command != PRO_CMD_STOP && command != PRO_CMD_SD_INIT) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    if (!pro_ll.identified) {
+        return ED64_PRO_LL_NOT_IDENTIFIED;
+    }
+    pro_ll.transferred = 0;
+    pro_staging[0] = 0x2B;
+    pro_staging[1] = 0xD4;
+    pro_staging[2] = command;
+    pro_staging[3] = command ^ 0xFF;
+    pro_staging[4] = 0x10;
+    size_t length = command == PRO_CMD_STATUS ? 4 : 5;
+    return pro_transfer(transaction, ED64_PRO_REG_FIFO, length * sizeof(uint32_t), true, deadline);
+}
+
+ed64_pro_ll_error_t
+ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    if (!status) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    deadline = pro_deadline(transaction, deadline);
+    pro_ll.transferred = 0;
+    uint32_t available;
+    error = pro_fifo_available(transaction, &available, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    if (available) {
+        return pro_fail(ED64_PRO_LL_TRAILING_DATA);
+    }
+    error = pro_send_command(transaction, PRO_CMD_STATUS, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    uint8_t reply[4];
+    error = pro_fifo_read(transaction, reply, sizeof(reply), deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    if (reply[0] != 0x5A) {
+        return pro_fail(ED64_PRO_LL_FRAME);
+    }
+    error = pro_fifo_available(transaction, &available, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    if (available) {
+        return pro_fail(ED64_PRO_LL_TRAILING_DATA);
+    }
+    *status = (ed64_pro_status_t){
+        .key = reply[0],
+        .opaque = {reply[1], reply[2]},
+        .mcu_status = reply[3],
+    };
+    return ED64_PRO_LL_OK;
 }
