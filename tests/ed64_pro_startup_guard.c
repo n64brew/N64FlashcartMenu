@@ -8,6 +8,9 @@
 static bool terminal_only;
 
 static void guard_failed (const char *operation) __attribute__((noreturn));
+/**
+ * @brief Permanently report a forbidden startup call using the PI-independent built-in console.
+ */
 static void guard_failed (const char *operation) {
     console_init();
     console_set_debug(false);
@@ -22,6 +25,9 @@ static void guard_failed (const char *operation) {
     }
 }
 
+/**
+ * @brief Reject wrapped hardware/storage/debug/controller calls once a Pro result arms the guard.
+ */
 static void check_guard (const char *operation) {
     if (terminal_only) {
         guard_failed(operation);

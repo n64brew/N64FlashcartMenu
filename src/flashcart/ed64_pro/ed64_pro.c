@@ -20,6 +20,9 @@ static uint32_t pro_attempt_deadline;
 static uint32_t pro_phase_start;
 static char pro_error_message[256];
 
+/**
+ * @brief Record the completed non-probe phase time and start timing the next phase.
+ */
 static void pro_set_phase (ed64_pro_phase_t phase) {
     uint32_t now = TICKS_READ();
     if (pro_diagnostics.phase != ED64_PRO_PHASE_PROBE) {
@@ -29,6 +32,11 @@ static void pro_set_phase (ed64_pro_phase_t phase) {
     pro_phase_start = now;
 }
 
+/**
+ * @brief Latch the first startup failure with its phase, elapsed time, and DMA evidence.
+ *
+ * Later calls return the original failure without replacing its diagnostics.
+ */
 static ed64_pro_ll_error_t pro_init_fail (ed64_pro_ll_error_t error) {
     if (pro_diagnostics.failure.code == ED64_PRO_LL_OK) {
         uint32_t now = TICKS_READ();
@@ -43,6 +51,11 @@ static ed64_pro_ll_error_t pro_init_fail (ed64_pro_ll_error_t error) {
     return pro_diagnostics.failure.code;
 }
 
+/**
+ * @brief Probe once within the whole-attempt budget, distinguishing absence from I/O failure.
+ *
+ * Busy or unsupported-context results leave the startup state unchanged.
+ */
 ed64_pro_probe_t ed64_pro_probe (void) {
     uint32_t start = TICKS_READ();
     uint32_t deadline = pro_diagnostics.state == ED64_PRO_COLD ? start + TICKS_FROM_MS(ED64_PRO_ATTEMPT_TIMEOUT_MS)
@@ -67,6 +80,12 @@ ed64_pro_probe_t ed64_pro_probe (void) {
     return result;
 }
 
+/**
+ * @brief Perform the bounded MCU/SD handoff, reusing cached readiness or the first failure.
+ *
+ * Transport failures remain latched for this launch. READY never implies a
+ * mounted filesystem or a usable storage backend.
+ */
 ed64_pro_ll_error_t ed64_pro_init_transport (void) {
     ed64_pro_probe_t probe = ed64_pro_probe();
     if (probe.error != ED64_PRO_LL_OK) {
@@ -150,6 +169,9 @@ const ed64_pro_diagnostics_t *ed64_pro_get_diagnostics (void) {
     return &pro_diagnostics;
 }
 
+/**
+ * @brief Return static display text for an initialization phase, with an unknown fallback.
+ */
 const char *ed64_pro_phase_name (ed64_pro_phase_t phase) {
     switch (phase) {
     case ED64_PRO_PHASE_PROBE: return "Pro probe";
@@ -164,6 +186,9 @@ const char *ed64_pro_phase_name (ed64_pro_phase_t phase) {
     }
 }
 
+/**
+ * @brief Map a transport error to built-in display text, including unknown error values.
+ */
 static const char *pro_error_name (ed64_pro_ll_error_t error) {
     switch (error) {
     case ED64_PRO_LL_OK: return "No transport error";
@@ -185,6 +210,12 @@ static const char *pro_error_name (ed64_pro_ll_error_t error) {
     }
 }
 
+/**
+ * @brief Format the startup result without accessing the cartridge or filesystem.
+ *
+ * Failures report retained MCU status or confirmed RX progress; READY reports
+ * the missing storage backend. The shared output buffer is overwritten on each call.
+ */
 char *ed64_pro_get_error_message (void) {
     if (pro_diagnostics.state == ED64_PRO_READY) {
         snprintf(

@@ -44,8 +44,13 @@ static menu_t *menu;
 static bool interlaced = true;
 
 static void menu_pro_startup_error (flashcart_err_t error) __attribute__((noreturn));
+/**
+ * @brief Permanently display the Pro startup result without further PI or backend work.
+ *
+ * Built-in console/font rendering remains usable with a quarantined DMA.
+ * Do not initialize controls, filesystem assets, or USB logging on this path.
+ */
 static void menu_pro_startup_error (flashcart_err_t error) {
-    /* Built-in console/font rendering must remain usable with a quarantined PI DMA. */
     console_init();
     console_set_debug(false);
     console_set_render_mode(RENDER_MANUAL);

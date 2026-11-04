@@ -39,14 +39,21 @@ static volatile uint32_t irq_dma_overlap;
 static volatile uint32_t irq_canary_errors;
 static volatile uint32_t irq_sink;
 
+/**
+ * @brief Validate guard words around the ISR-shared register and status outputs.
+ */
 static bool canaries_ok (void) {
     return register_line.before == CANARY_BEFORE && register_line.after == CANARY_AFTER &&
            status_line.before == CANARY_BEFORE && status_line.after == CANARY_AFTER;
 }
 
+/**
+ * @brief Dirty caller cache lines and count PI/IRQ overlaps and canary corruption.
+ *
+ * This ISR never submits PI work, so it is not a competing DMA producer.
+ */
 static void stress_interrupt (int overflow) {
     (void)overflow;
-    /* Dirty the caller's lines during DMA, but never submit PI work from this ISR. */
     irq_sink ^= *(volatile uint32_t *)&register_line.value;
     volatile uint8_t *bytes = (volatile uint8_t *)&status_line.value;
     for (size_t i = 0; i < sizeof(status_line.value); i++) {
@@ -62,6 +69,9 @@ static void stress_interrupt (int overflow) {
     }
 }
 
+/**
+ * @brief Label the console video standard, falling back for unknown values.
+ */
 static const char *tv_name (void) {
     switch (get_tv_type()) {
     case TV_PAL: return "PAL";
@@ -77,6 +87,9 @@ static void screen_init (void) {
     console_set_render_mode(RENDER_MANUAL);
 }
 
+/**
+ * @brief Print build/console identity and only a successfully completed passive EDID read.
+ */
 static void print_identity (void) {
     const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
     printf("ED64 Pro transport qualification\nBuild: %s\n", ED64_PRO_TEST_BUILD_ID);
@@ -88,6 +101,9 @@ static void print_identity (void) {
     }
 }
 
+/**
+ * @brief Report valid inherited status, cleanup counts, and measured phase/PI timing.
+ */
 static void print_init_metrics (void) {
     const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
     const ed64_pro_ll_metrics_t *metrics = ed64_pro_ll_get_metrics();
@@ -118,6 +134,9 @@ static void print_init_metrics (void) {
 }
 
 static void terminal (void) __attribute__((noreturn));
+/**
+ * @brief Keep qualification results visible without activating storage, USB, or retries.
+ */
 static void terminal (void) {
     printf("\nNo storage backend, filesystem, or USB is active.\n");
     printf("After any failure: power cycle. Do not retry.\n");
@@ -126,6 +145,12 @@ static void terminal (void) {
     }
 }
 
+/**
+ * @brief Exercise 100,000 status/EDID operations under timer-driven cache-line contention.
+ *
+ * Stop on the first transport or integrity failure. A passing run requires
+ * observed IRQ/DMA overlap and ends on the terminal screen without storage access.
+ */
 static void run_stress (void) {
     const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
     register_line.before = status_line.before = CANARY_BEFORE;
@@ -213,6 +238,12 @@ static void run_stress (void) {
     terminal();
 }
 
+/**
+ * @brief Run Pro identification, MCU handoff, and read-only stress without mounting storage.
+ *
+ * Initialize the clock before deadlines, bypass iQue, and stop permanently on
+ * startup failure rather than retrying or selecting another cartridge backend.
+ */
 int main (void) {
     /* timer_init resets CP0 COUNT; it must precede the probe/attempt deadline. */
     timer_init();

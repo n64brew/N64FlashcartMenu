@@ -35,6 +35,9 @@ typedef enum {
     PRO_CMD_STOP = 0x85,
 } pro_command_t;
 
+/**
+ * @brief Allow transport only in an interrupt-enabled, non-kernel foreground context.
+ */
 static bool pro_context_valid (void) {
     uint32_t sr = C0_STATUS();
     return get_interrupts_state() == INTERRUPTS_ENABLED && (sr & C0_STATUS_IE) &&
@@ -53,15 +56,26 @@ static bool pro_pi_busy (void) {
 }
 #pragma GCC diagnostic pop
 
+/**
+ * @brief Cap an absolute deadline by a local timeout using wrap-safe signed comparison.
+ *
+ * Deadlines must remain within the signed half-range of the CP0 counter.
+ */
 uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t timeout_ms) {
     uint32_t local = TICKS_READ() + TICKS_FROM_MS(timeout_ms);
     return (int32_t)(local - deadline) < 0 ? local : deadline;
 }
 
+/**
+ * @brief Clamp a phase deadline to the owning transaction's whole-attempt deadline.
+ */
 static uint32_t pro_deadline (const ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     return (int32_t)(transaction->deadline - deadline) < 0 ? transaction->deadline : deadline;
 }
 
+/**
+ * @brief Finish timing an active PI operation and retain the largest observed duration.
+ */
 static void pro_measure_pi (void) {
     if (pro_ll.pi_active) {
         uint32_t elapsed = TICKS_READ() - pro_ll.pi_started;
@@ -72,6 +86,12 @@ static void pro_measure_pi (void) {
     }
 }
 
+/**
+ * @brief Latch the first transport fault with confirmed RX progress and DMA ownership.
+ *
+ * A retained ticket poisons the transport: its staging buffer must remain
+ * quarantined even if the outstanding DMA completes later.
+ */
 static ed64_pro_ll_error_t pro_fail (ed64_pro_ll_error_t error) {
     pro_measure_pi();
     if (pro_ll.failure.code == ED64_PRO_LL_OK) {
@@ -85,6 +105,9 @@ static ed64_pro_ll_error_t pro_fail (ed64_pro_ll_error_t error) {
     return pro_ll.failure.code;
 }
 
+/**
+ * @brief Reject invalid context or ownership before returning any latched transport fault.
+ */
 static ed64_pro_ll_error_t pro_owned (ed64_pro_ll_transaction_t *transaction) {
     if (!transaction) {
         return ED64_PRO_LL_ARGUMENT;
@@ -98,6 +121,12 @@ static ed64_pro_ll_error_t pro_owned (ed64_pro_ll_transaction_t *transaction) {
     return pro_ll.failure.code;
 }
 
+/**
+ * @brief Acquire exclusive foreground ownership without retrying a latched transport fault.
+ *
+ * The transaction's address is its token and must stay valid through end.
+ * Interrupts must already be enabled; ISR and kernel callers are unsupported.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     if (!transaction) {
         return ED64_PRO_LL_ARGUMENT;
@@ -119,6 +148,9 @@ ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, u
     return error;
 }
 
+/**
+ * @brief Release the owner token without clearing faults or cancelling an outstanding DMA.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
     if (!transaction) {
         return ED64_PRO_LL_ARGUMENT;
@@ -141,6 +173,9 @@ const ed64_pro_ll_metrics_t *ed64_pro_ll_get_metrics (void) {
     return &pro_ll.metrics;
 }
 
+/**
+ * @brief Whitelist selected register reads, excluding the side-effectful FIFO data port.
+ */
 static bool pro_readable_reg (ed64_pro_reg_t reg) {
     switch (reg) {
     case ED64_PRO_REG_FIFOSTAT:
@@ -153,6 +188,13 @@ static bool pro_readable_reg (ed64_pro_reg_t reg) {
     }
 }
 
+/**
+ * @brief Transfer an exact bus length through cache-owned staging within bounded deadlines.
+ *
+ * PI acquisition is rechecked under IRQ exclusion. Reads become visible only
+ * after confirmed completion; an issued DMA fault retains its ticket and buffer
+ * rather than resetting PI or pretending the transfer was cancelled.
+ */
 static ed64_pro_ll_error_t pro_transfer (
     ed64_pro_ll_transaction_t *transaction,
     ed64_pro_reg_t reg,
@@ -258,6 +300,11 @@ static ed64_pro_ll_error_t pro_transfer (
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Read one whitelisted register and publish its value only after successful DMA.
+ *
+ * The first completed EDID read caches the Pro family/device identification.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_read_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg, uint32_t *value, uint32_t deadline) {
     if (!value || !pro_readable_reg(reg)) {
@@ -275,6 +322,9 @@ ed64_pro_ll_read_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg
     return error;
 }
 
+/**
+ * @brief Permit only the mailbox zero/NOP write after ownership and Pro identification checks.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_write_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg, uint32_t value, uint32_t deadline) {
     ed64_pro_ll_error_t error = pro_owned(transaction);
@@ -288,6 +338,9 @@ ed64_pro_ll_write_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t re
     return pro_transfer(transaction, reg, sizeof(uint32_t), true, deadline);
 }
 
+/**
+ * @brief Cache one passive EDID read without ever classifying an I/O failure as absence.
+ */
 ed64_pro_probe_t ed64_pro_ll_probe (uint32_t deadline) {
     ed64_pro_ll_transaction_t transaction;
     ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
@@ -311,6 +364,9 @@ ed64_pro_probe_t ed64_pro_ll_probe (uint32_t deadline) {
     };
 }
 
+/**
+ * @brief Read the low-16-bit RX count, track its peak, and reject implausible FIFO capacity.
+ */
 static ed64_pro_ll_error_t
 pro_fifo_available (ed64_pro_ll_transaction_t *transaction, uint32_t *available, uint32_t deadline) {
     uint32_t value;
@@ -372,6 +428,12 @@ pro_fifo_read (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size_t l
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Discard handoff RX data within fixed cleanup time and byte limits.
+ *
+ * Intended only for initial and post-stop cleanup. Continuous refill cannot
+ * restart the deadline, and the output count is published only on success.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, size_t *drained, uint32_t deadline) {
     ed64_pro_ll_error_t error = pro_owned(transaction);
     if (error != ED64_PRO_LL_OK) {
@@ -407,6 +469,11 @@ ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, s
     }
 }
 
+/**
+ * @brief Encode one selected short command with one protocol byte per PI word.
+ *
+ * STATUS sends four words; STOP and SD_INIT append the execution byte 0x10.
+ */
 static ed64_pro_ll_error_t
 pro_send_command (ed64_pro_ll_transaction_t *transaction, pro_command_t command, uint32_t deadline) {
     ed64_pro_ll_error_t error = pro_owned(transaction);
@@ -429,6 +496,12 @@ pro_send_command (ed64_pro_ll_transaction_t *transaction, pro_command_t command,
     return pro_transfer(transaction, ED64_PRO_REG_FIFO, length * sizeof(uint32_t), true, deadline);
 }
 
+/**
+ * @brief Request one exact status frame without treating inherited MCU status as failure.
+ *
+ * Reject preexisting/trailing FIFO data and malformed keys. Publish output only
+ * after a complete four-byte reply within the original deadline.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
     ed64_pro_ll_error_t error = pro_owned(transaction);
@@ -475,6 +548,11 @@ ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Clear the mailbox, send STOP, and require two consecutive matching READY samples.
+ *
+ * All polls share the original capped stop/transaction deadline.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     ed64_pro_ll_error_t error = pro_owned(transaction);
     if (error != ED64_PRO_LL_OK) {
@@ -509,6 +587,9 @@ ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, ui
     }
 }
 
+/**
+ * @brief Require zero fresh MCU status, retaining the completed frame on MCU_ERROR.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
     ed64_pro_ll_error_t error = ed64_pro_ll_read_status(transaction, status, deadline);
@@ -518,6 +599,11 @@ ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_statu
     return error;
 }
 
+/**
+ * @brief Send SD_INIT and validate fresh status within one capped five-second budget.
+ *
+ * The complete status frame is also published when the MCU reports an error.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
     ed64_pro_ll_error_t error = pro_owned(transaction);

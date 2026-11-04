@@ -92,6 +92,9 @@ static void event (char value) {
     mock.events[mock.event_count] = '\0';
 }
 
+/**
+ * @brief Model CP0 interrupt enable from the nested mock IRQ-mask state.
+ */
 uint32_t mock_cp0_status (void) {
     return mock.irq_depth ? mock.cp0 & ~C0_STATUS_IE : mock.cp0;
 }
@@ -106,6 +109,9 @@ void mock_memory_barrier (void) {
     mock.barriers++;
 }
 
+/**
+ * @brief Enter IRQ exclusion and inject a queue arrival at the armed idle-to-lock race.
+ */
 void disable_interrupts (void) {
     if (mock.race_armed && mock.irq_depth == 0) {
         mock.race_armed = false;
@@ -119,6 +125,9 @@ void enable_interrupts (void) {
     mock.irq_depth--;
 }
 
+/**
+ * @brief Report uninitialized or nested IRQ state for foreground-context checks.
+ */
 interrupt_state_t get_interrupts_state (void) {
     if (mock.uninitialized) {
         return INTERRUPTS_UNINITIALIZED;
@@ -126,10 +135,16 @@ interrupt_state_t get_interrupts_state (void) {
     return mock.irq_depth ? INTERRUPTS_DISABLED : INTERRUPTS_ENABLED;
 }
 
+/**
+ * @brief Expose the kernel-context fixture without starting a real kernel thread.
+ */
 kthread_t *kthread_current (void) {
     return mock.kernel ? (kthread_t *)&mock : NULL;
 }
 
+/**
+ * @brief Model software/hardware PI busy states and arm the idle-check race injection.
+ */
 int dma_busy (void) {
     if (mock.irq_depth) {
         mock.busy_rechecks++;
@@ -148,6 +163,12 @@ int dma_busy (void) {
     return 0;
 }
 
+/**
+ * @brief Assert isolated staging and exact bus lengths, then record an IRQ-protected DMA submission.
+ *
+ * Fail immediately if the modeled SDK queue would block. Device effects are
+ * deferred until completion rather than applied during submission.
+ */
 static uint64_t submit (const void *ram, pi_addr_t pi, unsigned long length, bool write) {
     /* Trap instead of hiding the SDK's queue-full wait in the mock. */
     TEST_ASSERT(mock.irq_depth > 0);
@@ -194,6 +215,9 @@ static void rx_push (uint8_t byte) {
     mock.rx_count++;
 }
 
+/**
+ * @brief Release scheduled MCU bytes only when mock absolute ticks reach each byte's deadline.
+ */
 static void release_reply (void) {
     while (mock.pending_offset < mock.pending_length && (int32_t)(mock.now - mock.next_reply_tick) >= 0) {
         rx_push(mock.pending_reply[mock.pending_offset++]);
@@ -201,6 +225,12 @@ static void release_reply (void) {
     }
 }
 
+/**
+ * @brief Complete the pending DMA with literal FIFO/mailbox protocol and RDRAM-side effects.
+ *
+ * Schedule status replies and post-stop cleanup without directly publishing
+ * read data into CPU staging; cache invalidation remains a separate operation.
+ */
 static void finish_pending (void) {
     TEST_ASSERT(mock.active);
     if (mock.write && mock.pi == 0x1F800000u) {
@@ -281,6 +311,9 @@ static void finish_pending (void) {
     event('F');
 }
 
+/**
+ * @brief Poll the issued ticket with interrupts enabled while injecting hooks and completion delays.
+ */
 bool dma_finished (uint64_t ticket) {
     TEST_ASSERT(ticket == mock.ticket && ticket != 0);
     TEST_ASSERT(mock.irq_depth == 0);
@@ -293,6 +326,9 @@ bool dma_finished (uint64_t ticket) {
     return !mock.active;
 }
 
+/**
+ * @brief Enforce staging alignment, exclusive cache-line ownership, and no active DMA during cache work.
+ */
 static void check_cache (const volatile void *ram, unsigned long length) {
     TEST_ASSERT(ram == pro_staging);
     TEST_ASSERT(((uintptr_t)ram & 511u) == 0);
@@ -325,6 +361,9 @@ void data_cache_hit_invalidate (volatile void *ram, unsigned long length) {
     event('I');
 }
 
+/**
+ * @brief Reset the SDK model and ROM-lifetime driver state with well-formed default replies.
+ */
 static void power_on (void) {
     memset(&mock, 0, sizeof(mock));
     memset(&pro_ll, 0, sizeof(pro_ll));
@@ -355,6 +394,9 @@ static void begin (ed64_pro_ll_transaction_t *transaction) {
     TEST_ASSERT(ed64_pro_ll_begin(transaction, deadline_ms(15000)) == ED64_PRO_LL_OK);
 }
 
+/**
+ * @brief Complete passive identification and reset transfer traces for an isolated transport check.
+ */
 static void identify (void) {
     ed64_pro_probe_t probe = ed64_pro_probe();
     TEST_ASSERT(probe.outcome == ED64_PRO_PROBE_IDENTIFIED && probe.id_valid && probe.error == ED64_PRO_LL_OK);
@@ -372,6 +414,9 @@ static void end (ed64_pro_ll_transaction_t *transaction) {
     TEST_CHECK(pro_ll.owner == NULL);
 }
 
+/**
+ * @brief Verify the exact EDID bus address/length and cache/barrier publication order.
+ */
 static void test_register_read (void) {
     power_on();
     ed64_pro_ll_transaction_t transaction;
@@ -387,6 +432,9 @@ static void test_register_read (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Verify the four-byte mailbox NOP uses writeback without read invalidation.
+ */
 static void test_register_write (void) {
     power_on();
     identify();
@@ -400,6 +448,9 @@ static void test_register_write (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Reject invalid ownership/register/length arguments without DMA or latched faults.
+ */
 static void test_invalid_input (void) {
     power_on();
     ed64_pro_ll_transaction_t transaction;
@@ -425,6 +476,9 @@ static void test_invalid_input (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Verify busy waiting and the IRQ-protected recheck prevent queue-full submission.
+ */
 static void test_queue_race (void) {
     power_on();
     mock.busy_checks = 3;
@@ -438,6 +492,9 @@ static void test_queue_race (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Bound queue and hardware-busy waits across counter wrap without issuing DMA.
+ */
 static void test_queue_timeouts (void) {
     for (unsigned mode = 0; mode < 3; mode++) {
         power_on();
@@ -460,6 +517,9 @@ static void test_queue_timeouts (void) {
     }
 }
 
+/**
+ * @brief Preserve caller output and staging quarantine after timeout and late DMA completion.
+ */
 static void test_completion_timeout (void) {
     power_on();
     mock.now = UINT32_MAX - TICKS_FROM_MS(2);
@@ -487,6 +547,9 @@ static void test_completion_timeout (void) {
     TEST_CHECK(mock.event_count == events && mock.enqueues == 1);
 }
 
+/**
+ * @brief Treat a deadline equal to the current tick as expired before DMA submission.
+ */
 static void test_exact_deadline (void) {
     power_on();
     mock.tick_step = 0;
@@ -501,6 +564,9 @@ static void test_exact_deadline (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Latch pre/post-submission PI faults with unchanged output and the correct poison state.
+ */
 static void test_pi_errors (void) {
     for (unsigned issued = 0; issued < 2; issued++) {
         power_on();
@@ -527,6 +593,9 @@ static void expire_on_completion (void) {
     mock.now = finish_deadline;
 }
 
+/**
+ * @brief Reject exact-deadline completion without publishing data or releasing DMA quarantine.
+ */
 static void test_completion_at_deadline (void) {
     power_on();
     mock.tick_step = 0;
@@ -548,6 +617,9 @@ static void error_during_dma (void) {
     mock_pi_status |= PI_STATUS_ERROR;
 }
 
+/**
+ * @brief Keep an issued write's staging unchanged after a PI fault and late completion.
+ */
 static void test_write_quarantine (void) {
     power_on();
     identify();
@@ -567,6 +639,9 @@ static void test_write_quarantine (void) {
     TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == ED64_PRO_LL_PI_ERROR);
 }
 
+/**
+ * @brief Reject IRQ-disabled, exception, kernel, and uninitialized contexts without side effects.
+ */
 static void test_invalid_context (void) {
     for (unsigned mode = 0; mode < 6; mode++) {
         power_on();
@@ -585,6 +660,9 @@ static void test_invalid_context (void) {
     }
 }
 
+/**
+ * @brief Attempt nested and interrupt-disabled entry during DMA without changing owner or progress.
+ */
 static void nested_entry (void) {
     ed64_pro_ll_transaction_t nested;
     ed64_pro_ll_transaction_t *owner = pro_ll.owner;
@@ -606,6 +684,9 @@ static void nested_entry (void) {
     TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
 }
 
+/**
+ * @brief Preserve the original transaction while completion hooks attempt nested transport entry.
+ */
 static void test_serialization (void) {
     power_on();
     mock.poll_hook = nested_entry;
@@ -625,12 +706,18 @@ static struct {
     uint32_t irq_updates;
 } shared_line __attribute__((aligned(16)));
 
+/**
+ * @brief Model ISR updates to the caller's cache line while checking its output and canaries.
+ */
 static void neighboring_interrupt (void) {
     TEST_CHECK(shared_line.output == 42);
     TEST_CHECK(shared_line.before == 0x11223344u && shared_line.after == 0x55667788u);
     shared_line.irq_updates++;
 }
 
+/**
+ * @brief Verify DMA publication preserves ISR updates and canaries on the caller's shared cache line.
+ */
 static void test_cache_sharing (void) {
     power_on();
     shared_line.before = 0x11223344u;
@@ -649,6 +736,9 @@ static void test_cache_sharing (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Match only the Pro family/device, cache the read, and forbid writes after confirmed absence.
+ */
 static void test_probe_identity (void) {
     const uint32_t ids[] = {
         0, UINT32_MAX, 0xABCD0027u, 0xED640026u, 0xED640000u, 0xED640027u, 0xED640127u, 0xED647F27u, 0xED64FF27u
@@ -678,6 +768,9 @@ static void test_probe_identity (void) {
     }
 }
 
+/**
+ * @brief Keep failed identity reads indeterminate and sticky without writes or retries.
+ */
 static void test_probe_failures (void) {
     const ed64_pro_ll_error_t errors[] = {
         ED64_PRO_LL_PI_ACQUIRE_TIMEOUT,
@@ -700,6 +793,9 @@ static void test_probe_failures (void) {
     }
 }
 
+/**
+ * @brief Reject state-changing and FIFO commands until Pro identification completes.
+ */
 static void test_unidentified_commands (void) {
     power_on();
     ed64_pro_ll_transaction_t transaction;
@@ -718,6 +814,9 @@ static void test_unidentified_commands (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Compare selected command frames and exact DMA/cache lengths against literal protocol words.
+ */
 static void test_command_words (void) {
     static const uint32_t frames[][5] = {
         {0x2B, 0xD4, 0x10, 0xEF, 0},
@@ -742,6 +841,9 @@ static void test_command_words (void) {
     }
 }
 
+/**
+ * @brief Preserve opaque/nonzero inherited status bytes and verify the exact status bus trace.
+ */
 static void test_status_frame (void) {
     const uint8_t statuses[] = {0, 0xB0, 0xFF};
     for (size_t i = 0; i < sizeof(statuses); i++) {
@@ -768,6 +870,9 @@ static void test_status_frame (void) {
     }
 }
 
+/**
+ * @brief Verify FIFO chunking, exact byte counts, and caller canaries across offsets and boundary lengths.
+ */
 static void test_fifo_boundaries (void) {
     const size_t lengths[] = {0, 1, 2, 3, 4, 5, 15, 16, 17, 127, 128, 129, 2047, 2048};
     for (size_t offset = 0; offset < 32; offset++) {
@@ -800,6 +905,9 @@ static void test_fifo_boundaries (void) {
     }
 }
 
+/**
+ * @brief Accept zero-length FIFO reads but reject null or oversized outputs before DMA.
+ */
 static void test_fifo_invalid_lengths (void) {
     power_on();
     identify();
@@ -817,6 +925,9 @@ static void test_fifo_invalid_lengths (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Verify empty through full-capacity handoff drains discard exactly the reported bytes.
+ */
 static void test_fifo_drains (void) {
     const size_t lengths[] = {0, 1, 128, 129, 2048};
     for (size_t n = 0; n < sizeof(lengths) / sizeof(lengths[0]); n++) {
@@ -835,6 +946,9 @@ static void test_fifo_drains (void) {
     }
 }
 
+/**
+ * @brief Bound impossible counts and continuous refill while preserving confirmed RX progress.
+ */
 static void test_fifo_count_and_refill (void) {
     for (unsigned mode = 0; mode < 3; mode++) {
         power_on();
@@ -862,10 +976,16 @@ static void test_fifo_count_and_refill (void) {
     }
 }
 
+/**
+ * @brief Recognize phase, PI-acquisition, and PI-completion timeout results.
+ */
 static bool is_deadline_error (ed64_pro_ll_error_t error) {
     return error == ED64_PRO_LL_TIMEOUT || error == ED64_PRO_LL_PI_ACQUIRE_TIMEOUT || error == ED64_PRO_LL_PI_TIMEOUT;
 }
 
+/**
+ * @brief Ensure continuous refill cannot restart the fixed cleanup deadline.
+ */
 static void test_drain_deadline (void) {
     power_on();
     identify();
@@ -882,6 +1002,9 @@ static void test_drain_deadline (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Reject every incomplete status length without publishing a partial frame.
+ */
 static void test_partial_status (void) {
     for (size_t length = 0; length < 4; length++) {
         power_on();
@@ -902,6 +1025,9 @@ static void test_partial_status (void) {
     }
 }
 
+/**
+ * @brief Make malformed, trailing, and preexisting-data faults sticky without further discard.
+ */
 static void test_bad_status (void) {
     for (unsigned mode = 0; mode < 3; mode++) {
         power_on();
@@ -931,6 +1057,9 @@ static void test_bad_status (void) {
     }
 }
 
+/**
+ * @brief Preserve phase/transaction deadlines despite slow byte arrival and counter wrap.
+ */
 static void test_slow_partial_status (void) {
     const uint32_t budgets[] = {1000, 600};
     for (size_t i = 0; i < 2; i++) {
@@ -952,6 +1081,9 @@ static void test_slow_partial_status (void) {
     }
 }
 
+/**
+ * @brief Inject a PI error with the second FIFO chunk pending after 128 confirmed bytes.
+ */
 static void fail_second_chunk (void) {
     if (mock.pi == 0x1F800000u && !mock.write && mock.rx_consumed == 128) {
         mock.never_finish = true;
@@ -959,6 +1091,9 @@ static void fail_second_chunk (void) {
     }
 }
 
+/**
+ * @brief Preserve the first chunk's confirmed count and quarantine the second through late completion.
+ */
 static void test_partial_dma_failure (void) {
     power_on();
     identify();
@@ -981,6 +1116,9 @@ static void test_partial_dma_failure (void) {
     TEST_CHECK(mock.enqueues == enqueues);
 }
 
+/**
+ * @brief Prevent nested transport calls from interleaving a status command and its reply.
+ */
 static void test_status_serialization (void) {
     power_on();
     identify();
@@ -1039,6 +1177,9 @@ static void handoff_fixture (void) {
     mock.mailbox = 0x52445921u;
 }
 
+/**
+ * @brief Verify the complete one-shot MCU handoff against its golden trace and cached-success state.
+ */
 static void test_init_transcript (void) {
     handoff_fixture();
     TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_OK);
@@ -1083,6 +1224,11 @@ static void test_init_transcript (void) {
     TEST_CHECK(memcmp(&before, diagnostics, sizeof(before)) == 0);
 }
 
+/**
+ * @brief Inject timeout at every startup DMA and verify sticky phase, evidence, and quarantine.
+ *
+ * Late completion must not alter staging, retained diagnostics, or retry behavior.
+ */
 static void test_init_failure_boundaries (void) {
     for (size_t i = 0; i < sizeof(init_trace) / sizeof(init_trace[0]); i++) {
         handoff_fixture();
@@ -1119,6 +1265,9 @@ static void test_init_failure_boundaries (void) {
     }
 }
 
+/**
+ * @brief Distinguish malformed inherited frames from fresh STOP/SD MCU errors and retain their origin.
+ */
 static void test_inherited_and_fresh_errors (void) {
     for (size_t status_index = 0; status_index < 3; status_index++) {
         handoff_fixture();
@@ -1149,6 +1298,9 @@ static void test_inherited_and_fresh_errors (void) {
     }
 }
 
+/**
+ * @brief Reject every partial reply length at each handoff status phase within its original budget.
+ */
 static void test_init_partial_statuses (void) {
     for (size_t status_index = 0; status_index < 3; status_index++) {
         for (size_t length = 0; length < 4; length++) {
@@ -1169,6 +1321,9 @@ static void test_init_partial_statuses (void) {
     }
 }
 
+/**
+ * @brief Require two equal consecutive READY reads after clearing the inherited mailbox.
+ */
 static void test_mailbox_stability (void) {
     handoff_fixture();
     mock.mailbox_samples[0] = 0x52445921u;
@@ -1181,6 +1336,9 @@ static void test_mailbox_stability (void) {
     TEST_CHECK(mock.bus[9].address == 0x1F800010u && mock.bus[9].write && mock.bus[9].words[0] == 0);
 }
 
+/**
+ * @brief Bound stalled or alternating mailboxes and retain failure without sending SD_INIT.
+ */
 static void test_mailbox_deadlines (void) {
     for (unsigned mode = 0; mode < 2; mode++) {
         handoff_fixture();
@@ -1202,6 +1360,9 @@ static void test_mailbox_deadlines (void) {
     }
 }
 
+/**
+ * @brief Enforce the byte ceiling on both handoff cleanup phases without advancing to SD_INIT.
+ */
 static void test_init_cleanup_limits (void) {
     for (unsigned post_stop = 0; post_stop < 2; post_stop++) {
         power_on();
@@ -1222,6 +1383,9 @@ static void test_init_cleanup_limits (void) {
     }
 }
 
+/**
+ * @brief Apply the original five-second SD budget to slow complete and incomplete replies.
+ */
 static void test_sd_deadline (void) {
     for (unsigned timeout = 0; timeout < 2; timeout++) {
         handoff_fixture();
@@ -1242,6 +1406,9 @@ static void test_sd_deadline (void) {
     }
 }
 
+/**
+ * @brief Share the 15-second budget across probe and startup despite counter wrap or idle delay.
+ */
 static void test_whole_attempt_deadline (void) {
     for (unsigned expired = 0; expired < 2; expired++) {
         handoff_fixture();
@@ -1263,6 +1430,9 @@ static void test_whole_attempt_deadline (void) {
     }
 }
 
+/**
+ * @brief Allow context rejection without probing and cache confirmed absence without MCU writes.
+ */
 static void test_init_absent_and_context (void) {
     power_on();
     mock.cp0 = 0;
@@ -1276,6 +1446,9 @@ static void test_init_absent_and_context (void) {
     TEST_CHECK(mock.cart_writes == 0);
 }
 
+/**
+ * @brief Enforce one owner through the complete handoff against nested completion hooks.
+ */
 static void test_init_serialization (void) {
     handoff_fixture();
     mock.poll_hook = nested_entry;

@@ -54,12 +54,18 @@ int bbfs_init (void) {
     return spy.bbfs_result;
 }
 
+/**
+ * @brief Assert Pro probing precedes other cartridge/filesystem/debug work and return the fixture.
+ */
 ed64_pro_probe_t ed64_pro_probe (void) {
     spy.probes++;
     TEST_CHECK(spy.daisy_detects == 0 && spy.sdfs == 0 && spy.usb == 0 && spy.callbacks == 0);
     return spy.probe;
 }
 
+/**
+ * @brief Record transport startup only after one completed Pro identification.
+ */
 ed64_pro_ll_error_t ed64_pro_init_transport (void) {
     spy.pro_inits++;
     TEST_CHECK(spy.probes == 1 && spy.probe.outcome == ED64_PRO_PROBE_IDENTIFIED);
@@ -77,12 +83,18 @@ bool daisydrive_detected (void) {
     return spy.daisy;
 }
 
+/**
+ * @brief Validate DaisyDrive mount arguments and return the configured SD result.
+ */
 bool daisydrive_init_sdfs (const char *prefix, int max_files) {
     spy.daisy_mounts++;
     TEST_CHECK(strcmp(prefix, "sd:/") == 0 && max_files == -1);
     return spy.sdfs_ok;
 }
 
+/**
+ * @brief Simulate libcart detection while checking the legacy SD mount arguments.
+ */
 bool debug_init_sdfs (const char *prefix, int npart) {
     spy.sdfs++;
     TEST_CHECK(strcmp(prefix, "sd:/") == 0 && npart == -1);
@@ -129,6 +141,9 @@ static flashcart_err_t backend_load_rom (char *path, flashcart_progress_callback
     return spy.backend_result;
 }
 
+/**
+ * @brief Assert file-load dispatch preserves the path and both ROM/file offsets.
+ */
 static flashcart_err_t backend_load_file (char *path, uint32_t rom_offset, uint32_t file_offset) {
     TEST_CHECK(strcmp(path, "sd:/test.bin") == 0 && rom_offset == 4096 && file_offset == 512);
     spy.callbacks++;
@@ -203,6 +218,9 @@ bool file_fill (char *path, uint8_t value) {
     return false;
 }
 
+/**
+ * @brief Restore the ROM fallback and reset spies for an independent startup scenario.
+ */
 static void power_on (void) {
     if (!fallback) {
         fallback = flashcart;
@@ -218,6 +236,11 @@ static void power_on (void) {
     spy.message = "EverDrive-64 Pro storage backend is not implemented.";
 }
 
+/**
+ * @brief Require every Pro result to clear the storage prefix without activating any backend.
+ *
+ * A previous backend must remain untouched, and error formatting must use Pro diagnostics.
+ */
 static void require_terminal_result (bool identified) {
     /* A previous backend must not be replaced or invoked by any Pro outcome. */
     flashcart = &backend;
@@ -244,6 +267,9 @@ static void test_ready_is_not_storage (void) {
     require_terminal_result(true);
 }
 
+/**
+ * @brief Verify each identified-Pro transport failure stays terminal without storage fallback.
+ */
 static void test_identified_failures (void) {
     const ed64_pro_ll_error_t failures[] = {
         ED64_PRO_LL_PI_ACQUIRE_TIMEOUT,
@@ -271,6 +297,9 @@ static void test_identified_failures (void) {
     }
 }
 
+/**
+ * @brief Verify indeterminate probes neither initialize Pro transport nor try another cartridge.
+ */
 static void test_failed_probe_never_falls_back (void) {
     const ed64_pro_ll_error_t failures[] = {
         ED64_PRO_LL_PI_ACQUIRE_TIMEOUT,
@@ -288,6 +317,9 @@ static void test_failed_probe_never_falls_back (void) {
     }
 }
 
+/**
+ * @brief Preserve the iQue prefix and NAND errors while bypassing all cartridge probing.
+ */
 static void test_ique_bypass (void) {
     for (unsigned fail = 0; fail < 2; fail++) {
         power_on();
@@ -302,6 +334,9 @@ static void test_ique_bypass (void) {
     }
 }
 
+/**
+ * @brief Preserve all four libcart backends' selection, initialization, and debug USB policy.
+ */
 static void test_non_pro_dispatch (void) {
     const int types[] = {CART_CI, CART_EDX, CART_ED, CART_SC};
     for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
@@ -322,6 +357,9 @@ static void test_non_pro_dispatch (void) {
     }
 }
 
+/**
+ * @brief Preserve backend-error precedence over an SD initialization failure.
+ */
 static void test_non_pro_sd_and_init_errors (void) {
     const int types[] = {CART_CI, CART_EDX, CART_ED, CART_SC};
     for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
@@ -338,6 +376,9 @@ static void test_non_pro_sd_and_init_errors (void) {
     }
 }
 
+/**
+ * @brief Check unknown/no-cartridge ROM fallback, including the existing SD error rules.
+ */
 static void test_non_pro_rom_fallback (void) {
     const int types[] = {CART_NULL, 123};
     for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
@@ -356,6 +397,9 @@ static void test_non_pro_rom_fallback (void) {
     }
 }
 
+/**
+ * @brief Preserve DaisyDrive's mount path and backend errors without libcart or USB setup.
+ */
 static void test_non_pro_daisy_dispatch (void) {
     for (unsigned fail = 0; fail < 2; fail++) {
         power_on();
@@ -370,6 +414,9 @@ static void test_non_pro_daisy_dispatch (void) {
     }
 }
 
+/**
+ * @brief Verify callback forwarding, temporary byte swapping, and unsupported optional features.
+ */
 static void test_non_pro_callbacks (void) {
     power_on();
     const char *prefix;
@@ -396,6 +443,9 @@ static void test_non_pro_callbacks (void) {
     TEST_CHECK(spy.file_calls == 0 && spy.pro_inits == 0);
 }
 
+/**
+ * @brief Keep existing error values and messages stable when appending the Pro startup error.
+ */
 static void test_error_values_preserved (void) {
     power_on();
     TEST_CHECK(FLASHCART_ERR_FUNCTION_NOT_SUPPORTED == 7 && FLASHCART_ERR_ED64_PRO == 8);
