@@ -104,6 +104,7 @@ ed64_pro_ll_error_t ed64_pro_init_transport (void) {
     ed64_pro_ll_transaction_t transaction;
     ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, pro_attempt_deadline);
     if (error != ED64_PRO_LL_OK) {
+        pro_init_fail(error);
         return error;
     }
     pro_diagnostics.state = ED64_PRO_INITIALIZING;
