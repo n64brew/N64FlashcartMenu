@@ -88,6 +88,9 @@ the "cartridge save memory".
         └── b_rom_whatever.sav
 ```
 
+> [!TIP]
+> To keep every save in one place instead, turn on **Global Saves Folder** in the [menu settings](./32_menu_settings.md). Saves are then stored as `/saves/<ROM file name>.sav` at the root of the SD card, and every copy of a ROM with the same file name shares that save. Turn on **Migrate Old Saves** as well to move your existing saves there as you launch each game.
+
 ### Transferring saves from an ED64 or emulator
 If you are transferring a file from a different flashcart, such as the ED64, or an emulator you must change the file extension to `sav`. 
 For example, a save file called `Glover (USA).eep` should have its extension changed to `Glover (USA).sav` to work with N64FlashcartMenu.
