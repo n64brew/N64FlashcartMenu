@@ -71,7 +71,19 @@ static struct {
     size_t pending_length;
     size_t pending_offset;
     uint32_t reply_interval;
+    uint32_t reply_intervals[8];
+    uint32_t active_reply_interval;
     uint32_t next_reply_tick;
+    unsigned fail_at;
+    bool mailbox_stalled;
+    bool mailbox_unstable;
+    unsigned mailbox_reads;
+    uint32_t mailbox_samples[16];
+    size_t mailbox_sample_count;
+    uint32_t stop_delay;
+    uint32_t ready_tick;
+    size_t post_stop_junk;
+    bool post_stop_refill;
 } mock;
 
 static void event (char value) {
@@ -185,7 +197,7 @@ static void rx_push (uint8_t byte) {
 static void release_reply (void) {
     while (mock.pending_offset < mock.pending_length && (int32_t)(mock.now - mock.next_reply_tick) >= 0) {
         rx_push(mock.pending_reply[mock.pending_offset++]);
-        mock.next_reply_tick += mock.reply_interval;
+        mock.next_reply_tick += mock.active_reply_interval;
     }
 }
 
@@ -202,13 +214,20 @@ static void finish_pending (void) {
             memcpy(mock.pending_reply, mock.replies[index].bytes, sizeof(mock.pending_reply));
             mock.pending_length = mock.replies[index].length;
             mock.pending_offset = 0;
-            mock.next_reply_tick = mock.now + mock.reply_interval;
+            mock.active_reply_interval =
+                mock.reply_intervals[index] ? mock.reply_intervals[index] : mock.reply_interval;
+            mock.next_reply_tick = mock.now + mock.active_reply_interval;
             release_reply();
             break;
         }
         case 0x85:
             TEST_ASSERT(mock.length == 20 && mock.ram[4] == 0x10);
             mock.stop_commands++;
+            mock.ready_tick = mock.now + mock.stop_delay;
+            for (size_t i = 0; i < mock.post_stop_junk; i++) {
+                rx_push((uint8_t)(0x80 + i));
+            }
+            mock.refill = mock.post_stop_refill;
             break;
         case 0x80:
             TEST_ASSERT(mock.length == 20 && mock.ram[4] == 0x10);
@@ -237,7 +256,20 @@ static void finish_pending (void) {
             release_reply();
             mock.ram[0] = mock.fifo_upper | (mock.count_override ? mock.reported_count : mock.rx_count);
             break;
-        case 0x1F800010u: mock.ram[0] = mock.mailbox; break;
+        case 0x1F800010u:
+            if (mock.stop_commands && !mock.mailbox_stalled && (int32_t)(mock.now - mock.ready_tick) >= 0) {
+                mock.mailbox = 0x52445921u;
+            }
+            mock.ram[0] = mock.mailbox;
+            if (mock.mailbox_sample_count) {
+                size_t index =
+                    mock.mailbox_reads < mock.mailbox_sample_count ? mock.mailbox_reads : mock.mailbox_sample_count - 1;
+                mock.ram[0] = mock.mailbox_samples[index];
+            } else if (mock.mailbox_unstable && (mock.mailbox_reads & 1u)) {
+                mock.ram[0] ^= 1u;
+            }
+            mock.mailbox_reads++;
+            break;
         default: mock.ram[0] = mock.register_value; break;
         }
     }
@@ -255,7 +287,7 @@ bool dma_finished (uint64_t ticket) {
     if (mock.poll_hook) {
         mock.poll_hook();
     }
-    if (mock.active && !mock.never_finish && mock.polls++ >= mock.finish_after) {
+    if (mock.active && !mock.never_finish && mock.enqueues != mock.fail_at && mock.polls++ >= mock.finish_after) {
         finish_pending();
     }
     return !mock.active;
@@ -296,6 +328,11 @@ void data_cache_hit_invalidate (volatile void *ram, unsigned long length) {
 static void power_on (void) {
     memset(&mock, 0, sizeof(mock));
     memset(&pro_ll, 0, sizeof(pro_ll));
+    memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
+    memset(pro_error_message, 0, sizeof(pro_error_message));
+    pro_attempt_start = 0;
+    pro_attempt_deadline = 0;
+    pro_phase_start = 0;
     memset(pro_staging, 0, sizeof(pro_staging));
     mock_pi_status = 0;
     mock.cp0 = C0_STATUS_IE;
@@ -559,6 +596,7 @@ static void nested_entry (void) {
     TEST_CHECK(ed64_pro_ll_end(&nested) == ED64_PRO_LL_BUSY);
     TEST_CHECK(ed64_pro_ll_read_status(&nested, &status, deadline_ms(1000)) == ED64_PRO_LL_BUSY);
     TEST_CHECK(ed64_pro_probe().error == ED64_PRO_LL_BUSY);
+    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_BUSY);
     mock.cp0 &= ~C0_STATUS_IE;
     TEST_CHECK(ed64_pro_ll_begin(&nested, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
     TEST_CHECK(ed64_pro_ll_read_status(owner, &status, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
@@ -673,6 +711,8 @@ static void test_unidentified_commands (void) {
     TEST_CHECK(pro_send_command(&transaction, PRO_CMD_SD_INIT, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
     TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
     TEST_CHECK(ed64_pro_ll_drain(&transaction, &drained, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(ed64_pro_ll_stop(&transaction, deadline_ms(5000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(ed64_pro_ll_init_sd(&transaction, &status, deadline_ms(5000)) == ED64_PRO_LL_NOT_IDENTIFIED);
     TEST_CHECK(mock.enqueues == 0 && mock.cart_writes == 0);
     TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
     end(&transaction);
@@ -954,6 +994,298 @@ static void test_status_serialization (void) {
     end(&transaction);
 }
 
+static const struct {
+    uint32_t address;
+    size_t length;
+    bool write;
+    ed64_pro_phase_t phase;
+} init_trace[] = {
+    {0x1F800014u, 4, false, ED64_PRO_PHASE_PROBE},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_INITIAL_DRAIN},
+    {0x1F800000u, 12, false, ED64_PRO_PHASE_INITIAL_DRAIN},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_INITIAL_DRAIN},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_INHERITED_STATUS},
+    {0x1F800000u, 16, true, ED64_PRO_PHASE_INHERITED_STATUS},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_INHERITED_STATUS},
+    {0x1F800000u, 16, false, ED64_PRO_PHASE_INHERITED_STATUS},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_INHERITED_STATUS},
+    {0x1F800010u, 4, true, ED64_PRO_PHASE_STOP},
+    {0x1F800000u, 20, true, ED64_PRO_PHASE_STOP},
+    {0x1F800010u, 4, false, ED64_PRO_PHASE_STOP},
+    {0x1F800010u, 4, false, ED64_PRO_PHASE_STOP},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_POST_STOP_DRAIN},
+    {0x1F800000u, 8, false, ED64_PRO_PHASE_POST_STOP_DRAIN},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_POST_STOP_DRAIN},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_STOP_STATUS},
+    {0x1F800000u, 16, true, ED64_PRO_PHASE_STOP_STATUS},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_STOP_STATUS},
+    {0x1F800000u, 16, false, ED64_PRO_PHASE_STOP_STATUS},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_STOP_STATUS},
+    {0x1F800000u, 20, true, ED64_PRO_PHASE_SD_INIT},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_SD_INIT},
+    {0x1F800000u, 16, true, ED64_PRO_PHASE_SD_INIT},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_SD_INIT},
+    {0x1F800000u, 16, false, ED64_PRO_PHASE_SD_INIT},
+    {0x1F800004u, 4, false, ED64_PRO_PHASE_SD_INIT},
+};
+
+static void handoff_fixture (void) {
+    power_on();
+    rx_push(0x12);
+    rx_push(0x34);
+    rx_push(0x56);
+    mock.post_stop_junk = 2;
+    mock.replies[0].bytes[3] = 0xB0;
+    mock.mailbox = 0x52445921u;
+}
+
+static void test_init_transcript (void) {
+    handoff_fixture();
+    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_OK);
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    TEST_CHECK(diagnostics->state == ED64_PRO_READY && diagnostics->phase == ED64_PRO_PHASE_READY);
+    TEST_CHECK(diagnostics->probe.id_valid && diagnostics->probe.id == 0xED640127u);
+    TEST_CHECK(diagnostics->inherited_status_valid && diagnostics->inherited_status.mcu_status == 0xB0);
+    TEST_CHECK(diagnostics->status_valid && diagnostics->status.mcu_status == 0);
+    TEST_CHECK(diagnostics->initial_drained == 3 && diagnostics->post_stop_drained == 2);
+    TEST_CHECK(diagnostics->failure.code == ED64_PRO_LL_OK);
+    TEST_CHECK(mock.bus_count == sizeof(init_trace) / sizeof(init_trace[0]));
+    static const uint32_t commands[] = {0x10, 0x85, 0x10, 0x80, 0x10};
+    size_t command_index = 0;
+    for (size_t i = 0; i < mock.bus_count; i++) {
+        TEST_CHECK(
+            mock.bus[i].address == init_trace[i].address && mock.bus[i].length == init_trace[i].length &&
+            mock.bus[i].write == init_trace[i].write
+        );
+        if (mock.bus[i].write && mock.bus[i].address == 0x1F800000u) {
+            TEST_ASSERT(command_index < sizeof(commands) / sizeof(commands[0]));
+            TEST_CHECK(mock.bus[i].words[2] == commands[command_index++]);
+        }
+    }
+    TEST_CHECK(command_index == 5 && mock.status_requests == 3 && mock.stop_commands == 1 && mock.sd_commands == 1);
+    TEST_CHECK(mock.bus[9].words[0] == 0 && mock.mailbox_reads == 2);
+    TEST_CHECK(ed64_pro_ll_get_metrics()->submissions == mock.bus_count);
+    TEST_CHECK(ed64_pro_ll_get_metrics()->rx_peak == 4);
+    TEST_CHECK(ed64_pro_ll_get_metrics()->max_pi_ticks > 0);
+    for (ed64_pro_phase_t phase = ED64_PRO_PHASE_PROBE; phase < ED64_PRO_PHASE_READY; phase++) {
+        TEST_CHECK(diagnostics->phase_ticks[phase] > 0);
+    }
+    TEST_CHECK(diagnostics->attempt_ticks < TICKS_FROM_MS(15000));
+    TEST_CHECK(strstr(ed64_pro_get_error_message(), "not implemented") != NULL);
+    TEST_CHECK(!ed64_pro_detected() && mock.irq_depth == 0 && pro_ll.owner == NULL);
+
+    ed64_pro_diagnostics_t before = *diagnostics;
+    size_t bus_count = mock.bus_count;
+    size_t events = mock.event_count;
+    mock.now += TICKS_FROM_MS(20000);
+    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_OK);
+    TEST_CHECK(mock.bus_count == bus_count && mock.event_count == events);
+    TEST_CHECK(memcmp(&before, diagnostics, sizeof(before)) == 0);
+}
+
+static void test_init_failure_boundaries (void) {
+    for (size_t i = 0; i < sizeof(init_trace) / sizeof(init_trace[0]); i++) {
+        handoff_fixture();
+        mock.tick_step = TICKS_FROM_MS(1) / 8;
+        mock.fail_at = (unsigned)i + 1;
+        TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_PI_TIMEOUT);
+        const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+        TEST_CHECK(diagnostics->state == ED64_PRO_POISONED && diagnostics->phase == init_trace[i].phase);
+        TEST_CHECK(diagnostics->failure.code == ED64_PRO_LL_PI_TIMEOUT && diagnostics->failure.poisoned);
+        TEST_CHECK(diagnostics->failure.ticket == mock.ticket && mock.active);
+        TEST_CHECK(diagnostics->probe.id_valid == (i != 0));
+        TEST_CHECK(diagnostics->inherited_status_valid == (i >= 9));
+        TEST_CHECK(mock.bus_count == i + 1 && mock.irq_depth == 0 && pro_ll.owner == NULL);
+        TEST_CHECK(!ed64_pro_detected());
+        if (i == 0) {
+            TEST_CHECK(mock.cart_writes == 0);
+            TEST_CHECK(strstr(ed64_pro_get_error_message(), "identity unknown") != NULL);
+        }
+        if (init_trace[i].phase == ED64_PRO_PHASE_SD_INIT) {
+            TEST_CHECK(!diagnostics->status_valid);
+            TEST_CHECK(strstr(ed64_pro_get_error_message(), "SD readiness") != NULL);
+        }
+        char message[256];
+        snprintf(message, sizeof(message), "%s", ed64_pro_get_error_message());
+        ed64_pro_diagnostics_t before = *diagnostics;
+        uint32_t staging[ED64_PRO_FIFO_CHUNK];
+        memcpy(staging, pro_staging, sizeof(staging));
+        TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_PI_TIMEOUT);
+        TEST_CHECK(mock.bus_count == i + 1 && memcmp(staging, pro_staging, sizeof(staging)) == 0);
+        finish_pending();
+        TEST_CHECK(memcmp(staging, pro_staging, sizeof(staging)) == 0);
+        TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_PI_TIMEOUT && mock.bus_count == i + 1);
+        TEST_CHECK(memcmp(&before, diagnostics, sizeof(before)) == 0);
+        TEST_CHECK(strcmp(message, ed64_pro_get_error_message()) == 0);
+    }
+}
+
+static void test_inherited_and_fresh_errors (void) {
+    for (size_t status_index = 0; status_index < 3; status_index++) {
+        handoff_fixture();
+        if (status_index == 0) {
+            mock.replies[0].bytes[0] = 0x5B;
+        } else {
+            mock.replies[status_index].bytes[3] = 0xB0;
+        }
+        ed64_pro_ll_error_t expected = status_index == 0 ? ED64_PRO_LL_FRAME : ED64_PRO_LL_MCU_ERROR;
+        TEST_CHECK(ed64_pro_init_transport() == expected);
+        const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+        ed64_pro_phase_t phase = status_index == 0   ? ED64_PRO_PHASE_INHERITED_STATUS
+                                 : status_index == 1 ? ED64_PRO_PHASE_STOP_STATUS
+                                                     : ED64_PRO_PHASE_SD_INIT;
+        TEST_CHECK(diagnostics->state == ED64_PRO_FAILED && diagnostics->phase == phase);
+        TEST_CHECK(diagnostics->failure.code == expected && !diagnostics->failure.poisoned);
+        TEST_CHECK(diagnostics->inherited_status_valid == (status_index != 0));
+        TEST_CHECK(mock.stop_commands == (status_index == 0 ? 0 : 1));
+        TEST_CHECK(mock.sd_commands == (status_index == 2 ? 1 : 0));
+        if (status_index) {
+            TEST_CHECK(diagnostics->status_valid && diagnostics->status.mcu_status == 0xB0);
+            TEST_CHECK(strstr(ed64_pro_get_error_message(), "MCU status 0xB0") != NULL);
+        }
+        unsigned enqueues = mock.enqueues;
+        mock.replies[status_index].bytes[0] = 0x5A;
+        mock.replies[status_index].bytes[3] = 0;
+        TEST_CHECK(ed64_pro_init_transport() == expected && mock.enqueues == enqueues);
+    }
+}
+
+static void test_init_partial_statuses (void) {
+    for (size_t status_index = 0; status_index < 3; status_index++) {
+        for (size_t length = 0; length < 4; length++) {
+            handoff_fixture();
+            mock.tick_step = TICKS_FROM_MS(1) / 8;
+            mock.replies[status_index].length = length;
+            TEST_CHECK(is_deadline_error(ed64_pro_init_transport()));
+            const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+            ed64_pro_phase_t phase = status_index == 0   ? ED64_PRO_PHASE_INHERITED_STATUS
+                                     : status_index == 1 ? ED64_PRO_PHASE_STOP_STATUS
+                                                         : ED64_PRO_PHASE_SD_INIT;
+            TEST_CHECK(diagnostics->phase == phase && diagnostics->failure.transferred == length);
+            TEST_CHECK(diagnostics->inherited_status_valid == (status_index != 0) && !diagnostics->status_valid);
+            TEST_CHECK(mock.status_requests == status_index + 1);
+            uint32_t budget = status_index == 2 ? 5000 : 1000;
+            TEST_CHECK(diagnostics->phase_ticks[phase] <= TICKS_FROM_MS(budget + 2));
+        }
+    }
+}
+
+static void test_mailbox_stability (void) {
+    handoff_fixture();
+    mock.mailbox_samples[0] = 0x52445921u;
+    mock.mailbox_samples[1] = 0x12345678u;
+    mock.mailbox_samples[2] = 0x52445921u;
+    mock.mailbox_samples[3] = 0x52445921u;
+    mock.mailbox_sample_count = 4;
+    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_OK);
+    TEST_CHECK(mock.mailbox_reads == 4 && mock.stop_commands == 1 && mock.sd_commands == 1);
+    TEST_CHECK(mock.bus[9].address == 0x1F800010u && mock.bus[9].write && mock.bus[9].words[0] == 0);
+}
+
+static void test_mailbox_deadlines (void) {
+    for (unsigned mode = 0; mode < 2; mode++) {
+        handoff_fixture();
+        mock.tick_step = TICKS_FROM_MS(1) / 8;
+        mock.mailbox_stalled = mode == 0;
+        mock.mailbox_unstable = mode == 1;
+        ed64_pro_ll_error_t error = ed64_pro_init_transport();
+        TEST_CHECK(error == ED64_PRO_LL_MAILBOX_TIMEOUT || is_deadline_error(error));
+        const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+        TEST_CHECK(diagnostics->phase == ED64_PRO_PHASE_STOP && diagnostics->inherited_status_valid);
+        TEST_CHECK(diagnostics->phase_ticks[ED64_PRO_PHASE_STOP] <= TICKS_FROM_MS(5002));
+        TEST_CHECK(diagnostics->phase_ticks[ED64_PRO_PHASE_STOP] >= TICKS_FROM_MS(5000));
+        TEST_CHECK(mock.stop_commands == 1 && mock.sd_commands == 0);
+        if (mode == 0) {
+            TEST_CHECK(mock.mailbox == 0);
+        }
+        unsigned enqueues = mock.enqueues;
+        TEST_CHECK(ed64_pro_init_transport() == error && mock.enqueues == enqueues);
+    }
+}
+
+static void test_init_cleanup_limits (void) {
+    for (unsigned post_stop = 0; post_stop < 2; post_stop++) {
+        power_on();
+        if (post_stop) {
+            mock.post_stop_junk = 128;
+            mock.post_stop_refill = true;
+        } else {
+            for (size_t i = 0; i < 128; i++) {
+                rx_push(0x12);
+            }
+            mock.refill = true;
+        }
+        TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_DRAIN_LIMIT);
+        const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+        TEST_CHECK(diagnostics->phase == (post_stop ? ED64_PRO_PHASE_POST_STOP_DRAIN : ED64_PRO_PHASE_INITIAL_DRAIN));
+        TEST_CHECK(diagnostics->failure.transferred == 2048 && diagnostics->state == ED64_PRO_FAILED);
+        TEST_CHECK(mock.stop_commands == post_stop && mock.sd_commands == 0);
+    }
+}
+
+static void test_sd_deadline (void) {
+    for (unsigned timeout = 0; timeout < 2; timeout++) {
+        handoff_fixture();
+        mock.tick_step = TICKS_FROM_MS(1) / 8;
+        mock.reply_intervals[2] = TICKS_FROM_MS(timeout ? 1400 : 400);
+        ed64_pro_ll_error_t error = ed64_pro_init_transport();
+        const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+        if (timeout) {
+            TEST_CHECK(is_deadline_error(error) && !diagnostics->status_valid);
+            TEST_CHECK(diagnostics->failure.transferred == 3);
+            TEST_CHECK(diagnostics->phase_ticks[ED64_PRO_PHASE_SD_INIT] >= TICKS_FROM_MS(5000));
+        } else {
+            TEST_CHECK(error == ED64_PRO_LL_OK && diagnostics->state == ED64_PRO_READY);
+            TEST_CHECK(diagnostics->phase_ticks[ED64_PRO_PHASE_SD_INIT] >= TICKS_FROM_MS(1600));
+        }
+        TEST_CHECK(diagnostics->phase_ticks[ED64_PRO_PHASE_SD_INIT] <= TICKS_FROM_MS(5002));
+        TEST_CHECK(mock.stop_commands == 1 && mock.sd_commands == 1 && mock.status_requests == 3);
+    }
+}
+
+static void test_whole_attempt_deadline (void) {
+    for (unsigned expired = 0; expired < 2; expired++) {
+        handoff_fixture();
+        mock.now = UINT32_MAX - TICKS_FROM_MS(2000);
+        TEST_ASSERT(ed64_pro_probe().outcome == ED64_PRO_PROBE_IDENTIFIED);
+        mock.now += TICKS_FROM_MS(expired ? 15000 : 14000);
+        mock.tick_step = TICKS_FROM_MS(1) / 8;
+        mock.stop_delay = TICKS_FROM_MS(1500);
+        ed64_pro_ll_error_t error = ed64_pro_init_transport();
+        TEST_CHECK(is_deadline_error(error) || error == ED64_PRO_LL_MAILBOX_TIMEOUT);
+        const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+        TEST_CHECK(diagnostics->phase == (expired ? ED64_PRO_PHASE_INITIAL_DRAIN : ED64_PRO_PHASE_STOP));
+        TEST_CHECK(diagnostics->attempt_ticks >= TICKS_FROM_MS(15000));
+        TEST_CHECK(diagnostics->attempt_ticks <= TICKS_FROM_MS(15003));
+        TEST_CHECK(mock.stop_commands == (expired ? 0 : 1) && mock.sd_commands == 0);
+        if (expired) {
+            TEST_CHECK(mock.enqueues == 1 && mock.cart_writes == 0);
+        }
+    }
+}
+
+static void test_init_absent_and_context (void) {
+    power_on();
+    mock.cp0 = 0;
+    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_CONTEXT);
+    TEST_CHECK(ed64_pro_get_diagnostics()->state == ED64_PRO_COLD && mock.enqueues == 0);
+    mock.cp0 = C0_STATUS_IE;
+    mock.register_value = 0xED640025u;
+    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(ed64_pro_get_diagnostics()->state == ED64_PRO_ABSENT && mock.enqueues == 1);
+    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_NOT_IDENTIFIED && mock.enqueues == 1);
+    TEST_CHECK(mock.cart_writes == 0 && !ed64_pro_detected());
+}
+
+static void test_init_serialization (void) {
+    handoff_fixture();
+    mock.poll_hook = nested_entry;
+    mock.finish_after = 2;
+    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_OK);
+    TEST_CHECK(ed64_pro_get_diagnostics()->state == ED64_PRO_READY && mock.bus_count == 27);
+    TEST_CHECK(mock.stop_commands == 1 && mock.sd_commands == 1 && mock.irq_depth == 0);
+}
+
 TEST_LIST = {
     {"exact register read and cache order", test_register_read},
     {"exact mailbox write and cache order", test_register_write},
@@ -983,5 +1315,16 @@ TEST_LIST = {
     {"slow partial progress preserves original deadlines", test_slow_partial_status},
     {"partial FIFO DMA failure preserves count", test_partial_dma_failure},
     {"command and reply cannot interleave", test_status_serialization},
+    {"golden one-shot MCU initialization transcript", test_init_transcript},
+    {"sticky failure at every initialization DMA boundary", test_init_failure_boundaries},
+    {"inherited versus fresh MCU errors", test_inherited_and_fresh_errors},
+    {"partial replies at every initialization status", test_init_partial_statuses},
+    {"mailbox requires matching READY samples", test_mailbox_stability},
+    {"mailbox stall and instability are bounded", test_mailbox_deadlines},
+    {"both handoff cleanup phases are bounded", test_init_cleanup_limits},
+    {"SD initialization uses its original five-second budget", test_sd_deadline},
+    {"whole attempt budget spans probe and initialization", test_whole_attempt_deadline},
+    {"absent and unsupported context never initialize", test_init_absent_and_context},
+    {"initialization guard covers the complete handoff", test_init_serialization},
     {NULL, NULL},
 };

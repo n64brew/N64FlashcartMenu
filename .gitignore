@@ -21,6 +21,7 @@
 **/*.n64
 **/*.v64
 **/*.z64
+!/tests/Makefile.n64
 
 # Ignore exe files
 *.exe

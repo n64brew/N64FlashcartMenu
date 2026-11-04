@@ -21,6 +21,9 @@ static struct {
     uint32_t id;
     bool probed;
     bool identified;
+    ed64_pro_ll_metrics_t metrics;
+    uint32_t pi_started;
+    bool pi_active;
 } pro_ll;
 
 _Static_assert(sizeof(pro_staging) == 512, "Pro staging must own complete cache lines");
@@ -59,7 +62,18 @@ static uint32_t pro_deadline (const ed64_pro_ll_transaction_t *transaction, uint
     return (int32_t)(transaction->deadline - deadline) < 0 ? transaction->deadline : deadline;
 }
 
+static void pro_measure_pi (void) {
+    if (pro_ll.pi_active) {
+        uint32_t elapsed = TICKS_READ() - pro_ll.pi_started;
+        if (elapsed > pro_ll.metrics.max_pi_ticks) {
+            pro_ll.metrics.max_pi_ticks = elapsed;
+        }
+        pro_ll.pi_active = false;
+    }
+}
+
 static ed64_pro_ll_error_t pro_fail (ed64_pro_ll_error_t error) {
+    pro_measure_pi();
     if (pro_ll.failure.code == ED64_PRO_LL_OK) {
         pro_ll.failure = (ed64_pro_ll_failure_t){
             .code = error,
@@ -123,6 +137,10 @@ const ed64_pro_ll_failure_t *ed64_pro_ll_get_failure (void) {
     return &pro_ll.failure;
 }
 
+const ed64_pro_ll_metrics_t *ed64_pro_ll_get_metrics (void) {
+    return &pro_ll.metrics;
+}
+
 static bool pro_readable_reg (ed64_pro_reg_t reg) {
     switch (reg) {
     case ED64_PRO_REG_FIFOSTAT:
@@ -156,7 +174,12 @@ static ed64_pro_ll_error_t pro_transfer (
         return ED64_PRO_LL_NOT_IDENTIFIED;
     }
     deadline = pro_deadline(transaction, deadline);
-    deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_PI_TIMEOUT_MS);
+    pro_ll.pi_started = TICKS_READ();
+    pro_ll.pi_active = true;
+    uint32_t pi_deadline = pro_ll.pi_started + TICKS_FROM_MS(ED64_PRO_PI_TIMEOUT_MS);
+    if ((int32_t)(pi_deadline - deadline) < 0) {
+        deadline = pi_deadline;
+    }
     if (pro_expired(deadline)) {
         return pro_fail(ED64_PRO_LL_PI_ACQUIRE_TIMEOUT);
     }
@@ -188,6 +211,7 @@ static ed64_pro_ll_error_t pro_transfer (
         if (!busy && !expired && !pi_error) {
             pro_ll.ticket =
                 write ? dma_write_raw_async(pro_staging, reg, length) : dma_read_raw_async(pro_staging, reg, length);
+            pro_ll.metrics.submissions++;
         }
         enable_interrupts();
         if (pi_error) {
@@ -210,6 +234,10 @@ static ed64_pro_ll_error_t pro_transfer (
             return pro_fail(ED64_PRO_LL_PI_ERROR);
         }
         bool finished = dma_finished(pro_ll.ticket);
+#ifdef ED64_PRO_TEST_FORCE_TIMEOUT
+        /* Software-only fault injection; never reset PI or pretend DMA was cancelled. */
+        finished = false;
+#endif
         if (*PI_STATUS & PI_STATUS_ERROR) {
             return pro_fail(ED64_PRO_LL_PI_ERROR);
         }
@@ -226,6 +254,7 @@ static ed64_pro_ll_error_t pro_transfer (
         data_cache_hit_invalidate(pro_staging, cache_length);
     }
     MEMORY_BARRIER();
+    pro_measure_pi();
     return ED64_PRO_LL_OK;
 }
 
@@ -290,6 +319,9 @@ pro_fifo_available (ed64_pro_ll_transaction_t *transaction, uint32_t *available,
         return error;
     }
     value &= 0xFFFFu;
+    if (value > pro_ll.metrics.rx_peak) {
+        pro_ll.metrics.rx_peak = value;
+    }
     if (value > ED64_PRO_FIFO_LIMIT) {
         return pro_fail(ED64_PRO_LL_FIFO_COUNT);
     }
@@ -441,4 +473,64 @@ ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status
         .mcu_status = reply[3],
     };
     return ED64_PRO_LL_OK;
+}
+
+ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_STOP_TIMEOUT_MS);
+    pro_ll.transferred = 0;
+    error = ed64_pro_ll_write_reg(transaction, ED64_PRO_REG_MBX, 0, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    error = pro_send_command(transaction, PRO_CMD_STOP, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    for (;;) {
+        if (pro_expired(deadline)) {
+            return pro_fail(ED64_PRO_LL_MAILBOX_TIMEOUT);
+        }
+        uint32_t first, second;
+        error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_MBX, &first, deadline);
+        if (error != ED64_PRO_LL_OK) {
+            return error;
+        }
+        error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_MBX, &second, deadline);
+        if (error != ED64_PRO_LL_OK) {
+            return error;
+        }
+        if (first == second && second == 0x52445921u) {
+            return ED64_PRO_LL_OK;
+        }
+    }
+}
+
+ed64_pro_ll_error_t
+ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
+    ed64_pro_ll_error_t error = ed64_pro_ll_read_status(transaction, status, deadline);
+    if (error == ED64_PRO_LL_OK && status->mcu_status != 0) {
+        return pro_fail(ED64_PRO_LL_MCU_ERROR);
+    }
+    return error;
+}
+
+ed64_pro_ll_error_t
+ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    if (!status) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_SD_TIMEOUT_MS);
+    error = pro_send_command(transaction, PRO_CMD_SD_INIT, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    return ed64_pro_ll_check_status(transaction, status, deadline);
 }

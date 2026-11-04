@@ -34,12 +34,16 @@ typedef enum {
     ED64_PRO_LL_DRAIN_LIMIT,
     ED64_PRO_LL_FRAME,
     ED64_PRO_LL_TRAILING_DATA,
+    ED64_PRO_LL_MAILBOX_TIMEOUT,
+    ED64_PRO_LL_MCU_ERROR,
 } ed64_pro_ll_error_t;
 
 enum {
     ED64_PRO_PI_TIMEOUT_MS = 10,
     ED64_PRO_DRAIN_TIMEOUT_MS = 100,
     ED64_PRO_STATUS_TIMEOUT_MS = 1000,
+    ED64_PRO_STOP_TIMEOUT_MS = 5000,
+    ED64_PRO_SD_TIMEOUT_MS = 5000,
     ED64_PRO_ATTEMPT_TIMEOUT_MS = 15000,
     ED64_PRO_FIFO_CHUNK = 128,
     ED64_PRO_FIFO_LIMIT = 2048,
@@ -76,6 +80,12 @@ typedef struct {
     bool poisoned;
 } ed64_pro_ll_failure_t;
 
+typedef struct {
+    uint32_t max_pi_ticks;
+    uint32_t rx_peak;
+    uint32_t submissions;
+} ed64_pro_ll_metrics_t;
+
 /* Absolute CP0 deadlines must be within the signed half-range of the counter. */
 uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t timeout_ms);
 
@@ -87,6 +97,7 @@ uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t timeout_ms);
 ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, uint32_t deadline);
 ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction);
 const ed64_pro_ll_failure_t *ed64_pro_ll_get_failure (void);
+const ed64_pro_ll_metrics_t *ed64_pro_ll_get_metrics (void);
 
 /* One passive EDID read per launch; a failed read is never absence. */
 ed64_pro_probe_t ed64_pro_ll_probe (uint32_t deadline);
@@ -102,5 +113,12 @@ ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, s
 /* Caller supplies the original phase deadline. Output is valid only on LL_OK. */
 ed64_pro_ll_error_t
 ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline);
+
+ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, uint32_t deadline);
+/* These fresh-status operations also publish the complete frame on MCU_ERROR. */
+ed64_pro_ll_error_t
+ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline);
+ed64_pro_ll_error_t
+ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline);
 
 #endif
