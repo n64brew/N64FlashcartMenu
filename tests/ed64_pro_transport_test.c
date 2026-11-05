@@ -561,6 +561,9 @@ static void test_exact_deadline (void) {
         ED64_PRO_LL_PI_ACQUIRE_TIMEOUT
     );
     TEST_CHECK(mock.enqueues == 0 && output == 42);
+    const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
+    TEST_CHECK(failure->pi_context_valid && failure->pi_phase_limited && !failure->pi_submitted);
+    TEST_CHECK(failure->pi_budget_ticks == 0 && failure->pi_elapsed_ticks == 0);
     end(&transaction);
 }
 
@@ -608,7 +611,9 @@ static void test_completion_at_deadline (void) {
         ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &output, finish_deadline) == ED64_PRO_LL_PI_TIMEOUT
     );
     TEST_CHECK(!mock.active && output == 42);
-    TEST_CHECK(ed64_pro_ll_get_failure()->poisoned);
+    const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
+    TEST_CHECK(failure->poisoned && failure->pi_context_valid && failure->pi_submitted && failure->pi_phase_limited);
+    TEST_CHECK(failure->pi_budget_ticks == TICKS_FROM_MS(2) && failure->pi_elapsed_ticks == TICKS_FROM_MS(2));
     TEST_CHECK(strcmp(mock.events, "BRF") == 0);
     end(&transaction);
 }
@@ -1458,6 +1463,150 @@ static void test_init_serialization (void) {
     TEST_CHECK(mock.stop_commands == 1 && mock.sd_commands == 1 && mock.irq_depth == 0);
 }
 
+/**
+ * @brief Identify submitted register-read, status-write and status-read DMA timeouts.
+ */
+static void test_pi_failure_context (void) {
+    static const struct {
+        const char *name;
+        uint32_t address;
+        size_t length;
+        bool write;
+        unsigned fail_at;
+    } cases[] = {
+        {"FIFO availability register", ED64_PRO_REG_FIFOSTAT, 4, false, 1},
+        {"FIFO status command", ED64_PRO_REG_FIFO, 16, true, 2},
+        {"FIFO four-byte status reply", ED64_PRO_REG_FIFO, 16, false, 4},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        TEST_CASE(cases[i].name);
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        mock.fail_at = cases[i].fail_at;
+        uint32_t value = 0x12345678;
+        ed64_pro_status_t status;
+        memset(&status, 0xAA, sizeof(status));
+        ed64_pro_ll_error_t error;
+        if (i == 0) {
+            error = ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000));
+        } else {
+            error = ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000));
+        }
+        TEST_CHECK(error == ED64_PRO_LL_PI_TIMEOUT);
+        const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
+        TEST_CHECK(failure->pi_context_valid && failure->pi_submitted && failure->poisoned);
+        TEST_CHECK(failure->pi_address == cases[i].address && failure->pi_length == cases[i].length);
+        TEST_CHECK(failure->pi_write == cases[i].write && failure->ticket == mock.ticket && failure->ticket != 0);
+        TEST_CHECK(failure->transferred == 0 && value == 0x12345678 && status.key == 0xAA);
+        TEST_CHECK(mock.enqueues == mock.fail_at);
+        ed64_pro_ll_failure_t first;
+        memcpy(&first, failure, sizeof(first));
+        unsigned enqueues = mock.enqueues;
+        TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == ED64_PRO_LL_PI_TIMEOUT);
+        TEST_CHECK(memcmp(&first, ed64_pro_ll_get_failure(), sizeof(first)) == 0 && mock.enqueues == enqueues);
+        end(&transaction);
+        TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == ED64_PRO_LL_PI_TIMEOUT);
+        TEST_CHECK(memcmp(&first, ed64_pro_ll_get_failure(), sizeof(first)) == 0 && mock.enqueues == enqueues);
+    }
+}
+
+/**
+ * @brief Identify attempted queue acquisition separately from submitted DMA.
+ */
+static void test_pi_attempt_context (void) {
+    power_on();
+    identify();
+    mock.force_busy = true;
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    uint32_t value = 42;
+    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000)) ==
+               ED64_PRO_LL_PI_ACQUIRE_TIMEOUT);
+    const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
+    TEST_CHECK(failure->pi_context_valid && !failure->pi_submitted && !failure->poisoned && failure->ticket == 0);
+    TEST_CHECK(failure->pi_address == ED64_PRO_REG_FIFOSTAT && failure->pi_length == 4 && !failure->pi_write);
+    TEST_CHECK(mock.enqueues == 0 && value == 42);
+    end(&transaction);
+}
+
+/**
+ * @brief Avoid attributing a protocol-only fault to the last successful PI access.
+ */
+static void test_non_pi_fault_context (void) {
+    power_on();
+    identify();
+    mock.replies[0].bytes[0] = 0;
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    ed64_pro_status_t status;
+    memset(&status, 0xAA, sizeof(status));
+    TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == ED64_PRO_LL_FRAME);
+    const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
+    TEST_CHECK(!failure->pi_context_valid && !failure->pi_submitted && !failure->pi_write);
+    TEST_CHECK(failure->pi_address == 0 && failure->pi_length == 0 && !failure->poisoned && failure->ticket == 0);
+    TEST_CHECK(failure->pi_budget_ticks == 0 && failure->pi_elapsed_ticks == 0 && !failure->pi_phase_limited);
+    TEST_CHECK(mock.enqueues == 4 && mock.rx_consumed == 4 && status.key == 0xAA);
+    end(&transaction);
+}
+
+/**
+ * @brief Distinguish a full PI cap from a deadline equal to that cap.
+ */
+static void test_pi_full_budget_timing (void) {
+    const uint32_t phase_ms[] = {1000, ED64_PRO_PI_TIMEOUT_MS};
+    for (size_t i = 0; i < sizeof(phase_ms) / sizeof(phase_ms[0]); i++) {
+        TEST_CASE_("phase budget %u ms", phase_ms[i]);
+        power_on();
+        identify();
+        mock.tick_step = TICKS_FROM_MS(1);
+        mock.never_finish = true;
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        uint32_t value = 42;
+        TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(phase_ms[i])) ==
+                   ED64_PRO_LL_PI_TIMEOUT);
+        const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
+        TEST_CHECK(failure->pi_context_valid && failure->pi_submitted && failure->poisoned && !failure->pi_phase_limited);
+        TEST_CHECK(failure->pi_budget_ticks == TICKS_FROM_MS(ED64_PRO_PI_TIMEOUT_MS));
+        TEST_CHECK(failure->pi_elapsed_ticks >= failure->pi_budget_ticks);
+        TEST_CHECK(failure->pi_elapsed_ticks <= failure->pi_budget_ticks + TICKS_FROM_MS(2));
+        TEST_CHECK(mock.enqueues == 1 && value == 42);
+        end(&transaction);
+    }
+}
+
+/**
+ * @brief Preserve a phase-clipped final FIFO poll even when DMA finishes at the phase deadline.
+ */
+static void test_pi_final_poll_timing (void) {
+    power_on();
+    mock.tick_step = 0;
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    TEST_ASSERT(ed64_pro_ll_begin(&transaction, TICKS_FROM_MS(5000)) == ED64_PRO_LL_OK);
+    mock.now = TICKS_FROM_MS(4999);
+    finish_deadline = TICKS_FROM_MS(5000);
+    mock.poll_hook = expire_on_completion;
+    uint32_t value = 42;
+    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000)) ==
+               ED64_PRO_LL_PI_TIMEOUT);
+    const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
+    TEST_CHECK(failure->pi_context_valid && failure->pi_submitted && failure->poisoned && failure->pi_phase_limited);
+    TEST_CHECK(failure->pi_address == ED64_PRO_REG_FIFOSTAT && failure->pi_length == 4 && !failure->pi_write);
+    TEST_CHECK(failure->pi_budget_ticks == TICKS_FROM_MS(1) && failure->pi_elapsed_ticks == TICKS_FROM_MS(1));
+    TEST_CHECK(!mock.active && failure->ticket == mock.ticket && value == 42 && mock.enqueues == 1);
+    ed64_pro_ll_failure_t first;
+    memcpy(&first, failure, sizeof(first));
+    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000)) ==
+               ED64_PRO_LL_PI_TIMEOUT);
+    TEST_CHECK(memcmp(&first, ed64_pro_ll_get_failure(), sizeof(first)) == 0 && mock.enqueues == 1);
+    end(&transaction);
+    TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == ED64_PRO_LL_PI_TIMEOUT);
+    TEST_CHECK(memcmp(&first, ed64_pro_ll_get_failure(), sizeof(first)) == 0 && mock.enqueues == 1);
+}
+
 TEST_LIST = {
     {"exact register read and cache order", test_register_read},
     {"exact mailbox write and cache order", test_register_write},
@@ -1498,5 +1647,10 @@ TEST_LIST = {
     {"whole attempt budget spans probe and initialization", test_whole_attempt_deadline},
     {"absent and unsupported context never initialize", test_init_absent_and_context},
     {"initialization guard covers the complete handoff", test_init_serialization},
+    {"PI timeout retains submitted access context", test_pi_failure_context},
+    {"PI acquisition failure retains attempted context", test_pi_attempt_context},
+    {"protocol fault has no active PI context", test_non_pi_fault_context},
+    {"PI cap timing records full effective budget", test_pi_full_budget_timing},
+    {"final FIFO poll timing records clipped phase budget", test_pi_final_poll_timing},
     {NULL, NULL},
 };

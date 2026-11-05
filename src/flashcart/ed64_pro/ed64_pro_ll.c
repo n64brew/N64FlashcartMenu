@@ -24,6 +24,14 @@ static struct {
     ed64_pro_ll_metrics_t metrics;
     uint32_t pi_started;
     bool pi_active;
+    bool pi_context_valid;
+    uint32_t pi_address;
+    size_t pi_length;
+    bool pi_write;
+    bool pi_submitted;
+    uint32_t pi_budget_ticks;
+    uint32_t pi_elapsed_ticks;
+    bool pi_phase_limited;
 } pro_ll;
 
 _Static_assert(sizeof(pro_staging) == 512, "Pro staging must own complete cache lines");
@@ -79,6 +87,7 @@ static uint32_t pro_deadline (const ed64_pro_ll_transaction_t *transaction, uint
 static void pro_measure_pi (void) {
     if (pro_ll.pi_active) {
         uint32_t elapsed = TICKS_READ() - pro_ll.pi_started;
+        pro_ll.pi_elapsed_ticks = elapsed;
         if (elapsed > pro_ll.metrics.max_pi_ticks) {
             pro_ll.metrics.max_pi_ticks = elapsed;
         }
@@ -100,6 +109,14 @@ static ed64_pro_ll_error_t pro_fail (ed64_pro_ll_error_t error) {
             .transferred = pro_ll.transferred,
             .ticket = pro_ll.ticket,
             .poisoned = pro_ll.ticket != 0,
+            .pi_context_valid = pro_ll.pi_context_valid,
+            .pi_address = pro_ll.pi_context_valid ? pro_ll.pi_address : 0,
+            .pi_length = pro_ll.pi_context_valid ? pro_ll.pi_length : 0,
+            .pi_write = pro_ll.pi_context_valid && pro_ll.pi_write,
+            .pi_submitted = pro_ll.pi_context_valid && pro_ll.pi_submitted,
+            .pi_budget_ticks = pro_ll.pi_context_valid ? pro_ll.pi_budget_ticks : 0,
+            .pi_elapsed_ticks = pro_ll.pi_context_valid ? pro_ll.pi_elapsed_ticks : 0,
+            .pi_phase_limited = pro_ll.pi_context_valid && pro_ll.pi_phase_limited,
         };
     }
     return pro_ll.failure.code;
@@ -216,12 +233,21 @@ static ed64_pro_ll_error_t pro_transfer (
         return ED64_PRO_LL_NOT_IDENTIFIED;
     }
     deadline = pro_deadline(transaction, deadline);
+    /* Record the attempt before acquisition; this performs no additional PI I/O. */
+    pro_ll.pi_context_valid = true;
+    pro_ll.pi_address = (uint32_t)reg;
+    pro_ll.pi_length = length;
+    pro_ll.pi_write = write;
+    pro_ll.pi_submitted = false;
     pro_ll.pi_started = TICKS_READ();
     pro_ll.pi_active = true;
     uint32_t pi_deadline = pro_ll.pi_started + TICKS_FROM_MS(ED64_PRO_PI_TIMEOUT_MS);
+    pro_ll.pi_phase_limited = (int32_t)(deadline - pi_deadline) < 0;
     if ((int32_t)(pi_deadline - deadline) < 0) {
         deadline = pi_deadline;
     }
+    pro_ll.pi_budget_ticks = (int32_t)(deadline - pro_ll.pi_started) > 0 ? deadline - pro_ll.pi_started : 0;
+    pro_ll.pi_elapsed_ticks = 0;
     if (pro_expired(deadline)) {
         return pro_fail(ED64_PRO_LL_PI_ACQUIRE_TIMEOUT);
     }
@@ -253,6 +279,7 @@ static ed64_pro_ll_error_t pro_transfer (
         if (!busy && !expired && !pi_error) {
             pro_ll.ticket =
                 write ? dma_write_raw_async(pro_staging, reg, length) : dma_read_raw_async(pro_staging, reg, length);
+            pro_ll.pi_submitted = true;
             pro_ll.metrics.submissions++;
         }
         enable_interrupts();
@@ -297,6 +324,7 @@ static ed64_pro_ll_error_t pro_transfer (
     }
     MEMORY_BARRIER();
     pro_measure_pi();
+    pro_ll.pi_context_valid = false;
     return ED64_PRO_LL_OK;
 }
 

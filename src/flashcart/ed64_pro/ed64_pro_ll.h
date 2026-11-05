@@ -78,6 +78,21 @@ typedef struct {
     size_t transferred;
     uint64_t ticket;
     bool poisoned;
+    /* Valid only for an attempted PI operation active when this fault latched.
+     * Protocol-only faults do not identify the last completed PI access as failed.
+     * Length is bus bytes (FIFO payload bytes use one 32-bit word each).
+     */
+    bool pi_context_valid;
+    uint32_t pi_address;
+    size_t pi_length;
+    bool pi_write;
+    bool pi_submitted;
+    /* Effective budget and existing PI timer measurement, in CP0 ticks.
+     * phase_limited means the phase/transaction deadline shortened the PI cap.
+     */
+    uint32_t pi_budget_ticks;
+    uint32_t pi_elapsed_ticks;
+    bool pi_phase_limited;
 } ed64_pro_ll_failure_t;
 
 typedef struct {
