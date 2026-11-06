@@ -54,7 +54,8 @@ static ed64_pro_ll_error_t pro_init_fail (ed64_pro_ll_error_t error) {
 /**
  * @brief Probe once within the whole-attempt budget, distinguishing absence from I/O failure.
  *
- * Busy or unsupported-context results leave the startup state unchanged.
+ * Cold-start rejections retain their probe result without latching a failure;
+ * busy or unsupported-context results leave the startup state unchanged.
  */
 ed64_pro_probe_t ed64_pro_probe (void) {
     uint32_t start = TICKS_READ();
@@ -62,6 +63,9 @@ ed64_pro_probe_t ed64_pro_probe (void) {
                                                                : pro_attempt_deadline;
     ed64_pro_probe_t result = ed64_pro_ll_probe(deadline);
     if (result.error == ED64_PRO_LL_BUSY || result.error == ED64_PRO_LL_CONTEXT) {
+        if (pro_diagnostics.state == ED64_PRO_COLD) {
+            pro_diagnostics.probe = result;
+        }
         return result;
     }
     if (pro_diagnostics.state == ED64_PRO_COLD) {
@@ -218,6 +222,8 @@ static const char *pro_error_name (ed64_pro_ll_error_t error) {
  * the missing storage backend. The shared output buffer is overwritten on each call.
  */
 char *ed64_pro_get_error_message (void) {
+    ed64_pro_ll_error_t error = pro_diagnostics.failure.code != ED64_PRO_LL_OK ? pro_diagnostics.failure.code
+                                                                           : pro_diagnostics.probe.error;
     if (pro_diagnostics.state == ED64_PRO_READY) {
         snprintf(
             pro_error_message,
@@ -231,11 +237,11 @@ char *ed64_pro_get_error_message (void) {
             "Cartridge is not an EverDrive-64 Pro.\nEDID: %08" PRIX32,
             pro_diagnostics.probe.id
         );
-    } else if (pro_diagnostics.failure.code != ED64_PRO_LL_OK) {
+    } else if (error != ED64_PRO_LL_OK) {
         const char *identity = pro_diagnostics.probe.outcome == ED64_PRO_PROBE_IDENTIFIED
                                    ? "EverDrive-64 Pro startup failed."
                                    : "Cartridge identity unknown.";
-        if (pro_diagnostics.failure.code == ED64_PRO_LL_MCU_ERROR && pro_diagnostics.status_valid) {
+        if (error == ED64_PRO_LL_MCU_ERROR && pro_diagnostics.status_valid) {
             snprintf(
                 pro_error_message,
                 sizeof(pro_error_message),
@@ -251,7 +257,7 @@ char *ed64_pro_get_error_message (void) {
                 "%s\n%s: %s.\nConfirmed RX bytes: %zu.",
                 identity,
                 ed64_pro_phase_name(pro_diagnostics.phase),
-                pro_error_name(pro_diagnostics.failure.code),
+                pro_error_name(error),
                 pro_diagnostics.failure.transferred
             );
         }

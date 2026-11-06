@@ -194,6 +194,11 @@ From the project root, run variants sequentially:
 ```sh
 make -f tests/Makefile test-ed64-pro test-ed64-pro-sanitize
 
+# Linux host suites use a separate build directory from the macOS binaries.
+docker exec --workdir /work n64-libdragon-prebuilt \
+  make -f tests/Makefile test-ed64-pro test-ed64-pro-sanitize \
+  CC=gcc HOST_BUILD_DIR=/tmp/n64flashcartmenu-host-tests
+
 docker exec --workdir /work n64-libdragon-prebuilt \
   make -j2 output/N64FlashcartMenu.n64
 
@@ -248,6 +253,8 @@ caller offsets 0-31, lengths 0/1/2/3/4/5/15/16/17/127/128/129/2047/2048 and
 rejected over-limit/overflow lengths, bounded refill, opaque status bytes,
 partial/malformed/trailing replies, wraparound, phase/whole deadlines, and
 failure at all 27 DMA boundaries of the golden initialization transcript.
+Cold-start BUSY/CONTEXT rejections retain their terminal diagnostics, remain
+retryable, and do not replace an active initialization's sticky failure.
 The SDK stub intentionally exposes no blocking/fixup DMA or CPU-PI API.
 Host models do not establish physical bus or R4300 cache/interrupt behavior.
 
@@ -305,12 +312,13 @@ on hardware; a successful build alone is not a hardware result.
 
 ### Qualification record
 
-Software and hardware record on 2026-11-04. Hardware results below are observed
-from user-supplied HDMI screenshots, not inferred from upload-tool exit codes.
+Hardware record on 2026-11-04; complete host suites re-run on 2026-11-06.
+Hardware results below are observed from user-supplied HDMI screenshots, not
+inferred from upload-tool exit codes.
 
 | Gate / case | Result |
 |---|---|
-| 39 transport + 10 facade cases, normal and AddressSanitizer/UndefinedBehaviorSanitizer | PASS on macOS/Apple Clang and container Linux/GCC; facade runs in both debug and release modes, including all listed parameterized cases |
+| 45 transport + 10 facade cases, normal and AddressSanitizer/UndefinedBehaviorSanitizer | PASS on 2026-11-06 with macOS/Apple Clang 21.0.0 and container Linux/GCC 11.4.0; facade runs in both debug and release modes, including all listed parameterized cases |
 | Targeted N64 debug menu build | PASS with the inspected installed SDK, including terminal startup integration |
 | Hardware test ROM and timeout-injection ROM builds | PASS; separate output/object directories, production driver linked, no asset filesystem |
 | N64 ELF buffer ownership | PASS: 512-byte staging aligned to 512, metadata outside its lines, two 16-byte aligned shared caller-line fixtures |

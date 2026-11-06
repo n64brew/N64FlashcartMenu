@@ -672,6 +672,7 @@ static void nested_entry (void) {
     ed64_pro_ll_transaction_t nested;
     ed64_pro_ll_transaction_t *owner = pro_ll.owner;
     size_t transferred = pro_ll.transferred;
+    ed64_pro_diagnostics_t startup = pro_diagnostics;
     unsigned enqueues = mock.enqueues;
     ed64_pro_status_t status;
     memset(&status, 0xCD, sizeof(status));
@@ -683,10 +684,16 @@ static void nested_entry (void) {
     mock.cp0 &= ~C0_STATUS_IE;
     TEST_CHECK(ed64_pro_ll_begin(&nested, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
     TEST_CHECK(ed64_pro_ll_read_status(owner, &status, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
+    TEST_CHECK(ed64_pro_probe().error == ED64_PRO_LL_CONTEXT);
+    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_CONTEXT);
     mock.cp0 |= C0_STATUS_IE;
     TEST_CHECK(pro_ll.owner == owner && mock.irq_depth == 0);
     TEST_CHECK(pro_ll.transferred == transferred && mock.enqueues == enqueues && status.key == 0xCD);
     TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
+    TEST_CHECK(memcmp(&startup.failure, &pro_diagnostics.failure, sizeof(startup.failure)) == 0);
+    if (startup.state == ED64_PRO_INITIALIZING) {
+        TEST_CHECK(memcmp(&startup, &pro_diagnostics, sizeof(startup)) == 0);
+    }
 }
 
 /**
@@ -1436,6 +1443,53 @@ static void test_whole_attempt_deadline (void) {
 }
 
 /**
+ * @brief Display cold-start ownership/context rejections without latching them or preventing retry.
+ */
+static void test_cold_start_rejections (void) {
+    static const struct {
+        const char *name;
+        ed64_pro_ll_error_t error;
+        const char *message;
+    } cases[] = {
+        {"busy", ED64_PRO_LL_BUSY, "Transport already in use"},
+        {"unsupported context", ED64_PRO_LL_CONTEXT, "Unsupported interrupt/thread context"},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        for (unsigned initialize = 0; initialize < 2; initialize++) {
+            TEST_CASE_("%s via %s", cases[i].name, initialize ? "initialization" : "probe");
+            power_on();
+            ed64_pro_ll_transaction_t owner;
+            if (cases[i].error == ED64_PRO_LL_BUSY) {
+                begin(&owner);
+            } else {
+                mock.cp0 = 0;
+            }
+            ed64_pro_ll_error_t error = initialize ? ed64_pro_init_transport() : ed64_pro_probe().error;
+            TEST_CHECK(error == cases[i].error);
+            const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+            TEST_CHECK(diagnostics->state == ED64_PRO_COLD && diagnostics->phase == ED64_PRO_PHASE_PROBE);
+            TEST_CHECK(diagnostics->probe.error == cases[i].error && !diagnostics->probe.id_valid);
+            TEST_CHECK(diagnostics->failure.code == ED64_PRO_LL_OK && !diagnostics->failure.poisoned);
+            TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
+            TEST_CHECK(strstr(ed64_pro_get_error_message(), cases[i].message) != NULL);
+            TEST_CHECK(mock.enqueues == 0 && mock.event_count == 0);
+            if (cases[i].error == ED64_PRO_LL_BUSY) {
+                TEST_CHECK(pro_ll.owner == &owner);
+                end(&owner);
+            } else {
+                mock.cp0 = C0_STATUS_IE;
+            }
+            TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_OK);
+            TEST_CHECK(diagnostics->state == ED64_PRO_READY && diagnostics->probe.error == ED64_PRO_LL_OK);
+            TEST_CHECK(diagnostics->failure.code == ED64_PRO_LL_OK);
+            unsigned enqueues = mock.enqueues;
+            TEST_CHECK(strstr(ed64_pro_get_error_message(), "storage backend is not implemented") != NULL);
+            TEST_CHECK(mock.enqueues == enqueues);
+        }
+    }
+}
+
+/**
  * @brief Allow context rejection without probing and cache confirmed absence without MCU writes.
  */
 static void test_init_absent_and_context (void) {
@@ -1447,6 +1501,9 @@ static void test_init_absent_and_context (void) {
     mock.register_value = 0xED640025u;
     TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_NOT_IDENTIFIED);
     TEST_CHECK(ed64_pro_get_diagnostics()->state == ED64_PRO_ABSENT && mock.enqueues == 1);
+    TEST_CHECK(ed64_pro_get_diagnostics()->probe.error == ED64_PRO_LL_OK);
+    TEST_CHECK(strstr(ed64_pro_get_error_message(), "Cartridge is not an EverDrive-64 Pro") != NULL);
+    TEST_CHECK(mock.enqueues == 1);
     TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_NOT_IDENTIFIED && mock.enqueues == 1);
     TEST_CHECK(mock.cart_writes == 0);
 }
@@ -1645,6 +1702,7 @@ TEST_LIST = {
     {"both handoff cleanup phases are bounded", test_init_cleanup_limits},
     {"SD initialization uses its original five-second budget", test_sd_deadline},
     {"whole attempt budget spans probe and initialization", test_whole_attempt_deadline},
+    {"cold-start rejections retain diagnostics and remain retryable", test_cold_start_rejections},
     {"absent and unsupported context never initialize", test_init_absent_and_context},
     {"initialization guard covers the complete handoff", test_init_serialization},
     {"PI timeout retains submitted access context", test_pi_failure_context},
