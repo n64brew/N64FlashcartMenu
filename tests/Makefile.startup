@@ -1,0 +1,35 @@
+.DEFAULT_GOAL := all
+
+BUILD_DIR ?= build/ed64-pro-startup-guard
+OUTPUT_DIR ?= output/ed64-pro-startup-guard
+
+ifneq ($(ED64_PRO_STARTUP_INNER),1)
+
+.PHONY: all
+all:
+	$(MAKE) --no-print-directory -f tests/Makefile.startup ED64_PRO_STARTUP_INNER=1 \
+		BUILD_DIR="$(BUILD_DIR)" OUTPUT_DIR="$(OUTPUT_DIR)" "$(OUTPUT_DIR)/N64FlashcartMenu.n64"
+
+else
+
+include Makefile
+
+# Preserve external calls at the checked boundaries; other units keep normal LTO.
+$(BUILD_DIR)/menu/menu.o $(BUILD_DIR)/flashcart/flashcart.o \
+$(BUILD_DIR)/flashcart/ed64_pro/ed64_pro_ll.o $(BUILD_DIR)/ed64_pro_startup_guard.o: N64_CFLAGS+=-fno-lto
+GUARDED_APIS := flashcart_init dma_read_raw_async dma_write_raw_async dma_read_async dma_read dma_write \
+	io_read io_write debug_init_sdfs debug_init_usblog debug_init_emulog dfs_init \
+	f_mount f_open f_read f_write f_opendir f_stat f_mkdir usb_initialize usb_poll usb_write usb_read joypad_init
+N64_LDFLAGS += $(addprefix --wrap=,$(GUARDED_APIS))
+
+$(BUILD_DIR)/$(PROJECT_NAME).elf: $(BUILD_DIR)/ed64_pro_startup_guard.o
+
+# Same compiler/flags/dependency pattern as the installed SDK's C rule.
+$(BUILD_DIR)/ed64_pro_startup_guard.o: tests/ed64_pro_startup_guard.c src/flashcart/flashcart.h tests/Makefile.startup
+	@mkdir -p $(dir $@)
+	@echo "    [CC] $<"
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+-include $(BUILD_DIR)/ed64_pro_startup_guard.d
+
+endif

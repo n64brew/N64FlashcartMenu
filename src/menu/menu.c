@@ -5,6 +5,7 @@
  */
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -42,6 +43,25 @@ static menu_t *menu;
 
 static bool interlaced = true;
 
+static void menu_pro_startup_error (flashcart_err_t error) __attribute__((noreturn));
+/**
+ * @brief Permanently display the Pro startup result without further PI or backend work.
+ *
+ * Built-in console/font rendering remains usable with a quarantined DMA.
+ * Do not initialize controls, filesystem assets, or USB logging on this path.
+ */
+static void menu_pro_startup_error (flashcart_err_t error) {
+    console_init();
+    console_set_debug(false);
+    console_set_render_mode(RENDER_MANUAL);
+    printf("N64FlashcartMenu\n\n%s\n\nPower-cycle the console to return to stock firmware.\n"
+           "Do not retry after a transport failure.\n",
+           flashcart_convert_error_message(error));
+    for (;;) {
+        console_render();
+    }
+}
+
 /**
  * @brief Initialize the menu system.
  * 
@@ -57,6 +77,9 @@ static void menu_init (boot_params_t *boot_params) {
     menu->next_mode = MENU_MODE_STARTUP;
 
     menu->flashcart_err = flashcart_init(&menu->storage_prefix);
+    if (menu->flashcart_err == FLASHCART_ERR_ED64_PRO) {
+        menu_pro_startup_error(menu->flashcart_err);
+    }
     if (menu->flashcart_err != FLASHCART_OK) {
         menu->next_mode = MENU_MODE_FAULT;
     }

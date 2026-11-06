@@ -1,0 +1,45 @@
+.DEFAULT_GOAL := all
+
+PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+BUILD_DIR ?= $(PROJECT_ROOT)/build/ed64-pro-test
+OUTPUT_DIR ?= $(PROJECT_ROOT)/output/ed64-pro-test
+TEST_FLAGS ?=
+
+ifneq ($(ED64_PRO_HARDWARE_INNER),1)
+
+.PHONY: all
+all:
+	@mkdir -p "$(OUTPUT_DIR)"
+	$(MAKE) --no-print-directory -C "$(OUTPUT_DIR)" -f "$(PROJECT_ROOT)/tests/Makefile.n64" \
+		ED64_PRO_HARDWARE_INNER=1 BUILD_DIR="$(abspath $(BUILD_DIR))"
+
+else
+
+# Run the SDK's unmodified ROM rules inside the ignored output directory.
+SOURCE_DIR := $(PROJECT_ROOT)
+ifeq ($(N64_INST),)
+  $(error N64_INST is not set)
+endif
+include $(N64_INST)/include/n64.mk
+
+ROMNAME := ed64_pro_hardware
+N64_ROM_TITLE := "ED64 Pro transport"
+N64_ROM_SAVETYPE := none
+N64_ROM_REGIONFREE := 1
+N64_ROM_EXPANSIONPAK := unused
+N64_CFLAGS += -I$(PROJECT_ROOT)/src -Wall -Wextra -Werror $(TEST_FLAGS)
+
+SOURCES := tests/ed64_pro_hardware.c src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro_ll.c
+OBJS := $(addprefix $(BUILD_DIR)/,$(SOURCES:.c=.o))
+BUILD_ID := $(shell git -C "$(PROJECT_ROOT)" describe --always --dirty)
+
+.PHONY: all FORCE
+all: $(ROMNAME).z64
+
+$(BUILD_DIR)/$(ROMNAME).elf: $(OBJS)
+$(BUILD_DIR)/tests/ed64_pro_hardware.o: FORCE
+$(BUILD_DIR)/tests/ed64_pro_hardware.o: N64_CFLAGS+=-DED64_PRO_TEST_BUILD_ID=\"$(BUILD_ID)\"
+
+-include $(OBJS:.o=.d)
+
+endif

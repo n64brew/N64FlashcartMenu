@@ -20,6 +20,7 @@ typedef enum {
     FLASHCART_ERR_LOAD, /**< Load error */
     FLASHCART_ERR_INT, /**< Internal error */
     FLASHCART_ERR_FUNCTION_NOT_SUPPORTED, /**< Function not supported error */
+    FLASHCART_ERR_ED64_PRO, /**< Terminal Pro detection/transport-only startup result */
 } flashcart_err_t;
 
 /** @brief List of optional supported flashcart features */
