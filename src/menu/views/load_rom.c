@@ -13,6 +13,7 @@ static bool show_extra_info_message = false;
 static bool show_advanced_info_message = false;
 static bool show_expansion_pak_warning = false;
 static component_boxart_t *boxart;
+static component_boxart_t *pending_boxart;
 static bool boxart_sd_fallback_attempted = false;
 static char *rom_filename = NULL;
 
@@ -461,11 +462,12 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
             }
 
             if (new_boxart != NULL) {
-                // Only free old boxart after successful new allocation
                 if (!low_memory_mode) {
-                    ui_components_boxart_free(boxart);
+                    // Keep the current art visible until the new PNG has decoded.
+                    pending_boxart = new_boxart;
+                } else {
+                    boxart = new_boxart;
                 }
-                boxart = new_boxart;
                 current_metadata_image_index = new_metadata_image_index;
                 // The user picked a different image; allow the SD-card fallback in
                 // view_load_rom_display() to run again if this new one fails to decode.
@@ -980,6 +982,8 @@ static void reset_metadata_image_cache (void) {
 }
 
 static void deinit (void) {
+    ui_components_boxart_free(pending_boxart);
+    pending_boxart = NULL;
     ui_components_boxart_free(boxart);
     boxart = NULL;
     ui_components_background_reload();
@@ -1088,6 +1092,17 @@ void view_load_rom_init (menu_t *menu) {
 
 void view_load_rom_display (menu_t *menu, surface_t *display) {
     process(menu);
+
+    if (pending_boxart && !pending_boxart->loading) {
+        if (pending_boxart->image) {
+            ui_components_boxart_free(boxart);
+            boxart = pending_boxart;
+            pending_boxart = NULL;
+        } else {
+            ui_components_boxart_free(pending_boxart);
+            pending_boxart = NULL;
+        }
+    }
 
     if (boxart != NULL && !boxart->loading && boxart->image == NULL) {
         // Decode failed (or produced no image), on either memory configuration; drop the
