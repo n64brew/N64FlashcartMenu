@@ -13,6 +13,7 @@ static bool show_extra_info_message = false;
 static bool show_advanced_info_message = false;
 static bool show_expansion_pak_warning = false;
 static component_boxart_t *boxart;
+static component_boxart_t *pending_boxart;
 static bool boxart_sd_fallback_attempted = false;
 static char *rom_filename = NULL;
 
@@ -411,8 +412,12 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
     // (unlike low-memory mode, where freeing it also aborts its decode via
     // ui_components_boxart_free()). If it's still loading, the single-instance PNG decoder
     // is busy, so any new extraction attempt here would just waste a ZIP extraction and
-    // fail with PNG_ERR_BUSY. Skip it and let the current decode finish first.
-    if (!low_memory_mode && boxart != NULL && boxart->loading) {
+    // fail with PNG_ERR_BUSY. Skip it and let the current decode finish first. Also skip
+    // while a pending_boxart swap is outstanding (even once its decode has finished but
+    // before view_load_rom_display() promotes it), otherwise a new swap here would
+    // overwrite pending_boxart and leak its component and decoded surface.
+    if (!low_memory_mode && (pending_boxart != NULL ||
+                             (boxart != NULL && boxart->loading))) {
         return;
     }
 
@@ -461,11 +466,12 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
             }
 
             if (new_boxart != NULL) {
-                // Only free old boxart after successful new allocation
                 if (!low_memory_mode) {
-                    ui_components_boxart_free(boxart);
+                    // Keep the current art visible until the new PNG has decoded.
+                    pending_boxart = new_boxart;
+                } else {
+                    boxart = new_boxart;
                 }
-                boxart = new_boxart;
                 current_metadata_image_index = new_metadata_image_index;
                 // The user picked a different image; allow the SD-card fallback in
                 // view_load_rom_display() to run again if this new one fails to decode.
@@ -980,6 +986,8 @@ static void reset_metadata_image_cache (void) {
 }
 
 static void deinit (void) {
+    ui_components_boxart_free(pending_boxart);
+    pending_boxart = NULL;
     ui_components_boxart_free(boxart);
     boxart = NULL;
     ui_components_background_reload();
@@ -1101,6 +1109,17 @@ void view_load_rom_init (menu_t *menu) {
 
 void view_load_rom_display (menu_t *menu, surface_t *display) {
     process(menu);
+
+    if (pending_boxart && !pending_boxart->loading) {
+        if (pending_boxart->image) {
+            ui_components_boxart_free(boxart);
+            boxart = pending_boxart;
+            pending_boxart = NULL;
+        } else {
+            ui_components_boxart_free(pending_boxart);
+            pending_boxart = NULL;
+        }
+    }
 
     if (boxart != NULL && !boxart->loading && boxart->image == NULL) {
         // Decode failed (or produced no image), on either memory configuration; drop the
