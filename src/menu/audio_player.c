@@ -116,7 +116,6 @@ static int mp3_find_first_frame (audio_track_t *t) {
         if (samples > 0 && info.frame_bytes > 0) {
             t->buffer_ptr += offset;
             t->buffer_left -= offset;
-            info.frame_bytes -= (int)offset;
             t->info = info;
             drmp3dec_init(&t->dec);
             return samples;
