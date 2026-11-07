@@ -12,14 +12,13 @@ Files are made available:
 	- None.
 
 - **Bug Fixes**
-	- None.
+	- Preserve alpha transparency in decoded boxart.
 
 - **Documentation**
 	- Menu credits were updated to n64brew.
 
 - **Refactor**
-	- minimp3 was replaced with dr_mp3 (which is an abstraction).
-
+	- None.
 - **Other**
 	- None.
 
