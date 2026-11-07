@@ -204,6 +204,10 @@ void ui_components_boxart_free(component_boxart_t *b) {
             jpeg_decoder_abort();
         }
         if (b->image) {
+            // Wait for any queued RDP draw commands referencing this surface (e.g. from
+            // ui_components_boxart_draw()) to finish before freeing it, since the pending
+            // double-buffering swap can free the previously-displayed image.
+            rspq_wait();
             surface_free(b->image);
             free(b->image);
         }
@@ -223,7 +227,7 @@ void ui_components_boxart_draw(component_boxart_t *b) {
     int box_y = BOXART_Y;
     if (b && b->image && b->image->width <= BOXART_WIDTH_MAX && b->image->height <= BOXART_HEIGHT_MAX) {
         rdpq_mode_push();
-            rdpq_set_mode_copy(false);
+            rdpq_set_mode_copy(true);
             if (b->image->height == BOXART_HEIGHT_MAX) {
                 box_x = BOXART_X_JP;
                 box_y = BOXART_Y_JP;
@@ -233,13 +237,5 @@ void ui_components_boxart_draw(component_boxart_t *b) {
             }
             rdpq_tex_blit(b->image, box_x, box_y, NULL);
         rdpq_mode_pop();
-    } else {
-        ui_components_box_draw(
-            BOXART_X,
-            BOXART_Y,
-            BOXART_X + BOXART_WIDTH,
-            BOXART_Y + BOXART_HEIGHT,
-            BOXART_LOADING_COLOR
-        );
     }
 }
