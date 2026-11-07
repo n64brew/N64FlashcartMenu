@@ -1154,8 +1154,11 @@ static void deinit (void) {
     music_count = 0;
     queue_cache_count = 0;
 
-    sound_init_default();
+    // Close the current track's SD file handle before reconfiguring audio,
+    // since sound_init_default() may reopen a custom BGM file from the SD
+    // card and some filesystem drivers don't support two open SD handles.
     audioplayer_deinit();
+    sound_init_default();
 }
 
 

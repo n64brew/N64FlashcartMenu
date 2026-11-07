@@ -26,6 +26,35 @@ void ui_components_box_draw (int x0, int y0, int x1, int y1, color_t color) {
     rdpq_mode_pop();
 }
 
+/* Two opaque contrasting outlines keep focus visible over every palette and image. */
+void ui_components_focus_draw(int x0, int y0, int x1, int y1) {
+    rdpq_mode_push();
+    for (int inset = 0; inset < 4; inset += 2) {
+        rdpq_set_mode_fill(inset ? RGBA32(255, 255, 255, 255) : RGBA32(0, 0, 0, 255));
+        rdpq_fill_rectangle(x0, y0, x1, y0 + 2);
+        rdpq_fill_rectangle(x0, y1 - 2, x1, y1);
+        rdpq_fill_rectangle(x0, y0 + 2, x0 + 2, y1 - 2);
+        rdpq_fill_rectangle(x1 - 2, y0 + 2, x1, y1 - 2);
+        x0 += 2; y0 += 2; x1 -= 2; y1 -= 2;
+    }
+    rdpq_mode_pop();
+}
+
+static void ui_components_panel_draw(int x0, int y0, int x1, int y1) {
+    color_t panel = theme_get()->panel;
+    rdpq_mode_push();
+        rdpq_set_mode_standard();
+        rdpq_set_prim_color(panel);
+        rdpq_mode_combiner(RDPQ_COMBINER_FLAT);
+        rdpq_mode_blender(RDPQ_BLENDER_MULTIPLY);
+        /* RGB dithering happens after the blender, so RGBA16 quantizes the
+         * composed panel-over-background color instead of banding the result.
+         * RGBA32 preserves the blended color directly. */
+        rdpq_mode_dithering(DITHER_SQUARE_NONE);
+        rdpq_fill_rectangle(x0, y0, x1, y1);
+    rdpq_mode_pop();
+}
+
 /**
  * @brief Draw a border with the specified color.
  * 
@@ -61,6 +90,8 @@ void ui_components_border_draw (int x0, int y0, int x1, int y1) {
  * @brief Draw the layout with tabs.
  */
 void ui_components_layout_draw_tabbed (void) {
+    ui_components_panel_draw(VISIBLE_AREA_X0, VISIBLE_AREA_Y0 + TAB_HEIGHT + BORDER_THICKNESS,
+        VISIBLE_AREA_X1, VISIBLE_AREA_Y1);
     ui_components_border_draw(
         VISIBLE_AREA_X0,
         VISIBLE_AREA_Y0 + TAB_HEIGHT + BORDER_THICKNESS,
@@ -81,6 +112,7 @@ void ui_components_layout_draw_tabbed (void) {
  * @brief Draw the layout.
  */
 void ui_components_layout_draw (void) {
+    ui_components_panel_draw(VISIBLE_AREA_X0, VISIBLE_AREA_Y0, VISIBLE_AREA_X1, VISIBLE_AREA_Y1);
     ui_components_border_draw(
         VISIBLE_AREA_X0,
         VISIBLE_AREA_Y0,
@@ -331,8 +363,69 @@ void ui_components_actions_bar_text_draw (menu_font_type_t style, rdpq_align_t a
 }
 
 /**
+ * @brief Draw a block of text inside an explicit rectangle.
+ *
+ * @param x The x-coordinate of the top-left corner.
+ * @param y The y-coordinate of the top-left corner.
+ * @param width Width of the rectangle.
+ * @param height Height of the rectangle.
+ * @param style Font style to draw with.
+ * @param align Horizontal alignment within the rectangle.
+ * @param wrap Wrapping mode for text that exceeds the rectangle.
+ * @param text The text to draw.
+ */
+void ui_components_text_draw (int x, int y, int width, int height, menu_font_type_t style,
+                              rdpq_align_t align, rdpq_textwrap_t wrap, const char *text) {
+    rdpq_text_print(
+        &(rdpq_textparms_t) {
+            .style_id = style,
+            .width = width,
+            .height = height,
+            .align = align,
+            .valign = VALIGN_TOP,
+            .wrap = wrap,
+        },
+        FNT_DEFAULT,
+        x,
+        y,
+        text
+    );
+}
+
+/**
+ * @brief Draw a label/value row inside a settings pane.
+ *
+ * The label is left aligned and the value is right aligned, with the value
+ * column starting at a fixed fraction of the pane width.
+ *
+ * @param y The y-coordinate of the top of the row.
+ * @param label The row label.
+ * @param value The row value.
+ * @param selected Whether the row is highlighted.
+ */
+void ui_components_settings_row_draw (int y, const char *label, const char *value, bool selected) {
+    int x0 = SETTINGS_PANE_X0 + 10;
+    int x1 = SETTINGS_PANE_X1 - 10;
+    int value_x = x0 + (((x1 - x0) * 55) / 100);
+
+    if (selected) {
+        ui_components_box_draw(x0, y, x1, y + SETTINGS_ROW_HEIGHT - 2, FILE_LIST_HIGHLIGHT_COLOR);
+        ui_components_focus_draw(x0, y, x1, y + SETTINGS_ROW_HEIGHT - 2);
+    }
+
+    ui_components_text_draw(
+        x0 + 8, y + 4, value_x - x0 - 16, SETTINGS_ROW_HEIGHT,
+        STL_DEFAULT, ALIGN_LEFT, WRAP_ELLIPSES, label
+    );
+    ui_components_text_draw(
+        value_x, y + 4, x1 - value_x - 8, SETTINGS_ROW_HEIGHT,
+        selected ? STL_DEFAULT : STL_GRAY, ALIGN_RIGHT, WRAP_ELLIPSES, value
+    );
+}
+
+/**
  * @brief Draw the tabs.
- * 
+ *
  * @param text Array of tab text.
  * @param count Number of tabs.
  * @param selected Index of the selected tab.
@@ -373,7 +466,7 @@ void ui_components_tabs_draw(const char **text, int count, int selected, float w
 
         ui_components_box_draw(
             x,
-            y,
+            y - TAB_SELECTED_LIFT,
             x + width,
             y + height,
             TAB_ACTIVE_BACKGROUND_COLOR
@@ -381,7 +474,7 @@ void ui_components_tabs_draw(const char **text, int count, int selected, float w
 
         ui_components_border_draw_internal(
             x,
-            y,
+            y - TAB_SELECTED_LIFT,
             x + width,
             y + height,
             TAB_ACTIVE_BORDER_COLOR

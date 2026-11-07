@@ -36,6 +36,8 @@ static char *format_emulator_name (cart_load_emu_type_t emulator_info) {
             return "Sinclair ZX Spectrum";
         case CART_LOAD_EMU_TYPE_MICROSOFT_MSX:
             return "Microsoft MSX";
+        case CART_LOAD_EMU_TYPE_SNK_NEO_GEO:
+            return "SNK Neo Geo AES / MVS";
         case CART_LOAD_EMU_TYPE_DEV:
             return "Development Emulator";
         default:
@@ -143,6 +145,8 @@ void view_load_emulator_init (menu_t *menu) {
         emu_type = CART_LOAD_EMU_TYPE_SINCLAIR_ZXSPECTRUM;
     } else if (file_has_extensions(path_get(path), emu_microsoft_msx_rom_extensions)) {
         emu_type = CART_LOAD_EMU_TYPE_MICROSOFT_MSX;
+    // } else if (file_has_extensions(path_get(path), emu_snk_neogeo_rom_extensions)) {
+    //     emu_type = CART_LOAD_EMU_TYPE_SNK_NEO_GEO;
     } else if (file_has_extensions(path_get(path), emu_dev_rom_extensions)) {
         emu_type = CART_LOAD_EMU_TYPE_DEV;
     } else {

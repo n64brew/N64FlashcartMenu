@@ -200,8 +200,8 @@ component_boxart_t *ui_components_boxart_init(const char *storage_prefix, const 
 void ui_components_boxart_free(component_boxart_t *b) {
     if (b) {
         if (b->loading) {
-            png_decoder_abort();
             jpeg_decoder_abort();
+            png_decoder_abort();
         }
         if (b->image) {
             // Wait for any queued RDP draw commands referencing this surface (e.g. from
