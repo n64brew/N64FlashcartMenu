@@ -57,7 +57,7 @@ static bool advance_failed = false;
 static bool seek_busy = false;  /* one seek per frame, prevents cascade */
 static float ticker_offset = 0.0f;
 
-#define QUEUE_LINE_HEIGHT   (16)
+#define QUEUE_LINE_HEIGHT   (15)
 #define QUEUE_GAP           (12)
 #define QUEUE_ARROW         "\xE2\x96\xB6 "  /* "▶ " UTF-8 */
 
