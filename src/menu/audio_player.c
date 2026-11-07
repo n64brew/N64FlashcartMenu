@@ -625,6 +625,12 @@ static void mp3player_wave_read (void *ctx, samplebuffer_t *sbuf, int wpos, int 
 
         if (t->info.frame_bytes <= 0 || (size_t)t->info.frame_bytes > t->buffer_left) {
             /* MP3 track exhausted — fill remaining with silence. */
+            if (feof(t->f)) {
+                /* Any leftover bytes (e.g. a trailing ID3v1 tag or padding) can't form a
+                 * valid frame; clear them so track_is_finished() can detect completion
+                 * and the player can auto-advance. */
+                t->buffer_left = 0;
+            }
             if (wlen > 0) {
                 short *out = (short *)(samplebuffer_append(sbuf, wlen));
                 memset(out, 0, wlen * sizeof(short) * t->channels);
