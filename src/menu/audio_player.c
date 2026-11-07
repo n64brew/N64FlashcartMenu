@@ -114,8 +114,28 @@ static int mp3_find_first_frame (audio_track_t *t) {
         int samples = drmp3dec_decode_frame(&t->dec, t->buffer_ptr + offset,
             (int)(t->buffer_left - offset), NULL, &info);
         if (samples > 0 && info.frame_bytes > 0) {
-            t->buffer_ptr += offset;
-            t->buffer_left -= offset;
+            /* drmp3dec_decode_frame() can itself skip leading bytes (a false sync that
+             * passed our own coarse 0xFF/0xEx check but failed its stricter validation)
+             * before finding the real frame: info.frame_bytes then covers
+             * [offset, offset + frame_bytes), not necessarily a frame starting exactly at
+             * offset. t->dec.header holds the real frame's 4-byte MPEG header after a
+             * successful decode, so locate it within that range to find how many bytes
+             * were actually skipped, keeping buffer_ptr/frame_bytes aligned with the frame
+             * dr_mp3 decoded (so the later Xing/Info VBR lookup reads the right bytes). */
+            size_t header_pos = 0;
+            if ((size_t)info.frame_bytes >= sizeof(t->dec.header)) {
+                size_t search_limit = (size_t)info.frame_bytes - sizeof(t->dec.header);
+                for (size_t i = 0; i <= search_limit; i++) {
+                    if (memcmp(t->buffer_ptr + offset + i, t->dec.header, sizeof(t->dec.header)) == 0) {
+                        header_pos = i;
+                        break;
+                    }
+                }
+            }
+
+            t->buffer_ptr += offset + header_pos;
+            t->buffer_left -= offset + header_pos;
+            info.frame_bytes -= (int)header_pos;
             t->info = info;
             drmp3dec_init(&t->dec);
             return samples;
