@@ -27,8 +27,7 @@ static int max_scroll;
     "\tlibdragon (UNLICENSE License)\n" \
     "\tlibspng (BSD 2-Clause License)\n" \
     "\tTJpgDec (ChaN permissive license)\n" \
-    "\tdr_mp3 (Public domain or MIT-0)\n" \
-    "\tdr_flac (MIT License)\n" \
+    "\tdr_libs (dr_mp3, dr_flac) (Public domain or MIT-0)\n" \
     "\tminiz (MIT License)\n"
 
 /**
