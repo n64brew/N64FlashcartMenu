@@ -90,9 +90,8 @@ Other compatible or commercial license options may be available upon request wit
 * [libdragon](https://github.com/n64brew/libdragon/tree/preview) - [UNLICENSE License](https://github.com/n64brew/libdragon/blob/preview/LICENSE.md)
 * [libspng](https://github.com/randy408/libspng) - [BSD 2-Clause License](https://github.com/randy408/libspng/blob/master/LICENSE)
 * [TJpgDec](https://elm-chan.org/fsw/tjpgd/) - [ChaN permissive license](https://elm-chan.org/fsw/tjpgd/en/appnote.html)
-* [dr_mp3](https://github.com/mackron/dr_libs) - [Public domain or MIT-0](https://github.com/mackron/dr_libs/blob/master/LICENSE)
+* [dr_libs](https://github.com/mackron/dr_libs) (dr_mp3, dr_flac) - [Public domain or MIT-0](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 * [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
-* [dr_flac](https://github.com/mackron/dr_libs) - [MIT License](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 
 ## Sounds
 See [License](https://pixabay.com/en/service/license-summary/) for the following sounds:
