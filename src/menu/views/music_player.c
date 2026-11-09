@@ -19,12 +19,16 @@
 #define CONTENT_TOP_OFFSET      (54)
 #define HEADER_UNIT_HEIGHT      (46)  /* title + ticker + tech line */
 #define HEADER_BASELINE_OFFSET  (12)
-#define HEADER_LINE_SPACING     (16)
+#define HEADER_LINE_SPACING     (18)
 #define CONTENT_BOTTOM_PAD      (8)
-#define QUEUE_MAX_VISIBLE       (15)
-#define QUEUE_TEXT_WIDTH         (280)
+#define QUEUE_MAX_VISIBLE       (12)
+#define QUEUE_MAX_TEXT_WIDTH    (280)
+#define QUEUE_LINE_HEIGHT       (18)
+#define ART_QUEUE_PAD           (12)
+#define QUEUE_SELECTED_CURSOR   "\xE2\x96\xB6 "  /* "▶ " UTF-8 */
 #define TICKER_SCROLL_SPEED     (0.5f)
-#define COVER_SCAN_MAX_ATTEMPTS (20)
+#define TICKER_START_DELAY      (20)
+#define COVER_SCAN_MAX_ATTEMPTS (10)
 #define COVER_ART_BUDGET_MAX    (400)
 
 typedef enum {
@@ -56,11 +60,9 @@ static playback_mode_t playback_mode = PLAYBACK_NORMAL;
 static bool advance_failed = false;
 static bool seek_busy = false;  /* one seek per frame, prevents cascade */
 static float ticker_offset = 0.0f;
+static int ticker_delay_frames = TICKER_START_DELAY;
 static float queue_ticker_offset = 0.0f;
-
-#define QUEUE_LINE_HEIGHT   (15)
-#define QUEUE_GAP           (12)
-#define QUEUE_ARROW         "\xE2\x96\xB6 "  /* "▶ " UTF-8 */
+static int queue_ticker_delay_frames = TICKER_START_DELAY;
 
 /* Shuffle state: array of browser indices that point to music files */
 static int *shuffle_list = NULL;
@@ -636,7 +638,9 @@ static bool try_play_index (menu_t *menu, int idx) {
     menu->browser.entry = e;
     advance_failed = false;
     ticker_offset = 0.0f;
+    ticker_delay_frames = TICKER_START_DELAY;
     queue_ticker_offset = 0.0f;
+    queue_ticker_delay_frames = TICKER_START_DELAY;
 
     load_cover_art(menu->browser.directory);
     return true;
@@ -733,6 +737,7 @@ static void process (menu_t *menu) {
         playback_mode = (playback_mode + 1) % PLAYBACK_MODE_COUNT;
         advance_failed = false;
         queue_ticker_offset = 0.0f;
+        queue_ticker_delay_frames = TICKER_START_DELAY;
         if (playback_mode == PLAYBACK_SHUFFLE || playback_mode == PLAYBACK_PARTY) {
             build_shuffle_list(menu);
             /* Anchor to the currently playing track so the next advance
@@ -861,12 +866,16 @@ static void draw (menu_t *menu, surface_t *d) {
                 wrap_pad, strlen(wrap_pad)
             ).advance_x;
 
-            ticker_offset += TICKER_SCROLL_SPEED;
+            if (ticker_delay_frames > 0) {
+                ticker_delay_frames--;
+            } else {
+                ticker_offset += TICKER_SCROLL_SPEED;
+            }
             if ((int)ticker_offset >= cycle_width) {
                 ticker_offset -= (float)cycle_width;
             }
 
-            rdpq_set_scissor(SEEKBAR_X, ticker_y - 12, SEEKBAR_X + SEEKBAR_WIDTH, ticker_y + 4);
+            rdpq_set_scissor(SEEKBAR_X, ticker_y - HEADER_LINE_SPACING, SEEKBAR_X + SEEKBAR_WIDTH, ticker_y + 4);
 
             rdpq_text_printn(
                 &(rdpq_textparms_t) { .style_id = STL_DEFAULT },
@@ -959,7 +968,7 @@ static void draw (menu_t *menu, surface_t *d) {
     }
 
     /* Calculate the queue text width */
-    int queue_w = QUEUE_TEXT_WIDTH;
+    int queue_w = QUEUE_MAX_TEXT_WIDTH;
 
     /* Layout: art on left, queue on right, centered as a unit */
     int block_w;
@@ -967,11 +976,11 @@ static void draw (menu_t *menu, surface_t *d) {
     int queue_x, queue_y;
 
     if (art_size > 0) {
-        block_w = art_size + QUEUE_GAP + queue_w;
+        block_w = art_size + ART_QUEUE_PAD + queue_w;
         int block_x = DISPLAY_CENTER_X - block_w / 2;
         art_x = block_x;
         art_y = content_top + (content_h - art_size) / 2;
-        queue_x = block_x + art_size + QUEUE_GAP;
+        queue_x = block_x + art_size + ART_QUEUE_PAD;
     } else {
         block_w = queue_w;
         queue_x = DISPLAY_CENTER_X - queue_w / 2;
@@ -1079,7 +1088,7 @@ static void draw (menu_t *menu, surface_t *d) {
                 rdpq_textmetrics_t arrow_metrics = rdpq_text_printn(
                     &(rdpq_textparms_t) { .style_id = STL_DEFAULT },
                     FNT_DEFAULT, -1000, -1000,
-                    QUEUE_ARROW, strlen(QUEUE_ARROW)
+                    QUEUE_SELECTED_CURSOR, strlen(QUEUE_SELECTED_CURSOR)
                 );
                 int arrow_width = (int)arrow_metrics.advance_x;
                 rdpq_textmetrics_t number_metrics = rdpq_text_printn(
@@ -1094,7 +1103,7 @@ static void draw (menu_t *menu, surface_t *d) {
                 rdpq_text_printn(
                     &(rdpq_textparms_t) { .style_id = STL_DEFAULT },
                     FNT_DEFAULT, queue_x, line_y,
-                    QUEUE_ARROW, strlen(QUEUE_ARROW)
+                    QUEUE_SELECTED_CURSOR, strlen(QUEUE_SELECTED_CURSOR)
                 );
 
                 if (safe_track_number[0]) {
@@ -1125,12 +1134,16 @@ static void draw (menu_t *menu, surface_t *d) {
                         wrap_pad, strlen(wrap_pad)
                     ).advance_x;
 
-                    queue_ticker_offset += TICKER_SCROLL_SPEED;
+                    if (queue_ticker_delay_frames > 0) {
+                        queue_ticker_delay_frames--;
+                    } else {
+                        queue_ticker_offset += TICKER_SCROLL_SPEED;
+                    }
                     if ((int)queue_ticker_offset >= cycle_width) {
                         queue_ticker_offset -= (float)cycle_width;
                     }
 
-                    rdpq_set_scissor(title_x, line_y - 12, queue_x + queue_w, line_y + 4);
+                    rdpq_set_scissor(title_x, line_y - HEADER_LINE_SPACING, queue_x + queue_w, line_y + 4);
                     rdpq_text_printn(
                         &(rdpq_textparms_t) { .style_id = STL_DEFAULT },
                         FNT_DEFAULT,
@@ -1333,7 +1346,9 @@ void view_music_player_init (menu_t *menu) {
     playback_mode = PLAYBACK_NORMAL;
     advance_failed = false;
     ticker_offset = 0.0f;
+    ticker_delay_frames = TICKER_START_DELAY;
     queue_ticker_offset = 0.0f;
+    queue_ticker_delay_frames = TICKER_START_DELAY;
 
     /* Reset cover art state */
     abort_cover_decode();
