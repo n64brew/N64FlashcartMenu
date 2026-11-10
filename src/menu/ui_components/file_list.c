@@ -32,6 +32,11 @@ static float file_list_ticker_offset = 0.0f;
 static int file_list_ticker_delay_frames = FILE_ENTRY_TICKER_START_DELAY;
 static int file_list_ticker_selected = -1;
 static char file_list_ticker_name[256] = "";
+static bool file_list_ticker_widths_valid = false;
+static const rdpq_font_t *file_list_ticker_font = NULL;
+static menu_font_style_t file_list_ticker_style = STL_DEFAULT;
+static int file_list_ticker_name_width = 0;
+static int file_list_ticker_padding_width = 0;
 
 static rdpq_paragraph_t *file_list_layout_buffer;
 static size_t file_list_layout_capacity;
@@ -78,6 +83,7 @@ void ui_components_file_list_free(void) {
     free(file_list_layout_buffer);
     file_list_layout_buffer = NULL;
     file_list_layout_capacity = 0;
+    file_list_ticker_widths_valid = false;
 }
 
 /**
@@ -123,6 +129,7 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
         file_list_ticker_name[sizeof(file_list_ticker_name) - 1] = '\0';
         file_list_ticker_offset = 0.0f;
         file_list_ticker_delay_frames = FILE_ENTRY_TICKER_START_DELAY;
+        file_list_ticker_widths_valid = false;
     }
 
     if (entries > LIST_ENTRIES && selected >= (LIST_ENTRIES / 2)) {
@@ -248,14 +255,41 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
 
         if (selected >= starting_position && selected < starting_position + visible_entries) {
             const char *selected_name = list[selected].name;
-            rdpq_textmetrics_t ticker_metrics = rdpq_text_printn(
-                &(rdpq_textparms_t) { .style_id = selected_style },
-                FNT_DEFAULT,
-                -1000, -1000,
-                selected_name, strlen(selected_name)
-            );
+            const char *wrap_pad = "     ";
+            const rdpq_font_t *font = rdpq_text_get_font(FNT_DEFAULT);
 
-            if (ticker_metrics.advance_x > name_width) {
+            if (!file_list_ticker_widths_valid ||
+                strcmp(selected_name, file_list_ticker_name) != 0 ||
+                font != file_list_ticker_font || selected_style != file_list_ticker_style) {
+                file_list_ticker_widths_valid = false;
+                int name_bytes = (int)strlen(selected_name);
+                int padding_bytes = (int)strlen(wrap_pad);
+                rdpq_paragraph_t *name_layout = rdpq_paragraph_build(
+                    &(rdpq_textparms_t) { .style_id = selected_style, .wrap = WRAP_NONE },
+                    FNT_DEFAULT,
+                    selected_name, &name_bytes
+                );
+                rdpq_paragraph_t *padding_layout = rdpq_paragraph_build(
+                    &(rdpq_textparms_t) { .style_id = selected_style, .wrap = WRAP_NONE },
+                    FNT_DEFAULT,
+                    wrap_pad, &padding_bytes
+                );
+
+                if (name_layout && padding_layout) {
+                    file_list_ticker_name_width = (int)name_layout->advance_x;
+                    file_list_ticker_padding_width = (int)padding_layout->advance_x;
+                    strncpy(file_list_ticker_name, selected_name, sizeof(file_list_ticker_name) - 1);
+                    file_list_ticker_name[sizeof(file_list_ticker_name) - 1] = '\0';
+                    file_list_ticker_font = font;
+                    file_list_ticker_style = selected_style;
+                    file_list_ticker_widths_valid = true;
+                }
+
+                if (name_layout) rdpq_paragraph_free(name_layout);
+                if (padding_layout) rdpq_paragraph_free(padding_layout);
+            }
+
+            if (file_list_ticker_widths_valid && file_list_ticker_name_width > name_width) {
                 int first_baseline = INT32_MAX;
                 for (int i = 0; i < layout->nchars; i++) {
                     if (layout->chars[i].y < first_baseline) {
@@ -268,17 +302,11 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
                     : 0;
                 int row = selected - starting_position;
                 int ticker_y = name_y + first_baseline + row * line_step;
-                const char *wrap_pad = "     ";
                 char scroll_name[576];
                 snprintf(scroll_name, sizeof(scroll_name), "%s%s%s%s",
                          selected_name, wrap_pad, selected_name, wrap_pad);
                 size_t scroll_len = strlen(scroll_name);
-                int cycle_width = (int)ticker_metrics.advance_x + (int)rdpq_text_printn(
-                    &(rdpq_textparms_t) { .style_id = selected_style },
-                    FNT_DEFAULT,
-                    -1000, -1000,
-                    wrap_pad, strlen(wrap_pad)
-                ).advance_x;
+                int cycle_width = file_list_ticker_name_width + file_list_ticker_padding_width;
 
                 if (file_list_ticker_delay_frames > 0) {
                     file_list_ticker_delay_frames--;
