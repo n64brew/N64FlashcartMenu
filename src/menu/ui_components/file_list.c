@@ -5,6 +5,7 @@
  */
 
 #include <stdlib.h>
+#include <limits.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -31,7 +32,7 @@ static const char *directory_icon = "[DIR] ";
 static float file_list_ticker_offset = 0.0f;
 static int file_list_ticker_delay_frames = FILE_ENTRY_TICKER_START_DELAY;
 static int file_list_ticker_selected = -1;
-static char file_list_ticker_name[256] = "";
+static char *file_list_ticker_name = NULL;
 static bool file_list_ticker_widths_valid = false;
 static const rdpq_font_t *file_list_ticker_font = NULL;
 static menu_font_style_t file_list_ticker_style = STL_DEFAULT;
@@ -83,6 +84,9 @@ void ui_components_file_list_free(void) {
     free(file_list_layout_buffer);
     file_list_layout_buffer = NULL;
     file_list_layout_capacity = 0;
+    free(file_list_ticker_name);
+    file_list_ticker_name = NULL;
+    file_list_ticker_selected = -1;
     file_list_ticker_widths_valid = false;
 }
 
@@ -121,12 +125,16 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
 
     if (selected < 0 || selected >= entries) {
         file_list_ticker_selected = -1;
-        file_list_ticker_name[0] = '\0';
+        free(file_list_ticker_name);
+        file_list_ticker_name = NULL;
+        file_list_ticker_widths_valid = false;
     } else if (selected != file_list_ticker_selected ||
+               !file_list_ticker_name ||
                strcmp(list[selected].name, file_list_ticker_name) != 0) {
+        char *new_name = strdup(list[selected].name);
+        free(file_list_ticker_name);
+        file_list_ticker_name = new_name;
         file_list_ticker_selected = selected;
-        strncpy(file_list_ticker_name, list[selected].name, sizeof(file_list_ticker_name) - 1);
-        file_list_ticker_name[sizeof(file_list_ticker_name) - 1] = '\0';
         file_list_ticker_offset = 0.0f;
         file_list_ticker_delay_frames = FILE_ENTRY_TICKER_START_DELAY;
         file_list_ticker_widths_valid = false;
@@ -258,9 +266,9 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
             const char *wrap_pad = "     ";
             const rdpq_font_t *font = rdpq_text_get_font(FNT_DEFAULT);
 
-            if (!file_list_ticker_widths_valid ||
+            if (file_list_ticker_name && (!file_list_ticker_widths_valid ||
                 strcmp(selected_name, file_list_ticker_name) != 0 ||
-                font != file_list_ticker_font || selected_style != file_list_ticker_style) {
+                font != file_list_ticker_font || selected_style != file_list_ticker_style)) {
                 file_list_ticker_widths_valid = false;
                 int name_bytes = (int)strlen(selected_name);
                 int padding_bytes = (int)strlen(wrap_pad);
@@ -278,8 +286,6 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
                 if (name_layout && padding_layout) {
                     file_list_ticker_name_width = (int)name_layout->advance_x;
                     file_list_ticker_padding_width = (int)padding_layout->advance_x;
-                    strncpy(file_list_ticker_name, selected_name, sizeof(file_list_ticker_name) - 1);
-                    file_list_ticker_name[sizeof(file_list_ticker_name) - 1] = '\0';
                     file_list_ticker_font = font;
                     file_list_ticker_style = selected_style;
                     file_list_ticker_widths_valid = true;
@@ -290,7 +296,7 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
             }
 
             if (file_list_ticker_widths_valid && file_list_ticker_name_width > name_width) {
-                int first_baseline = INT32_MAX;
+                int first_baseline = INT_MAX;
                 for (int i = 0; i < layout->nchars; i++) {
                     if (layout->chars[i].y < first_baseline) {
                         first_baseline = layout->chars[i].y;
