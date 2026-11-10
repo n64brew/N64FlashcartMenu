@@ -1058,6 +1058,7 @@ void view_load_rom_init (menu_t *menu) {
     }
 
     if (menu->load.rom_info.meta.size_limit_exceeded) {
+        menu->load_pending.rom_file = false;
         menu_show_error(menu, "ROM metadata was skipped\nmetadata.ini exceeds size limit");
     }
 
@@ -1072,6 +1073,12 @@ void view_load_rom_init (menu_t *menu) {
             if (!is_memory_expanded()) {
                 ui_components_background_image_free_only();
             }
+            // This setup block can re-run for the same ROM (e.g. returning from the Datel
+            // code editor, which deliberately skips deinit()); free any existing boxart
+            // before it's overwritten below, otherwise its component and decoded surface
+            // leak.
+            ui_components_boxart_free(boxart);
+            boxart = NULL;
             if (rom_info_extract_metadata_image(&menu->load.rom_info, metadata_image_names[0], &data, &size)) {
                 boxart = ui_components_boxart_init_mem(
                     metadata_image_names[0], data, size,
@@ -1090,6 +1097,8 @@ void view_load_rom_init (menu_t *menu) {
                 );
             }
         } else {
+            ui_components_boxart_free(boxart);
+            boxart = NULL;
             boxart_sd_fallback_attempted = true;
             boxart = ui_components_boxart_init(
                 menu->storage_prefix, menu->load.rom_info.game_code,
