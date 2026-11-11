@@ -266,3 +266,80 @@ char *ed64_pro_get_error_message (void) {
     }
     return pro_error_message;
 }
+
+/**
+ * @brief Initialize the Pro transport without claiming a usable storage backend.
+ */
+static flashcart_err_t pro_init (void) {
+    if (ed64_pro_init_transport() != ED64_PRO_LL_OK) {
+        return FLASHCART_ERR_INT;
+    }
+    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+}
+
+/** @brief No menu features are available before the storage backend is implemented. */
+static bool pro_has_feature (flashcart_features_t feature) {
+    (void)feature;
+    return false;
+}
+
+/** @brief Firmware version retrieval is not implemented. */
+static flashcart_firmware_version_t pro_get_firmware_version (void) {
+    return (flashcart_firmware_version_t){0};
+}
+
+static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback_t *progress) {
+    (void)rom_path;
+    (void)progress;
+    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+}
+
+static flashcart_err_t pro_load_file (char *file_path, uint32_t rom_offset, uint32_t file_offset) {
+    (void)file_path;
+    (void)rom_offset;
+    (void)file_offset;
+    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+}
+
+static flashcart_err_t pro_load_save (char *save_path) {
+    (void)save_path;
+    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+}
+
+static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
+    (void)save_type;
+    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+}
+
+/** @brief Supply retained startup details for the errors this adapter returns. */
+static char *pro_get_error_message (flashcart_err_t error) {
+    if (error != FLASHCART_ERR_INT && error != FLASHCART_ERR_FUNCTION_NOT_SUPPORTED) {
+        return NULL;
+    }
+    return ed64_pro_get_error_message();
+}
+
+/** @brief Pro callbacks retain the shared flashcart interface while storage is unavailable. */
+static flashcart_t flashcart_ed64_pro = {
+    .init = pro_init,
+    .deinit = NULL,
+    .has_feature = pro_has_feature,
+    .get_firmware_version = pro_get_firmware_version,
+    .load_rom = pro_load_rom,
+    .load_file = pro_load_file,
+    .load_save = pro_load_save,
+    .load_64dd_ipl = NULL,
+    .load_64dd_disk = NULL,
+    .load_64dd_disks = NULL,
+    .get_button_state = NULL,
+    .get_voltage_temperature = NULL,
+    .set_save_type = pro_set_save_type,
+    .set_save_writeback = NULL,
+    .set_next_boot_mode = NULL,
+    .get_error_message = pro_get_error_message,
+};
+
+/** @brief Return the Pro adapter without accessing the cartridge. */
+flashcart_t *ed64_pro_get_flashcart (void) {
+    return &flashcart_ed64_pro;
+}

@@ -1664,6 +1664,59 @@ static void test_pi_final_poll_timing (void) {
     TEST_CHECK(memcmp(&first, ed64_pro_ll_get_failure(), sizeof(first)) == 0 && mock.enqueues == 1);
 }
 
+/**
+ * @brief Map transport success and sticky failures through the normal flashcart adapter.
+ */
+static void test_adapter_initialization (void) {
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    for (unsigned failed = 0; failed < 2; failed++) {
+        handoff_fixture();
+        if (failed) {
+            mock.fail_at = 2;
+        }
+        flashcart_err_t expected = failed ? FLASHCART_ERR_INT : FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+        TEST_CHECK(adapter->init() == expected);
+        const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+        TEST_CHECK(diagnostics->state == (failed ? ED64_PRO_POISONED : ED64_PRO_READY));
+        unsigned enqueues = mock.enqueues;
+        TEST_CHECK(
+            strstr(adapter->get_error_message(expected), failed ? "startup failed" : "not implemented") != NULL
+        );
+        TEST_CHECK(adapter->get_error_message(FLASHCART_ERR_SD_CARD) == NULL);
+        TEST_CHECK(adapter->get_error_message(FLASHCART_OK) == NULL);
+        TEST_CHECK(adapter->init() == expected && mock.enqueues == enqueues);
+    }
+}
+
+/**
+ * @brief Keep unsupported Pro callbacks safe and free of bus traffic even after a poisoned DMA.
+ */
+static void test_adapter_unavailable_operations (void) {
+    for (unsigned failed = 0; failed < 2; failed++) {
+        handoff_fixture();
+        flashcart_t *adapter = ed64_pro_get_flashcart();
+        if (failed) {
+            mock.fail_at = 2;
+        }
+        (void)adapter->init();
+        unsigned enqueues = mock.enqueues;
+        for (flashcart_features_t feature = FLASHCART_FEATURE_64DD; feature <= FLASHCART_FEATURE_ROM_REBOOT_FAST;
+             feature++) {
+            TEST_CHECK(!adapter->has_feature(feature));
+        }
+        flashcart_firmware_version_t version = adapter->get_firmware_version();
+        TEST_CHECK(version.major == 0 && version.minor == 0 && version.revision == 0);
+        TEST_CHECK(adapter->load_rom("sd:/test.z64", NULL) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+        TEST_CHECK(adapter->load_file("sd:/test.bin", 0, 0) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+        TEST_CHECK(adapter->load_save("sd:/test.sra") == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+        TEST_CHECK(adapter->set_save_type(FLASHCART_SAVE_TYPE_SRAM_256KBIT) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+        TEST_CHECK(adapter->deinit == NULL && adapter->load_64dd_ipl == NULL && adapter->load_64dd_disk == NULL);
+        TEST_CHECK(adapter->load_64dd_disks == NULL && adapter->get_button_state == NULL);
+        TEST_CHECK(adapter->get_voltage_temperature == NULL && adapter->set_save_writeback == NULL);
+        TEST_CHECK(adapter->set_next_boot_mode == NULL && mock.enqueues == enqueues);
+    }
+}
+
 TEST_LIST = {
     {"exact register read and cache order", test_register_read},
     {"exact mailbox write and cache order", test_register_write},
@@ -1693,6 +1746,8 @@ TEST_LIST = {
     {"slow partial progress preserves original deadlines", test_slow_partial_status},
     {"partial FIFO DMA failure preserves count", test_partial_dma_failure},
     {"command and reply cannot interleave", test_status_serialization},
+    {"Pro adapter maps startup through shared errors", test_adapter_initialization},
+    {"Pro adapter operations remain unavailable without bus traffic", test_adapter_unavailable_operations},
     {"golden one-shot MCU initialization transcript", test_init_transcript},
     {"sticky failure at every initialization DMA boundary", test_init_failure_boundaries},
     {"inherited versus fresh MCU errors", test_inherited_and_fresh_errors},

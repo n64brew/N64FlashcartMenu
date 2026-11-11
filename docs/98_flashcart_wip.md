@@ -30,13 +30,19 @@ PI transfers, initial FIFO cleanup/status, device stop and stable mailbox READY,
 post-stop cleanup/fresh status, and MCU SD initialization/fresh status. This
 check does **not** mount an N64 filesystem or provide a storage backend.
 
-Every Pro startup outcome intentionally stops at a local built-in-font console
-screen before filesystem, asset/font/background loading, browser setup, or USB
-polling. A ready transport reports that the storage backend is not implemented;
-a failure reports its phase and retained transport or original MCU status.
-Inherited well-formed nonzero status is distinguished from errors returned by
-our stop/SD commands. A failed identity read is not permission to try another
-cartridge. No incomplete backend table is selected and no callback is invoked.
+The Pro uses the shared flashcart interface and startup fault handling. Its
+adapter initializes the transport and returns the existing function-not-supported
+error when transport is ready, or an internal error when transport fails. The
+retained diagnostic message explains the missing storage backend or the failed
+phase and transport/original MCU status. Inherited well-formed nonzero status is
+distinguished from errors returned by our stop/SD commands.
+
+A failed identity read also selects the safe Pro adapter to prevent fallback,
+but returns an internal error without invoking transport initialization. Every
+such startup result reaches the shared built-in-font fault screen before
+filesystem, asset/font/background loading, browser setup, or USB polling. The
+adapter advertises no menu features; its mandatory storage callbacks return
+function-not-supported without I/O. Firmware version retrieval is not implemented.
 
 Power-cycle to return to stock firmware after this screen, especially after
 transport failure. There are no automatic retries, FIFO resynchronization

@@ -16,7 +16,7 @@ static void guard_failed (const char *operation) {
     console_set_debug(false);
     console_set_render_mode(RENDER_MANUAL);
     printf(
-        "ED64 Pro STARTUP GUARD FAILED\n\nForbidden call after Pro startup result:\n%s\n\n"
+        "ED64 Pro STARTUP GUARD FAILED\n\nForbidden call after flashcart startup error:\n%s\n\n"
         "Power-cycle; do not retry.\n",
         operation
     );
@@ -26,7 +26,7 @@ static void guard_failed (const char *operation) {
 }
 
 /**
- * @brief Reject wrapped hardware/storage/debug/controller calls once a Pro result arms the guard.
+ * @brief Reject wrapped hardware/storage/debug/controller calls once a flashcart startup error arms the guard.
  */
 static void check_guard (const char *operation) {
     if (terminal_only) {
@@ -37,7 +37,7 @@ static void check_guard (const char *operation) {
 flashcart_err_t __real_flashcart_init (const char **prefix);
 flashcart_err_t __wrap_flashcart_init (const char **prefix) {
     flashcart_err_t error = __real_flashcart_init(prefix);
-    terminal_only = error == FLASHCART_ERR_ED64_PRO;
+    terminal_only = error != FLASHCART_OK;
     return error;
 }
 

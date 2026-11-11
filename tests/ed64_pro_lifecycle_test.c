@@ -29,6 +29,7 @@ static struct {
     char *message;
     unsigned probes;
     unsigned pro_inits;
+    unsigned pro_getters;
     unsigned messages;
     unsigned bbfs;
     unsigned daisy_detects;
@@ -64,17 +65,27 @@ ed64_pro_probe_t ed64_pro_probe (void) {
 }
 
 /**
- * @brief Record transport startup only after one completed Pro identification.
+ * @brief Model the Pro adapter's generic initialization result after identification.
  */
-ed64_pro_ll_error_t ed64_pro_init_transport (void) {
+static flashcart_err_t pro_backend_init (void) {
     spy.pro_inits++;
     TEST_CHECK(spy.probes == 1 && spy.probe.outcome == ED64_PRO_PROBE_IDENTIFIED);
-    return spy.transport_result;
+    return spy.transport_result == ED64_PRO_LL_OK ? FLASHCART_ERR_FUNCTION_NOT_SUPPORTED : FLASHCART_ERR_INT;
 }
 
-char *ed64_pro_get_error_message (void) {
+static char *pro_error_message (flashcart_err_t error) {
     spy.messages++;
-    return spy.message;
+    return error == FLASHCART_ERR_INT || error == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED ? spy.message : NULL;
+}
+
+static flashcart_t pro_backend = {
+    .init = pro_backend_init,
+    .get_error_message = pro_error_message,
+};
+
+flashcart_t *ed64_pro_get_flashcart (void) {
+    spy.pro_getters++;
+    return &pro_backend;
 }
 
 bool daisydrive_detected (void) {
@@ -237,21 +248,23 @@ static void power_on (void) {
 }
 
 /**
- * @brief Require every Pro result to clear the storage prefix without activating any backend.
+ * @brief Select the Pro handler without mounting storage or invoking a previous backend.
  *
- * A previous backend must remain untouched, and error formatting must use Pro diagnostics.
+ * An indeterminate probe retains diagnostics without initializing transport.
  */
 static void require_terminal_result (bool identified) {
-    /* A previous backend must not be replaced or invoked by any Pro outcome. */
     flashcart = &backend;
     const char *prefix = "sd:/";
-    TEST_CHECK(flashcart_init(&prefix) == FLASHCART_ERR_ED64_PRO);
-    TEST_CHECK(prefix == NULL && flashcart == &backend);
-    TEST_CHECK(spy.probes == 1 && spy.pro_inits == (unsigned)identified);
+    flashcart_err_t expected = identified && spy.transport_result == ED64_PRO_LL_OK
+                                  ? FLASHCART_ERR_FUNCTION_NOT_SUPPORTED
+                                  : FLASHCART_ERR_INT;
+    TEST_CHECK(flashcart_init(&prefix) == expected);
+    TEST_CHECK(prefix == NULL && flashcart == &pro_backend);
+    TEST_CHECK(spy.probes == 1 && spy.pro_inits == (unsigned)identified && spy.pro_getters == 1);
     TEST_CHECK(spy.daisy_detects == 0 && spy.daisy_mounts == 0 && spy.getters == 0);
     TEST_CHECK(spy.sdfs == 0 && spy.bbfs == 0 && spy.usb == 0 && spy.isviewer == 0);
     TEST_CHECK(spy.callbacks == 0 && spy.file_calls == 0);
-    TEST_CHECK(flashcart_convert_error_message(FLASHCART_ERR_ED64_PRO) == spy.message);
+    TEST_CHECK(flashcart_convert_error_message(expected) == spy.message);
     TEST_CHECK(spy.messages == 1);
 }
 
@@ -444,15 +457,32 @@ static void test_non_pro_callbacks (void) {
 }
 
 /**
- * @brief Keep existing error values and messages stable when appending the Pro startup error.
+ * @brief Preserve existing generic error values and messages without a cartridge-specific error.
  */
 static void test_error_values_preserved (void) {
     power_on();
-    TEST_CHECK(FLASHCART_ERR_FUNCTION_NOT_SUPPORTED == 7 && FLASHCART_ERR_ED64_PRO == 8);
+    TEST_CHECK(FLASHCART_ERR_INT == 6 && FLASHCART_ERR_FUNCTION_NOT_SUPPORTED == 7);
     TEST_CHECK(
         strcmp(flashcart_convert_error_message(FLASHCART_ERR_SD_CARD), "Error during SD card initialization") == 0
     );
     TEST_CHECK(spy.messages == 0);
+}
+
+/**
+ * @brief Specialize only supported errors, retaining the generic converter's success and fallback text.
+ */
+static void test_optional_error_messages (void) {
+    power_on();
+    flashcart = &pro_backend;
+    TEST_CHECK(strcmp(flashcart_convert_error_message(FLASHCART_OK), "No error") == 0);
+    TEST_CHECK(spy.messages == 0);
+    TEST_CHECK(
+        strcmp(flashcart_convert_error_message(FLASHCART_ERR_SD_CARD), "Error during SD card initialization") == 0
+    );
+    TEST_CHECK(flashcart_convert_error_message(FLASHCART_ERR_INT) == spy.message);
+    TEST_CHECK(flashcart_convert_error_message(FLASHCART_ERR_FUNCTION_NOT_SUPPORTED) == spy.message);
+    TEST_CHECK(strcmp(flashcart_convert_error_message((flashcart_err_t)999), "Unknown flashcart error") == 0);
+    TEST_CHECK(spy.messages == 4 && spy.probes == 0 && spy.pro_inits == 0 && spy.file_calls == 0);
 }
 
 TEST_LIST = {
@@ -466,5 +496,6 @@ TEST_LIST = {
     {"non-Pro DaisyDrive dispatch remains unchanged", test_non_pro_daisy_dispatch},
     {"non-Pro mandatory and optional callbacks remain unchanged", test_non_pro_callbacks},
     {"public error values remain stable", test_error_values_preserved},
+    {"optional error messages preserve generic fallbacks", test_optional_error_messages},
     {NULL, NULL},
 };

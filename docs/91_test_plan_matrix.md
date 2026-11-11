@@ -132,12 +132,19 @@ This matrix verifies that the menu displays correctly at boot and when launching
 
 The Pro implementation is **detection/transport only, not a storage backend**.
 The pre-integration gate passed on the recorded Pro/X7 configurations below.
-The production selector now probes after the iQue bypass and before other
+The production selector probes after the iQue bypass and before other
 cartridge/filesystem initialization. Every recognized-Pro or indeterminate
-probe result clears the storage prefix and returns a non-OK Pro category,
-without selecting a backend or falling back. The actual menu handles it
-immediately with a non-returning, built-in-font terminal screen, before
-filesystem/assets, controller setup, normal USB polling, or menu cleanup.
+probe result clears the storage prefix and selects the safe Pro flashcart
+adapter without falling back. An identified Pro initializes through the shared
+callback: transport failure returns `FLASHCART_ERR_INT`, while READY returns
+`FLASHCART_ERR_FUNCTION_NOT_SUPPORTED` because storage is unavailable. An
+indeterminate probe returns `FLASHCART_ERR_INT` without transport initialization.
+The adapter supplies retained diagnostics through the optional shared error
+message callback; other errors retain the generic conversion messages.
+
+All flashcart initialization errors enter the shared, non-returning startup
+fault view immediately, before filesystem/assets, controller setup, normal USB
+polling, or menu cleanup. The view uses the built-in font and no cartridge I/O.
 Other cartridge families and memory/firmware configurations remain unqualified.
 
 The new [driver](../src/flashcart/ed64_pro/ed64_pro.c) performs a passive EDID
@@ -261,19 +268,23 @@ Host models do not establish physical bus or R4300 cache/interrupt behavior.
 
 The [lifecycle suite](../tests/ed64_pro_lifecycle_test.c) compiles the real
 flashcart facade against spies in debug and release modes. It checks every
-recognized-Pro outcome and indeterminate probe failure for a non-OK result,
-cleared prefix, unchanged backend pointer, and zero legacy selection,
-filesystem, USB initialization, or callback calls. It also checks iQue,
+recognized-Pro outcome and indeterminate probe failure for the existing error
+category, cleared prefix, safe Pro adapter selection, and zero legacy selection,
+filesystem, or USB initialization. Recognized devices invoke the adapter's
+initialization callback; indeterminate probes do not. It also checks iQue,
 libcart families, ROM fallback, DaisyDrive dispatch, non-Pro SD/init errors,
-mandatory/optional callbacks, and stable public error values. Legacy facade
+mandatory/optional callbacks, optional retained-state error messages, generic
+message fallback, and stable public error values. The transport suite exercises
+the production adapter's initialization mapping, unsupported storage callbacks,
+false feature reporting, and zero firmware placeholder without extra I/O. Legacy facade
 warnings are scoped out only around its inclusion in the host test; production
 code and default build flags are not weakened.
 
 [Makefile.startup](../tests/Makefile.startup) builds the actual menu with
-[link-time guards](../tests/ed64_pro_startup_guard.c). Only the menu, facade,
-low-level transport, and guard translation units disable LTO, preserving the
+[link-time guards](../tests/ed64_pro_startup_guard.c). Only the menu, startup
+fault view, facade, low-level transport, and guard translation units disable LTO, preserving the
 external boundaries to wrap. Other sources retain their normal flags. The
-wrapper arms after a Pro startup result; further PI DMA/CPU I/O, filesystem
+wrapper arms after any non-OK flashcart startup result; further PI DMA/CPU I/O, filesystem
 initialization/file access, debug/USB initialization/traffic, or controller
 setup displays `STARTUP GUARD FAILED` instead of performing that operation.
 The normal terminal renderer is unchanged. Check the ELF call sites to
@@ -313,7 +324,45 @@ on hardware; a successful build alone is not a hardware result.
 
 ### Qualification record
 
-Hardware record on 2026-11-04; complete host suites re-run on 2026-11-06.
+The hardware and host results below retain their original dates and source
+revisions. They do not qualify the 2026-11-11 interface and startup-view changes
+on hardware.
+
+#### Review changes verified on 2026-11-11
+
+The Pro adapter and retained-state error callback use the existing flashcart
+interface/error categories. All flashcart initialization failures now stop in
+the shared startup fault view before normal services. Transport protocol and
+runtime deadlines are unchanged.
+
+| Gate / case | Result |
+|---|---|
+| 47 transport + 11 facade cases, normal and AddressSanitizer/UndefinedBehaviorSanitizer | PASS on macOS; facade runs in both debug and release modes |
+| Linux host suites | PASS with GCC 11.4.0: the same 47 transport + 11 facade cases, normal and sanitizer builds, facade debug/release |
+| Target N64 menu and startup-guard builds | PASS: production menu, guarded menu, and separate guarded software-timeout variant |
+| Hardware acceptance of the shared startup fault view | PASS on the connected N64/ED64 Pro: guarded healthy transport and software-injected PI completion timeout both rendered the expected retained-state error, with no startup guard failure |
+
+The guarded ROMs were launched from the idle stock firmware using
+`edlink run --file`, without replacing the stock OS or updating firmware.
+The healthy result reported the unimplemented storage backend; the timeout
+result reported unknown cartridge identity, PI DMA completion timeout, and
+zero confirmed RX bytes. HDMI captures were inspected directly. The timeout
+variant uses `FLAGS=-DED64_PRO_TEST_FORCE_TIMEOUT`; it is software fault
+injection, not evidence of a physical PI fault. Both console and USB were
+power-cycled between variants and after the final timeout test. These checks
+do not repeat the earlier 4/8 MiB, other-cartridge, controller-input, or
+incoming-USB-payload qualification.
+
+Local captures are in the ignored `output/pr459-review-2026-11-11/` directory.
+The ROM SHA-256 values were:
+
+| ROM | SHA-256 |
+|---|---|
+| `output/ed64-pro-startup-guard/N64FlashcartMenu.n64` | `4d8425ed8831e3ab557752d8b261cce9cb1d5fccf5cc368a14f590629210ad27` |
+| `output/ed64-pro-startup-timeout/N64FlashcartMenu.n64` | `22b0476bd18be3b0de5bc669ce22698adc2e8db59c7a2eaecf127afb154b4018` |
+
+#### Earlier qualification: 2026-11-04 hardware and 2026-11-06 hosts
+
 Hardware results below are observed from user-supplied HDMI screenshots, not
 inferred from upload-tool exit codes.
 
@@ -445,10 +494,10 @@ establish universal hardware qualification or usable Pro storage support.
 | Files | Purpose |
 |---|---|
 | [ed64_pro_ll.c](../src/flashcart/ed64_pro/ed64_pro_ll.c), [ed64_pro_ll.h](../src/flashcart/ed64_pro/ed64_pro_ll.h) | Cartridge-local bounded PI/FIFO protocol, cache ownership, deadlines, quarantine, and typed results |
-| [ed64_pro.c](../src/flashcart/ed64_pro/ed64_pro.c), [ed64_pro.h](../src/flashcart/ed64_pro/ed64_pro.h) | One-shot probe/init lifecycle and retained diagnostics; obsolete backend stubs removed |
-| [flashcart.c](../src/flashcart/flashcart.c), [flashcart.h](../src/flashcart/flashcart.h) | Append the Pro error category and stop without selecting a backend or falling back; preserve non-Pro dispatch |
-| [menu.c](../src/menu/menu.c) | Immediate, non-returning, PI-independent Pro terminal screen before normal startup |
-| [LICENSE.krikzz](../src/flashcart/ed64_pro/LICENSE.krikzz) | Full upstream MIT notice, pinned revision, and adaptation provenance |
+| [ed64_pro.c](../src/flashcart/ed64_pro/ed64_pro.c), [ed64_pro.h](../src/flashcart/ed64_pro/ed64_pro.h) | One-shot probe/init lifecycle, retained diagnostics, and safe flashcart adapter with unsupported storage callbacks |
+| [flashcart.c](../src/flashcart/flashcart.c), [flashcart.h](../src/flashcart/flashcart.h) | Select the Pro adapter without fallback, reuse existing errors, and obtain optional retained-state error details; preserve non-Pro dispatch |
+| [menu.c](../src/menu/menu.c), [fault.c](../src/menu/views/fault.c), [views.h](../src/menu/views/views.h) | Route every flashcart startup error into the shared, non-returning, PI-independent fault view before normal services |
+| [README.md](../README.md#everdrive-64-pro-api-mit-license), [Pro developer notes](../src/flashcart/ed64_pro/README.md) | Full upstream MIT notice in the main README; pinned revision and adaptation provenance in the developer notes |
 | [Makefile](../Makefile), [build.yml](../.github/workflows/build.yml) | Compile the low-level driver and run focused host tests in CI before the existing ROM build |
 | [.gitignore](../.gitignore), [tests/Makefile](../tests/Makefile) | Track the otherwise ROM-glob-ignored hardware Makefile; segregate normal/release/sanitizer host binaries |
 | [ed64_pro_transport_test.c](../tests/ed64_pro_transport_test.c), [libdragon.h](../tests/stubs/libdragon.h) | Test production ownership/protocol/lifecycle code against the SDK-boundary cache/interrupt/DMA model |

@@ -129,6 +129,12 @@ static flashcart_t *flashcart = &((flashcart_t) {
  * @return char* The error message.
  */
 char *flashcart_convert_error_message (flashcart_err_t err) {
+    if (err != FLASHCART_OK && flashcart->get_error_message) {
+        char *message = flashcart->get_error_message(err);
+        if (message) {
+            return message;
+        }
+    }
     switch (err) {
         case FLASHCART_OK: return "No error";
         case FLASHCART_ERR_OUTDATED: return "Outdated flashcart firmware";
@@ -138,7 +144,6 @@ char *flashcart_convert_error_message (flashcart_err_t err) {
         case FLASHCART_ERR_LOAD: return "Error during loading data into flashcart";
         case FLASHCART_ERR_INT: return "Internal flashcart error";
         case FLASHCART_ERR_FUNCTION_NOT_SUPPORTED: return "Flashcart doesn't support this function";
-        case FLASHCART_ERR_ED64_PRO: return ed64_pro_get_error_message();
         default: return "Unknown flashcart error";
     }
 }
@@ -164,11 +169,13 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
     ed64_pro_probe_t pro = ed64_pro_probe();
     if (pro.outcome != ED64_PRO_PROBE_ABSENT) {
         *storage_prefix = NULL;
-        if (pro.outcome == ED64_PRO_PROBE_IDENTIFIED) {
-            /* Even READY is not an implemented storage backend. Diagnostics retain failures. */
-            (void)ed64_pro_init_transport();
+        /* The Pro handler also quarantines an indeterminate probe: no other
+         * cartridge is safe to try, and retained diagnostics explain the failure. */
+        flashcart = ed64_pro_get_flashcart();
+        if (pro.outcome != ED64_PRO_PROBE_IDENTIFIED) {
+            return FLASHCART_ERR_INT;
         }
-        return FLASHCART_ERR_ED64_PRO;
+        return flashcart->init();
     }
     
     if (daisydrive_detected()) {

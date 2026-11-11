@@ -20,7 +20,6 @@ typedef enum {
     FLASHCART_ERR_LOAD, /**< Load error */
     FLASHCART_ERR_INT, /**< Internal error */
     FLASHCART_ERR_FUNCTION_NOT_SUPPORTED, /**< Function not supported error */
-    FLASHCART_ERR_ED64_PRO, /**< Terminal Pro detection/transport-only startup result */
 } flashcart_err_t;
 
 /** @brief List of optional supported flashcart features */
@@ -107,6 +106,8 @@ typedef struct {
     flashcart_err_t (*set_save_writeback) (char *save_path);
     /** @brief The flashcart set boot mode function */
     flashcart_err_t (*set_next_boot_mode) (flashcart_reboot_mode_t boot_mode);
+    /** @brief Optional error detail from retained state; NULL uses the generic message. Must not perform I/O. */
+    char *(*get_error_message) (flashcart_err_t err);
 } flashcart_t;
 
 /**

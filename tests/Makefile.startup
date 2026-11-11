@@ -15,7 +15,7 @@ else
 include Makefile
 
 # Preserve external calls at the checked boundaries; other units keep normal LTO.
-$(BUILD_DIR)/menu/menu.o $(BUILD_DIR)/flashcart/flashcart.o \
+$(BUILD_DIR)/menu/menu.o $(BUILD_DIR)/menu/views/fault.o $(BUILD_DIR)/flashcart/flashcart.o \
 $(BUILD_DIR)/flashcart/ed64_pro/ed64_pro_ll.o $(BUILD_DIR)/ed64_pro_startup_guard.o: N64_CFLAGS+=-fno-lto
 GUARDED_APIS := flashcart_init dma_read_raw_async dma_write_raw_async dma_read_async dma_read dma_write \
 	io_read io_write debug_init_sdfs debug_init_usblog debug_init_emulog dfs_init \
