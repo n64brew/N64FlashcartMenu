@@ -79,9 +79,9 @@ Download the latest `sc64menu.n64` file from the [releases](https://github.com/P
 
 ### EverDrive-64 Pro
 The menu identifies the Pro and checks its transport/MCU SD readiness, then
-intentionally stops at a built-in-font error screen. It does not mount storage,
-enter the browser, load ROMs, or handle saves/USB. Power-cycle to return to stock
-firmware; transport failures are not retried. Test only as an ordinary ROM from
+stops through the shared flashcart startup fault screen. It does not mount
+storage, enter the browser, load ROMs, or handle saves/USB. Power-cycle to
+return to stock firmware; transport failures are not retried. Test only as an ordinary ROM from
 stock firmware, not as a replacement OS. See [Pro limitations](docs/98_flashcart_wip.md#everdrive-64-pro-detectiontransport-only)
 and the [qualification record](docs/91_test_plan_matrix.md#everdrive-64-pro-transport-qualification).
 
@@ -102,7 +102,31 @@ Other compatible or commercial license options may be available upon request wit
 * [TJpgDec](https://elm-chan.org/fsw/tjpgd/) - [ChaN permissive license](https://elm-chan.org/fsw/tjpgd/en/appnote.html)
 * [dr_libs](https://github.com/mackron/dr_libs) (dr_mp3, dr_flac) - [Public domain or MIT-0](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 * [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
-* [Krikzz EverDrive-64 Pro API](https://github.com/krikzz/ed64-pro-pub/tree/43014e290f85140d4c5ca84fbf5ae48ac755a23d) - selected protocol routines adapted under [MIT](src/flashcart/ed64_pro/LICENSE.krikzz)
+* [Krikzz EverDrive-64 Pro API](https://github.com/krikzz/ed64-pro-pub/tree/43014e290f85140d4c5ca84fbf5ae48ac755a23d) - selected protocol routines adapted under [MIT](#everdrive-64-pro-api-mit-license); see [adaptation notes](src/flashcart/ed64_pro/README.md)
+
+### EverDrive-64 Pro API (MIT License)
+
+MIT License
+
+Copyright (c) 2026 krikzz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ## Sounds
 See [License](https://pixabay.com/en/service/license-summary/) for the following sounds:

@@ -166,9 +166,10 @@ the attempt (in particular, call `timer_init` beforehand if it is needed).
 | Actual libdragon SDK | `39d0d6096130836a65710da6730290701d060272`; raw DMA tickets, queue-idle check, cache APIs |
 | [Official Krikzz API](https://github.com/krikzz/ed64-pro-pub/tree/43014e290f85140d4c5ca84fbf5ae48ac755a23d) | `43014e290f85140d4c5ca84fbf5ae48ac755a23d`; selected register/framing/stop/SD routines only |
 
-Krikzz's complete MIT notice and adaptation provenance are retained in
-[LICENSE.krikzz](../src/flashcart/ed64_pro/LICENSE.krikzz). The combined project
-retains its existing AGPL license.
+Krikzz's complete MIT notice is retained in the
+[main README](../README.md#everdrive-64-pro-api-mit-license); adaptation
+provenance is in the [developer notes](../src/flashcart/ed64_pro/README.md).
+The combined project retains its existing AGPL license.
 
 | Operation | Runtime failure limit |
 |---|---|
