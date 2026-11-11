@@ -5,7 +5,8 @@
 static const char *firmware_message = (
     "Minimum supported firmware versions:\n"
     "64drive: 2.05+\n"
-    "EverDrive-64 (V/X series): ???+\n"
+    "EverDrive-64 V/X series: ???+\n"
+    "EverDrive-64 Pro: ???+\n"
     "SummerCart64: 2.17.0+"
 );
 
