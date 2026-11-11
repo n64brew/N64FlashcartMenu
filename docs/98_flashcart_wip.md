@@ -25,5 +25,5 @@ The aim is to reach feature parity with [Altra64](https://github.com/networkfusi
 
 ### EverDrive-64 Pro - WiP - DETECTION ONLY
 Currently not supported, but work is in progress.
-
-ED64 Pro carts are detected, but not yet usable.
+> [!CAUTION]
+> ED64 Pro carts are only detected, but not yet usable.
