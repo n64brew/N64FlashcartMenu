@@ -77,9 +77,6 @@ Download the latest `sc64menu.n64` file from the [releases](https://github.com/P
 * Ensure the cart has the latest [firmware](https://64drive.retroactive.be/support.php) installed.
 * Download the latest `menu.bin` file from the [releases](https://github.com/Polprzewodnikowy/N64FlashcartMenu/releases/) page, then put it in the root directory of your SD card.
 
-### EverDrive-64 Pro
-See the [EverDrive-64 Pro documentation](docs/98_flashcart_wip.md#everdrive-64-pro-detectiontransport-only) for setup instructions and current limitations.
-
 
 # Contributors
 The features in this project were made possible by the [contributors](https://github.com/Polprzewodnikowy/N64FlashcartMenu/graphs/contributors).
@@ -97,31 +94,7 @@ Other compatible or commercial license options may be available upon request wit
 * [TJpgDec](https://elm-chan.org/fsw/tjpgd/) - [ChaN permissive license](https://elm-chan.org/fsw/tjpgd/en/appnote.html)
 * [dr_libs](https://github.com/mackron/dr_libs) (dr_mp3, dr_flac) - [Public domain or MIT-0](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 * [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
-* [Krikzz EverDrive-64 Pro API](https://github.com/krikzz/ed64-pro-pub/tree/43014e290f85140d4c5ca84fbf5ae48ac755a23d) - selected protocol routines adapted under [MIT](#everdrive-64-pro-api-mit-license); see [adaptation notes](src/flashcart/ed64_pro/README.md)
-
-### EverDrive-64 Pro API (MIT License)
-
-MIT License
-
-Copyright (c) 2026 krikzz
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+* [Krikzz EverDrive-64 Pro API](https://github.com/krikzz/ed64-pro-pub) - [MIT License](https://github.com/krikzz/ed64-pro-pub/blob/43014e290f85140d4c5ca84fbf5ae48ac755a23d/LICENSE)
 
 ## Sounds
 See [License](https://pixabay.com/en/service/license-summary/) for the following sounds:

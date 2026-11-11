@@ -59,10 +59,9 @@ Pro OS support. See [test commands and qualification limits](91_test_plan_matrix
 
 The selected protocol subset is adapted from
 [krikzz/ed64-pro-pub at `43014e290f85140d4c5ca84fbf5ae48ac755a23d`](https://github.com/krikzz/ed64-pro-pub/tree/43014e290f85140d4c5ca84fbf5ae48ac755a23d).
-Its complete copyright 2026 krikzz MIT notice is in the
-[main README](../README.md#everdrive-64-pro-api-mit-license), with adaptation
-provenance in the [developer notes](../src/flashcart/ed64_pro/README.md). This
-project remains AGPL. No upstream filesystem/launch/bulk ACK implementation is imported.
+Its complete copyright 2026 krikzz MIT notice and adaptation provenance are
+in the [developer notes](../src/flashcart/ed64_pro/README.md). This project
+remains AGPL. No upstream filesystem/launch/bulk ACK implementation is imported.
 
 Filesystem/file APIs, browsing/loading/saves, cartridge-memory bulk transfers,
 launch/device start, feature/firmware reporting, RTC/64DD/USB, recovery/reset,

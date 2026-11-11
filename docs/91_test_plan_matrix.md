@@ -173,9 +173,8 @@ the attempt (in particular, call `timer_init` beforehand if it is needed).
 | Actual libdragon SDK | `39d0d6096130836a65710da6730290701d060272`; raw DMA tickets, queue-idle check, cache APIs |
 | [Official Krikzz API](https://github.com/krikzz/ed64-pro-pub/tree/43014e290f85140d4c5ca84fbf5ae48ac755a23d) | `43014e290f85140d4c5ca84fbf5ae48ac755a23d`; selected register/framing/stop/SD routines only |
 
-Krikzz's complete MIT notice is retained in the
-[main README](../README.md#everdrive-64-pro-api-mit-license); adaptation
-provenance is in the [developer notes](../src/flashcart/ed64_pro/README.md).
+Krikzz's complete MIT notice and adaptation provenance are retained in the
+[developer notes](../src/flashcart/ed64_pro/README.md).
 The combined project retains its existing AGPL license.
 
 | Operation | Runtime failure limit |
@@ -497,7 +496,7 @@ establish universal hardware qualification or usable Pro storage support.
 | [ed64_pro.c](../src/flashcart/ed64_pro/ed64_pro.c), [ed64_pro.h](../src/flashcart/ed64_pro/ed64_pro.h) | One-shot probe/init lifecycle, retained diagnostics, and safe flashcart adapter with unsupported storage callbacks |
 | [flashcart.c](../src/flashcart/flashcart.c), [flashcart.h](../src/flashcart/flashcart.h) | Select the Pro adapter without fallback, reuse existing errors, and obtain optional retained-state error details; preserve non-Pro dispatch |
 | [menu.c](../src/menu/menu.c), [fault.c](../src/menu/views/fault.c), [views.h](../src/menu/views/views.h) | Route every flashcart startup error into the shared, non-returning, PI-independent fault view before normal services |
-| [README.md](../README.md#everdrive-64-pro-api-mit-license), [Pro developer notes](../src/flashcart/ed64_pro/README.md) | Full upstream MIT notice in the main README; pinned revision and adaptation provenance in the developer notes |
+| [README.md](../README.md), [Pro developer notes](../src/flashcart/ed64_pro/README.md) | Upstream source/license credit in the main README; full MIT notice, pinned revision, and adaptation provenance in the developer notes |
 | [Makefile](../Makefile), [build.yml](../.github/workflows/build.yml) | Compile the low-level driver and run focused host tests in CI before the existing ROM build |
 | [.gitignore](../.gitignore), [tests/Makefile](../tests/Makefile) | Track the otherwise ROM-glob-ignored hardware Makefile; segregate normal/release/sanitizer host binaries |
 | [ed64_pro_transport_test.c](../tests/ed64_pro_transport_test.c), [libdragon.h](../tests/stubs/libdragon.h) | Test production ownership/protocol/lifecycle code against the SDK-boundary cache/interrupt/DMA model |

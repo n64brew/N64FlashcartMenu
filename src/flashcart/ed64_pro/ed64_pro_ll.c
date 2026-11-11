@@ -3,7 +3,7 @@
  * @brief Cache-owned, bounded PI access for the EverDrive-64 Pro.
  *
  * Register layout and selected wire protocol: krikzz/ed64-pro-pub.
- * See README.md for revision/adaptations and the main README for the MIT notice.
+ * See README.md for the pinned revision, adaptations, and upstream MIT notice.
  */
 
 #include <libdragon.h>
