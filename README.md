@@ -25,7 +25,7 @@ The current state of support is:
 ### Help wanted (Work in Progress)
 * EverDrive-64 (X and V series)
 * DaisyDrive
-* EverDrive-64 Pro: detection/transport and MCU SD-readiness check only; no usable storage backend
+* EverDrive-64 Pro
 * ED64P (clones)
 
 ### Not yet planned
@@ -78,12 +78,7 @@ Download the latest `sc64menu.n64` file from the [releases](https://github.com/P
 * Download the latest `menu.bin` file from the [releases](https://github.com/Polprzewodnikowy/N64FlashcartMenu/releases/) page, then put it in the root directory of your SD card.
 
 ### EverDrive-64 Pro
-The menu identifies the Pro and checks its transport/MCU SD readiness, then
-stops through the shared flashcart startup fault screen. It does not mount
-storage, enter the browser, load ROMs, or handle saves/USB. Power-cycle to
-return to stock firmware; transport failures are not retried. Test only as an ordinary ROM from
-stock firmware, not as a replacement OS. See [Pro limitations](docs/98_flashcart_wip.md#everdrive-64-pro-detectiontransport-only)
-and the [qualification record](docs/91_test_plan_matrix.md#everdrive-64-pro-transport-qualification).
+See the [EverDrive-64 Pro documentation](docs/98_flashcart_wip.md#everdrive-64-pro-detectiontransport-only) for setup instructions and current limitations.
 
 
 # Contributors
