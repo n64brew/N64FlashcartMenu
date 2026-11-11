@@ -356,9 +356,6 @@ void view_error_display(menu_t *menu, surface_t *display);
  */
 void view_fault_init(menu_t *menu);
 
-/** @brief Display a fatal flashcart startup error before hardware or filesystem-dependent menu setup. */
-void view_fault_startup(flashcart_err_t error) __attribute__((noreturn));
-
 /**
  * @brief Display the fault view.
  *

@@ -39,8 +39,9 @@ distinguished from errors returned by our stop/SD commands.
 
 A failed identity read also selects the safe Pro adapter to prevent fallback,
 but returns an internal error without invoking transport initialization. Every
-such startup result reaches the shared built-in-font fault screen before
-filesystem, asset/font/background loading, browser setup, or USB polling. The
+such startup result selects `MENU_MODE_FAULT` and returns from initialization
+before filesystem, asset/font/background loading, browser setup, or USB polling.
+The existing fault view uses the built-in font and `menu->flashcart_err`. The
 adapter advertises no menu features; its mandatory storage callbacks return
 function-not-supported without I/O. Firmware version retrieval is not implemented.
 

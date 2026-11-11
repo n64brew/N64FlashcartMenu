@@ -35,8 +35,10 @@ queries return false, and the firmware version callback returns a zero
 placeholder rather than a measured version. Optional services remain absent.
 The optional error-message callback formats retained diagnostics without I/O;
 the shared conversion function keeps its generic fallback for other errors.
-The shared startup fault view stops before filesystem, USB, controller, or
-normal menu initialization. Transport READY does not provide usable storage.
+Startup selects `MENU_MODE_FAULT` and returns before filesystem, USB,
+controller, or normal menu initialization. The existing fault callbacks render
+`menu->flashcart_err` using the built-in console and shared error converter.
+Transport READY does not provide usable storage.
 
 ### Upstream license
 

@@ -360,6 +360,21 @@ The ROM SHA-256 values were:
 | `output/ed64-pro-startup-guard/N64FlashcartMenu.n64` | `4d8425ed8831e3ab557752d8b261cce9cb1d5fccf5cc368a14f590629210ad27` |
 | `output/ed64-pro-startup-timeout/N64FlashcartMenu.n64` | `22b0476bd18be3b0de5bc669ce22698adc2e8db59c7a2eaecf127afb154b4018` |
 
+#### Follow-up using the existing fault callbacks: 2026-11-11
+
+Startup now selects `MENU_MODE_FAULT` and returns before normal services.
+The existing `view_fault_init`/`view_fault_display` callbacks render
+`menu->flashcart_err` through the shared converter and built-in console;
+the separate startup fault API is removed. Firmware guidance explicitly
+identifies the EverDrive-64 V/X series.
+
+The macOS/Linux host suites above passed again, as did the production,
+guarded startup, and guarded software-timeout N64 builds. Guarded ELF
+inspection confirmed the error branch enters the fault callbacks before
+controller/filesystem setup, and the display callback calls only
+`console_render`. The hardware results and ROM hashes above predate this
+callback refactor; hardware rendering has not been rerun for this follow-up.
+
 #### Earlier qualification: 2026-11-04 hardware and 2026-11-06 hosts
 
 Hardware results below are observed from user-supplied HDMI screenshots, not
@@ -495,7 +510,7 @@ establish universal hardware qualification or usable Pro storage support.
 | [ed64_pro_ll.c](../src/flashcart/ed64_pro/ed64_pro_ll.c), [ed64_pro_ll.h](../src/flashcart/ed64_pro/ed64_pro_ll.h) | Cartridge-local bounded PI/FIFO protocol, cache ownership, deadlines, quarantine, and typed results |
 | [ed64_pro.c](../src/flashcart/ed64_pro/ed64_pro.c), [ed64_pro.h](../src/flashcart/ed64_pro/ed64_pro.h) | One-shot probe/init lifecycle, retained diagnostics, and safe flashcart adapter with unsupported storage callbacks |
 | [flashcart.c](../src/flashcart/flashcart.c), [flashcart.h](../src/flashcart/flashcart.h) | Select the Pro adapter without fallback, reuse existing errors, and obtain optional retained-state error details; preserve non-Pro dispatch |
-| [menu.c](../src/menu/menu.c), [fault.c](../src/menu/views/fault.c), [views.h](../src/menu/views/views.h) | Route every flashcart startup error into the shared, non-returning, PI-independent fault view before normal services |
+| [menu.c](../src/menu/menu.c), [fault.c](../src/menu/views/fault.c), [views.h](../src/menu/views/views.h) | Stop every flashcart startup error in `MENU_MODE_FAULT` with PI-independent built-in-console rendering before normal services |
 | [README.md](../README.md), [Pro developer notes](../src/flashcart/ed64_pro/README.md) | Upstream source/license credit in the main README; full MIT notice, pinned revision, and adaptation provenance in the developer notes |
 | [Makefile](../Makefile), [build.yml](../.github/workflows/build.yml) | Compile the low-level driver and run focused host tests in CI before the existing ROM build |
 | [.gitignore](../.gitignore), [tests/Makefile](../tests/Makefile) | Track the otherwise ROM-glob-ignored hardware Makefile; segregate normal/release/sanitizer host binaries |
