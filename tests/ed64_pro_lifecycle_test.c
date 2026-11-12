@@ -265,6 +265,7 @@ static void require_terminal_result (bool identified) {
                                   : FLASHCART_ERR_INT;
     TEST_CHECK(flashcart_init(&prefix) == expected);
     TEST_CHECK(prefix == NULL && flashcart == &pro_backend);
+    TEST_CHECK(cart_type == CART_MAX);
     TEST_CHECK(strcmp(flashcart_get_name(), "EverDrive-64 Pro") == 0);
     TEST_CHECK(spy.probes == 1 && spy.pro_inits == (unsigned)identified && spy.pro_getters == 1);
     TEST_CHECK(spy.daisy_detects == 0 && spy.daisy_mounts == 0 && spy.getters == 0);

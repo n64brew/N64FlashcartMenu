@@ -168,6 +168,10 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
 
     ed64_pro_probe_t pro = ed64_pro_probe();
     if (pro.outcome != ED64_PRO_PROBE_ABSENT) {
+        /* rtc_init must skip libcart probes: ED X/V registers overlap Pro
+         * registers and save memory. Never pass this sentinel to cart_exit or
+         * cart_card_*; only the non-Pro debug_init_sdfs path uses those APIs. */
+        cart_type = CART_MAX;
         *storage_prefix = NULL;
         /* The Pro handler also quarantines an indeterminate probe: no other
          * cartridge is safe to try, and retained diagnostics explain the failure. */
