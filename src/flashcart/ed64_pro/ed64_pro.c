@@ -395,10 +395,9 @@ static const char *pro_get_name (void) {
     return "EverDrive-64 Pro";
 }
 
-/** @brief Keep optional features disabled until their hardware qualification passes. */
+/** @brief Report the hardware-qualified Pro features. */
 static bool pro_has_feature (flashcart_features_t feature) {
-    (void)feature;
-    return false;
+    return feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_SAVE_WRITEBACK;
 }
 
 /** @brief Return cached information without MCU traffic. */
