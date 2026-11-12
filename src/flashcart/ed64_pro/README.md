@@ -10,35 +10,33 @@ Source: https://github.com/krikzz/ed64-pro-pub
 Revision: 43014e290f85140d4c5ca84fbf5ae48ac755a23d
 Paths: edio/everdrive.c, edio/everdrive.h
 
-The cartridge-local driver adapts only the register layout, FIFO word/byte
-encoding, command/status framing, mailbox synchronization, device stop, and
-MCU SD initialization. It uses fixed-width types, bounded libdragon ticket
-submission/completion, exclusive cache-line staging, and a sticky failure
-lifecycle instead of upstream's unbounded PI and protocol waits.
+The cartridge-local driver adapts register and FIFO access, bounded command
+framing, STATUS/NRESP, device stop, firmware information, MCU filesystem
+initialization, and raw-sector reads/writes. It uses fixed-width types,
+bounded libdragon ticket submission/completion, exclusive cache-line staging,
+and sticky failures instead of upstream's unbounded PI and protocol waits.
 
 The combined N64FlashcartMenu project retains its existing AGPL license.
+The upstream copyright and MIT license notice is retained [below](#upstream-license).
 
-The complete upstream copyright and MIT license notice is retained
-[below](#upstream-license).
+### Storage ownership
 
-### Menu integration
+The driver requires firmware 26.1014 or newer. It stops MCU services and mounts
+volume 0 as `sd:/` through libdragon FatFs. Before returning storage to the MCU,
+consumers stop, writes must be synchronized, FatFs unmounts, and FS INIT runs.
+A failed I/O or release is terminal; never retry an ambiguous write. Power-cycle
+the console and USB after a fault, then check the files on a computer.
 
-The Pro retains a `flashcart_t` adapter while storage support is incomplete.
-An identified device initializes through its shared callback; transport errors
-map to `FLASHCART_ERR_INT`, and transport READY maps to
-`FLASHCART_ERR_FUNCTION_NOT_SUPPORTED`. An indeterminate probe selects the same
-safe adapter but returns an internal error without initializing the transport
-or trying another cartridge. All such paths leave the storage prefix NULL.
+Use edlink or other active USB tools only with the console off or while the
+stock Pro menu runs. Keep them idle while this menu or a launched game runs.
+There is no in-menu USB transfer mode.
 
-Mandatory storage callbacks return function-not-supported without I/O, feature
-queries return false, and the firmware version callback returns a zero
-placeholder rather than a measured version. Optional services remain absent.
-The optional error-message callback formats retained diagnostics without I/O;
-the shared conversion function keeps its generic fallback for other errors.
-Startup selects `MENU_MODE_FAULT` and returns before filesystem, USB,
-controller, or normal menu initialization. The existing fault callbacks render
-`menu->flashcart_err` using the built-in console and shared error converter.
-Transport READY does not provide usable storage.
+WRE transmits `DE AD BE EF`, matching edlink rather than the upstream N64
+sample's read operation. Transfers calculate their own LBA stepping rather
+than copying upstream's byte-based address increment.
+
+Game loading and launch remain unavailable until their integration steps pass.
+Optional features are not advertised.
 
 ### Upstream license
 

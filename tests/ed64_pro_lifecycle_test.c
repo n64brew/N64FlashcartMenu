@@ -29,6 +29,7 @@ static struct {
     char *message;
     unsigned probes;
     unsigned pro_inits;
+    unsigned pro_mounts;
     unsigned pro_getters;
     unsigned messages;
     unsigned bbfs;
@@ -70,12 +71,22 @@ ed64_pro_probe_t ed64_pro_probe (void) {
 static flashcart_err_t pro_backend_init (void) {
     spy.pro_inits++;
     TEST_CHECK(spy.probes == 1 && spy.probe.outcome == ED64_PRO_PROBE_IDENTIFIED);
-    return spy.transport_result == ED64_PRO_LL_OK ? FLASHCART_ERR_FUNCTION_NOT_SUPPORTED : FLASHCART_ERR_INT;
+    return spy.transport_result == ED64_PRO_LL_OK ? spy.backend_result : FLASHCART_ERR_INT;
+}
+
+bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
+    spy.pro_mounts++;
+    TEST_CHECK(spy.pro_inits == 1 && spy.transport_result == ED64_PRO_LL_OK);
+    TEST_CHECK(strcmp(prefix, "sd:/") == 0 && max_files == -1);
+    TEST_CHECK(cart_type == CART_MAX);
+    return spy.sdfs_ok;
 }
 
 static char *pro_error_message (flashcart_err_t error) {
     spy.messages++;
-    return error == FLASHCART_ERR_INT || error == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED ? spy.message : NULL;
+    return error == FLASHCART_ERR_INT || error == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED || error == FLASHCART_ERR_SD_CARD
+               ? spy.message
+               : NULL;
 }
 
 static const char *pro_backend_name (void) {
@@ -260,9 +271,7 @@ static void power_on (void) {
 static void require_terminal_result (bool identified) {
     flashcart = &backend;
     const char *prefix = "sd:/";
-    flashcart_err_t expected = identified && spy.transport_result == ED64_PRO_LL_OK
-                                  ? FLASHCART_ERR_FUNCTION_NOT_SUPPORTED
-                                  : FLASHCART_ERR_INT;
+    flashcart_err_t expected = FLASHCART_ERR_INT;
     TEST_CHECK(flashcart_init(&prefix) == expected);
     TEST_CHECK(prefix == NULL && flashcart == &pro_backend);
     TEST_CHECK(cart_type == CART_MAX);
@@ -270,21 +279,36 @@ static void require_terminal_result (bool identified) {
     TEST_CHECK(spy.probes == 1 && spy.pro_inits == (unsigned)identified && spy.pro_getters == 1);
     TEST_CHECK(spy.daisy_detects == 0 && spy.daisy_mounts == 0 && spy.getters == 0);
     TEST_CHECK(spy.sdfs == 0 && spy.bbfs == 0 && spy.usb == 0 && spy.isviewer == 0);
-    TEST_CHECK(spy.callbacks == 0 && spy.file_calls == 0);
+    TEST_CHECK(spy.callbacks == 0 && spy.file_calls == 0 && spy.pro_mounts == 0);
     TEST_CHECK(flashcart_convert_error_message(expected) == spy.message);
     TEST_CHECK(spy.messages == 1);
 }
 
-static void test_ready_is_not_storage (void) {
+static void test_pro_storage_mount (void) {
+    for (unsigned fail = 0; fail < 2; fail++) {
+        power_on();
+        spy.probe = (ed64_pro_probe_t){
+            .outcome = ED64_PRO_PROBE_IDENTIFIED,
+            .id = 0xED640027u,
+            .id_valid = true,
+        };
+        spy.sdfs_ok = !fail;
+        spy.daisy = true;
+        const char *prefix = "previous:/";
+        TEST_CHECK(flashcart_init(&prefix) == (fail ? FLASHCART_ERR_SD_CARD : FLASHCART_OK));
+        TEST_CHECK(fail ? prefix == NULL : prefix && strcmp(prefix, "sd:/") == 0);
+        TEST_CHECK(flashcart == &pro_backend && cart_type == CART_MAX);
+        TEST_CHECK(spy.probes == 1 && spy.pro_inits == 1 && spy.pro_mounts == 1);
+        TEST_CHECK(spy.daisy_detects == 0 && spy.sdfs == 0 && spy.usb == 0 && spy.isviewer == 0);
+        TEST_CHECK(spy.callbacks == 0 && spy.file_calls == 0);
+        TEST_CHECK(strcmp(flashcart_get_name(), "EverDrive-64 Pro") == 0);
+    }
     power_on();
-    spy.probe = (ed64_pro_probe_t){
-        .outcome = ED64_PRO_PROBE_IDENTIFIED,
-        .id = 0xED640027u,
-        .id_valid = true,
-    };
-    spy.transport_result = ED64_PRO_LL_OK;
-    spy.daisy = true;
-    require_terminal_result(true);
+    spy.probe.outcome = ED64_PRO_PROBE_IDENTIFIED;
+    spy.backend_result = FLASHCART_ERR_OUTDATED;
+    const char *prefix = NULL;
+    TEST_CHECK(flashcart_init(&prefix) == FLASHCART_ERR_OUTDATED);
+    TEST_CHECK(prefix == NULL && spy.pro_mounts == 0);
 }
 
 /**
@@ -489,7 +513,8 @@ static void test_optional_error_messages (void) {
     TEST_CHECK(strcmp(flashcart_convert_error_message(FLASHCART_OK), "No error") == 0);
     TEST_CHECK(spy.messages == 0);
     TEST_CHECK(
-        strcmp(flashcart_convert_error_message(FLASHCART_ERR_SD_CARD), "Error during SD card initialization") == 0
+        strcmp(flashcart_convert_error_message(FLASHCART_ERR_ARGS), "Invalid argument passed to flashcart function") ==
+        0
     );
     TEST_CHECK(flashcart_convert_error_message(FLASHCART_ERR_INT) == spy.message);
     TEST_CHECK(flashcart_convert_error_message(FLASHCART_ERR_FUNCTION_NOT_SUPPORTED) == spy.message);
@@ -498,7 +523,7 @@ static void test_optional_error_messages (void) {
 }
 
 TEST_LIST = {
-    {"Pro READY never activates storage", test_ready_is_not_storage},
+    {"Pro mounts storage only after successful initialization", test_pro_storage_mount},
     {"identified Pro failures never activate or fall back", test_identified_failures},
     {"indeterminate probe never selects another cartridge", test_failed_probe_never_falls_back},
     {"iQue bypass remains unchanged", test_ique_bypass},

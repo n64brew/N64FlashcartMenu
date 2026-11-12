@@ -188,7 +188,7 @@ static void fixture (void) {
 
 static void mounted_fixture (void) {
     fixture();
-    TEST_ASSERT(pro_init() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+    TEST_ASSERT(pro_init() == FLASHCART_OK);
     TEST_ASSERT(ed64_pro_init_sdfs("sd:/", 4));
     mock.operations = 0;
     mock.reads = 0;
@@ -197,13 +197,13 @@ static void mounted_fixture (void) {
 
 static void test_firmware_info (void) {
     fixture();
-    TEST_CHECK(pro_init() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+    TEST_CHECK(pro_init() == FLASHCART_OK);
     TEST_CHECK(pro_get_firmware_version().major == 26);
     TEST_CHECK(pro_get_firmware_version().minor == 1014);
     TEST_CHECK(pro_get_firmware_version().revision == 0);
     TEST_CHECK(pro_diagnostics.rom_capacity == 0x0F000000u);
     TEST_CHECK(strcmp(pro_get_name(), "EverDrive-64 Pro") == 0);
-    TEST_CHECK(pro_init() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED && mock.info_calls == 1);
+    TEST_CHECK(pro_init() == FLASHCART_OK && mock.info_calls == 1);
 }
 
 static void test_firmware_boundaries (void) {
@@ -212,9 +212,9 @@ static void test_firmware_boundaries (void) {
         flashcart_err_t result;
     } cases[] = {
         {2026, 10, 13, FLASHCART_ERR_OUTDATED},
-        {2026, 10, 14, FLASHCART_ERR_FUNCTION_NOT_SUPPORTED},
-        {2027, 1, 1, FLASHCART_ERR_FUNCTION_NOT_SUPPORTED},
-        {2028, 2, 29, FLASHCART_ERR_FUNCTION_NOT_SUPPORTED},
+        {2026, 10, 14, FLASHCART_OK},
+        {2027, 1, 1, FLASHCART_OK},
+        {2028, 2, 29, FLASHCART_OK},
         {2026, 2, 29, FLASHCART_ERR_INT},
         {2100, 2, 29, FLASHCART_ERR_INT},
         {2026, 4, 31, FLASHCART_ERR_INT},
@@ -228,7 +228,7 @@ static void test_firmware_boundaries (void) {
         mock.info[0] = fat_date(cases[i].year, cases[i].month, cases[i].day);
         TEST_CHECK(pro_init() == cases[i].result);
         TEST_CHECK(mock.info_calls == 1);
-        TEST_CHECK(pro_get_error_message(cases[i].result) != NULL);
+        TEST_CHECK((pro_get_error_message(cases[i].result) == NULL) == (cases[i].result == FLASHCART_OK));
     }
     fixture();
     mock.info[1] = 0;
@@ -255,7 +255,7 @@ static void test_mount (void) {
 static void test_mount_failure (void) {
     for (int volume = -1; volume <= 1; volume += 2) {
         fixture();
-        TEST_ASSERT(pro_init() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+        TEST_ASSERT(pro_init() == FLASHCART_OK);
         mock.mount_result = volume;
         TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4));
         TEST_CHECK(mock.unmounts == (volume > 0 ? 1u : 0u));
@@ -267,7 +267,7 @@ static void test_mount_failure (void) {
 
 static void test_mount_io_failure (void) {
     fixture();
-    TEST_ASSERT(pro_init() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+    TEST_ASSERT(pro_init() == FLASHCART_OK);
     mock.fail_operation = 1;
     TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4));
     TEST_CHECK(pro_diagnostics.storage_failed);

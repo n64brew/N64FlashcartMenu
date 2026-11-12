@@ -376,8 +376,7 @@ static flashcart_err_t pro_init (void) {
         }
         pro_set_phase(ED64_PRO_PHASE_READY);
     }
-    return pro_diagnostics.info_result == FLASHCART_OK ? FLASHCART_ERR_FUNCTION_NOT_SUPPORTED
-                                                       : pro_diagnostics.info_result;
+    return pro_diagnostics.info_result;
 }
 
 static const char *pro_get_name (void) {

@@ -179,7 +179,15 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         if (pro.outcome != ED64_PRO_PROBE_IDENTIFIED) {
             return FLASHCART_ERR_INT;
         }
-        return flashcart->init();
+        if ((err = flashcart->init()) != FLASHCART_OK) {
+            return err;
+        }
+        *storage_prefix = "sd:/";
+        if (!ed64_pro_init_sdfs(*storage_prefix, -1)) {
+            *storage_prefix = NULL;
+            return FLASHCART_ERR_SD_CARD;
+        }
+        return FLASHCART_OK;
     }
     
     if (daisydrive_detected()) {

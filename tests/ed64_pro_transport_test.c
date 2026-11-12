@@ -1819,13 +1819,16 @@ static void test_adapter_initialization (void) {
         if (failed) {
             mock.fail_at = 2;
         }
-        flashcart_err_t expected = failed ? FLASHCART_ERR_INT : FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+        flashcart_err_t expected = failed ? FLASHCART_ERR_INT : FLASHCART_OK;
         TEST_CHECK(adapter->init() == expected);
         const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
         TEST_CHECK(diagnostics->state == (failed ? ED64_PRO_POISONED : ED64_PRO_READY));
         unsigned enqueues = mock.enqueues;
         TEST_CHECK(
-            strstr(adapter->get_error_message(expected), failed ? "startup failed" : "not implemented") != NULL
+            strstr(
+                adapter->get_error_message(failed ? expected : FLASHCART_ERR_FUNCTION_NOT_SUPPORTED),
+                failed ? "startup failed" : "not implemented"
+            ) != NULL
         );
         TEST_CHECK(adapter->get_error_message(FLASHCART_ERR_SD_CARD) != NULL);
         TEST_CHECK(adapter->get_error_message(FLASHCART_OK) == NULL);
