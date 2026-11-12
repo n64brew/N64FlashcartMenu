@@ -20,6 +20,9 @@
 #if (defined(ED64_PRO_TEST_INFO) + defined(ED64_PRO_TEST_STORAGE) + defined(ED64_PRO_TEST_LOAD)) > 1
 #error Select one qualification mode
 #endif
+#if defined(ED64_PRO_TEST_LOAD_TIMING) && !defined(ED64_PRO_TEST_LOAD)
+#error Timing qualification requires load mode
+#endif
 #if defined(ED64_PRO_TEST_RAW_WRITE) && !defined(ED64_PRO_TEST_STORAGE)
 #error Raw-write qualification requires storage mode
 #endif
@@ -583,6 +586,12 @@ static void run_storage (void) {
 #ifndef ED64_PRO_TEST_OVERSIZE_PATH
 #define ED64_PRO_TEST_OVERSIZE_PATH "/ed64pro-test/oversize.z64"
 #endif
+#ifndef ED64_PRO_TEST_LOAD_TIMING_32_PATH
+#define ED64_PRO_TEST_LOAD_TIMING_32_PATH "/ed64pro-test/boot/04-cic6105-CZLE.z64"
+#endif
+#ifndef ED64_PRO_TEST_LOAD_TIMING_64_PATH
+#define ED64_PRO_TEST_LOAD_TIMING_64_PATH "/ed64pro-test/boot/07-cic6103-NP3E.z64"
+#endif
 
 static uint8_t source_buffer[4096] __attribute__((aligned(16)));
 static uint8_t pi_buffer[4096] __attribute__((aligned(16)));
@@ -678,7 +687,7 @@ static bool compare_loaded (const char *path, uint32_t rom_offset, uint32_t file
     return true;
 }
 
-static bool load_rom_fixture (flashcart_t *adapter, char *path, bool normalize_v64) {
+static bool load_rom_fixture (flashcart_t *adapter, char *path, bool normalize_v64, bool verify_contents) {
     cart_card_byteswap = normalize_v64;
     load_progress_percent = 0;
     load_progress_valid = true;
@@ -700,7 +709,7 @@ static bool load_rom_fixture (flashcart_t *adapter, char *path, bool normalize_v
         printf("FAILED: progress callbacks\n");
         return false;
     }
-    return compare_loaded(path, 0, 0, normalize_v64);
+    return !verify_contents || compare_loaded(path, 0, 0, normalize_v64);
 }
 
 static void run_load (void) {
@@ -712,6 +721,31 @@ static void run_load (void) {
         printf("Startup/mount FAILED: %s\n", ed64_pro_get_error_message());
         terminal();
     }
+#ifdef ED64_PRO_TEST_LOAD_TIMING
+    static const struct {
+        char *path;
+        uint32_t size;
+    } fixtures[] = {
+        {ED64_PRO_TEST_LOAD_PATH, 8u * 1024u * 1024u},
+        {ED64_PRO_TEST_LOAD_TIMING_32_PATH, 32u * 1024u * 1024u},
+        {ED64_PRO_TEST_LOAD_TIMING_64_PATH, 64u * 1024u * 1024u},
+    };
+    for (size_t fixture = 0; fixture < sizeof(fixtures) / sizeof(fixtures[0]); fixture++) {
+        uint32_t size;
+        if (!fixture_size(fixtures[fixture].path, &size) || size != fixtures[fixture].size) {
+            printf("TIMING REFUSED: fixture size mismatch.\n");
+            terminal();
+        }
+        printf("Timing %" PRIu32 " MiB, comparison disabled:\n", size / (1024u * 1024u));
+        console_render();
+        if (!load_rom_fixture(adapter, fixtures[fixture].path, false, false)) {
+            terminal();
+        }
+    }
+    printf("Timing-only loads complete; no content-verification claim.\n");
+    printf("No release or START. Power off before host access.\n");
+    terminal();
+#endif
 #if defined(ED64_PRO_TEST_OVERSIZE)
     uint32_t oversize_size;
     const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
@@ -737,7 +771,7 @@ static void run_load (void) {
     }
     printf("H3.1: z64 (%" PRIu32 " bytes)\n", rom_size);
     console_render();
-    if (!load_rom_fixture(adapter, ED64_PRO_TEST_LOAD_PATH, false)) {
+    if (!load_rom_fixture(adapter, ED64_PRO_TEST_LOAD_PATH, false, true)) {
         terminal();
     }
     uint32_t start = TICKS_READ();
@@ -756,7 +790,7 @@ static void run_load (void) {
     }
     printf("H3.2: v64 (%" PRIu32 " bytes)\n", v64_size);
     console_render();
-    if (!load_rom_fixture(adapter, ED64_PRO_TEST_V64_PATH, true)) {
+    if (!load_rom_fixture(adapter, ED64_PRO_TEST_V64_PATH, true, true)) {
         terminal();
     }
     printf("H3.2 PASS: PI read-back matches normalized v64.\n");
