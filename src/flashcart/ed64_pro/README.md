@@ -11,10 +11,11 @@ Revision: 43014e290f85140d4c5ca84fbf5ae48ac755a23d
 Paths: edio/everdrive.c, edio/everdrive.h
 
 The cartridge-local driver adapts register and FIFO access, bounded command
-framing, STATUS/NRESP, device stop, firmware information, MCU filesystem
-initialization, and raw-sector reads/writes. It uses fixed-width types,
-bounded libdragon ticket submission/completion, exclusive cache-line staging,
-and sticky failures instead of upstream's unbounded PI and protocol waits.
+framing, STATUS/NRESP, firmware information, MCU filesystem initialization,
+raw-sector I/O, SD-to-FCI loading, and DEV stop/flags/paths/configuration/start.
+It uses fixed-width types, bounded libdragon ticket submission/completion,
+exclusive cache-line staging, and sticky failures instead of upstream's
+unbounded PI and protocol waits.
 
 The combined N64FlashcartMenu project retains its existing AGPL license.
 The upstream copyright and MIT license notice is retained [below](#upstream-license).
@@ -35,8 +36,37 @@ WRE transmits `DE AD BE EF`, matching edlink rather than the upstream N64
 sample's read operation. Transfers calculate their own LBA stepping rather
 than copying upstream's byte-based address increment.
 
-Game loading and launch remain unavailable until their integration steps pass.
-Optional features are not advertised.
+ROM and emulator loads use FatFs with capacity checks and staged paths. Save
+configuration remains local until the storage handoff; START loads the BRM file
+and enables MCU game services. The existing boot and cheat engine then runs.
+
+Measured on one setup: 601 KiB/s for a 1 MiB raw read; 8/32/64 MiB ROM loads
+took 0.97/3.79/7.53 s.
+
+Automatic CIC and MCU save writeback are enabled. 64DD, fast reboot, USB
+debugging, menu RTC and automatic region detection are unavailable.
+
+FatFs paths remain UTF-8. Only staged GPAK/BRM paths are converted to OEM
+CP437 using FatFs's conversion table. Components outside CP437 use their actual
+FatFs 8.3 aliases. Missing or unusable aliases, including on exFAT, cause refusal
+before storage handoff; no lossy replacement is used. The 1023-byte limit applies
+to the input path without `sd:` and to its MCU encoding.
+
+`.v64` loading and a game launch are verified. On FAT32, a game booted and its
+fresh save was written under the correct Unicode name on paths over 300 bytes.
+Autoload and history paths retain the shared INI parser's 255-byte value limit.
+
+Idle RESET returned to the stock menu on the tested setup. SM64 EEPROM settings
+persisted after immediate, 3-second and 10-second RESET trials, console-only
+and console-plus-USB power cycles, and intervening games. Other save families
+have boot/configuration checks; their persistence and direct power-loss timing
+remain unqualified.
+
+With Jumper Pak (4 MiB), SM64 booted and restored saved settings, and both cheat
+actions were correctly refused. Earlier intermittent navigation/artwork/open
+failures remain unresolved. SC64 boot/save and X7 boot regression checks passed
+on the NTSC console with 8 MiB. Emulator boot/save checks are user-deferred to
+external testers.
 
 ### Upstream license
 

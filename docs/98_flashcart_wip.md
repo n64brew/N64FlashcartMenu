@@ -22,8 +22,3 @@ The aim is to reach feature parity with [OS](https://krikzz.com/pub/support/ever
 The aim is to reach feature parity with [Altra64](https://github.com/networkfusion/altra64)
 
 * Download the `OS64P.v64` ROM from the latest [PR action run - assets] and place it in the `/ED64P` folder.
-
-### EverDrive-64 Pro - WiP - DETECTION ONLY
-Currently not supported, but work is in progress.
-> [!CAUTION]
-> ED64 Pro carts are only detected, but not yet usable.
