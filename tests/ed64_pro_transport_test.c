@@ -1893,8 +1893,8 @@ static void test_adapter_unavailable_operations (void) {
         TEST_CHECK(version.major == (failed ? 0 : 26) && version.minor == (failed ? 0 : 1014) && version.revision == 0);
         TEST_CHECK(adapter->load_rom("sd:/test.z64", NULL) == FLASHCART_ERR_LOAD);
         TEST_CHECK(adapter->load_file("sd:/test.bin", 0, 0) == FLASHCART_ERR_LOAD);
-        TEST_CHECK(adapter->load_save("sd:/test.sra") == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
-        TEST_CHECK(adapter->set_save_type(FLASHCART_SAVE_TYPE_SRAM_256KBIT) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+        TEST_CHECK(adapter->load_save("sd:/test.sra") == FLASHCART_ERR_ARGS);
+        TEST_CHECK(adapter->set_save_type(FLASHCART_SAVE_TYPE_SRAM_256KBIT) == FLASHCART_ERR_LOAD);
         TEST_CHECK(adapter->deinit != NULL && adapter->load_64dd_ipl == NULL && adapter->load_64dd_disk == NULL);
         TEST_CHECK(adapter->load_64dd_disks == NULL && adapter->get_button_state == NULL);
         TEST_CHECK(adapter->get_voltage_temperature == NULL && adapter->set_save_writeback == NULL);

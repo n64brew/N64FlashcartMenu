@@ -77,6 +77,16 @@ typedef struct {
     uint8_t mcu_status;
 } ed64_pro_status_t;
 
+typedef enum {
+    ED64_PRO_BRM_OFF = 0,
+    ED64_PRO_BRM_EEP4K,
+    ED64_PRO_BRM_EEP16K,
+    ED64_PRO_BRM_SRM32K,
+    ED64_PRO_BRM_SRM96K,
+    ED64_PRO_BRM_FLASH,
+    ED64_PRO_BRM_SRM128K,
+} ed64_pro_brm_t;
+
 typedef struct {
     uint32_t deadline;
 } ed64_pro_ll_transaction_t;

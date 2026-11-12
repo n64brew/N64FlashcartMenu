@@ -538,7 +538,55 @@ static void test_load_arguments (void) {
     TEST_CHECK(pro_disk_write((void *)0x10000000u, 0, 1) == RES_PARERR);
 }
 
+static void test_save_mapping (void) {
+    static const uint32_t sizes[] = {0, 512, 2048, 32768, 98304, 131072, 131072, 131072};
+    static const uint32_t types[] = {
+        ED64_PRO_BRM_OFF,
+        ED64_PRO_BRM_EEP4K,
+        ED64_PRO_BRM_EEP16K,
+        ED64_PRO_BRM_SRM32K,
+        ED64_PRO_BRM_SRM96K,
+        ED64_PRO_BRM_SRM128K,
+        ED64_PRO_BRM_FLASH,
+        ED64_PRO_BRM_FLASH
+    };
+    mounted_fixture();
+    unsigned traffic = mock.begin_calls;
+    for (unsigned type = 0; type < __FLASHCART_SAVE_TYPE_END; type++) {
+        TEST_CHECK(pro_set_save_type(type) == FLASHCART_OK);
+        TEST_CHECK(pro_diagnostics.brm_type == types[type] && pro_diagnostics.brm_size == sizes[type]);
+        if (type != FLASHCART_SAVE_TYPE_NONE) {
+            TEST_CHECK(!pro_diagnostics.save_ready);
+            TEST_CHECK(pro_load_save("sd:/saves/test.sav") == FLASHCART_OK);
+            TEST_CHECK(strcmp(pro_diagnostics.save_path, "/saves/test.sav") == 0 && pro_diagnostics.save_ready);
+        } else {
+            TEST_CHECK(pro_diagnostics.save_ready && pro_diagnostics.save_path[0] == '\0');
+        }
+    }
+    TEST_CHECK(mock.begin_calls == traffic && mock.opens == 0);
+    TEST_CHECK(pro_set_save_type(__FLASHCART_SAVE_TYPE_END) == FLASHCART_ERR_ARGS);
+    TEST_CHECK(pro_set_save_type((flashcart_save_type_t)-1) == FLASHCART_ERR_ARGS);
+    TEST_CHECK(!pro_diagnostics.save_ready);
+}
+
+static void test_save_staging_reset (void) {
+    mounted_fixture();
+    TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_SRAM_1MBIT) == FLASHCART_OK);
+    TEST_ASSERT(pro_load_save("sd:/save.sav") == FLASHCART_OK);
+    TEST_CHECK(pro_load_save(NULL) == FLASHCART_ERR_ARGS && !pro_diagnostics.save_ready);
+    TEST_ASSERT(pro_load_save("sd:/save.sav") == FLASHCART_OK);
+    TEST_CHECK(pro_set_save_type(FLASHCART_SAVE_TYPE_NONE) == FLASHCART_OK);
+    TEST_CHECK(pro_diagnostics.save_path[0] == '\0' && pro_diagnostics.brm_size == 0);
+    TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
+    TEST_ASSERT(pro_load_save("sd:/save.eep") == FLASHCART_OK);
+    TEST_ASSERT(pro_load_rom("sd:/another.z64", NULL) == FLASHCART_OK);
+    TEST_CHECK(pro_diagnostics.brm_type == ED64_PRO_BRM_OFF && !pro_diagnostics.save_ready);
+    TEST_CHECK(pro_diagnostics.save_path[0] == '\0');
+}
+
 TEST_LIST = {
+    {"save mappings stage without MCU traffic", test_save_mapping},
+    {"save paths and ROM changes clear staged state", test_save_staging_reset},
     {"ROM chunking byte-swap bracketing and staging", test_rom_loading},
     {"ROM load failure and dirty-window guards", test_rom_load_refusals},
     {"emulator offsets extend staged ROM extent", test_auxiliary_loading},

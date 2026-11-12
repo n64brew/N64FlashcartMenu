@@ -73,6 +73,10 @@ typedef struct {
     bool load_byte_swap;
     uint32_t launch_extent;
     char rom_path[ED64_PRO_PATH_MAX + 1];
+    uint32_t brm_type;
+    uint32_t brm_size;
+    bool save_ready;
+    char save_path[ED64_PRO_PATH_MAX + 1];
 } ed64_pro_diagnostics_t;
 
 /**

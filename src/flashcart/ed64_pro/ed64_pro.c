@@ -597,6 +597,10 @@ static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback
     pro_diagnostics.launch_ready = false;
     pro_diagnostics.launch_extent = 0;
     pro_diagnostics.rom_path[0] = '\0';
+    pro_diagnostics.save_path[0] = '\0';
+    pro_diagnostics.brm_type = ED64_PRO_BRM_OFF;
+    pro_diagnostics.brm_size = 0;
+    pro_diagnostics.save_ready = false;
     const char *mcu_path = pro_mcu_path(rom_path);
     if (!mcu_path) {
         return FLASHCART_ERR_ARGS;
@@ -707,13 +711,45 @@ done:
 }
 
 static flashcart_err_t pro_load_save (char *save_path) {
-    (void)save_path;
-    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+    const char *mcu_path = pro_mcu_path(save_path);
+    pro_diagnostics.save_ready = false;
+    pro_diagnostics.save_path[0] = '\0';
+    if (!mcu_path || pro_diagnostics.brm_type == ED64_PRO_BRM_OFF) {
+        return FLASHCART_ERR_ARGS;
+    }
+    if (pro_disk_status() != 0) {
+        return FLASHCART_ERR_LOAD;
+    }
+    memcpy(pro_diagnostics.save_path, mcu_path, strlen(mcu_path) + 1);
+    pro_diagnostics.save_ready = true;
+    return FLASHCART_OK;
 }
 
 static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
-    (void)save_type;
-    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+    static const struct {
+        uint32_t type, size;
+    } saves[] = {
+        [FLASHCART_SAVE_TYPE_NONE] = {ED64_PRO_BRM_OFF, 0},
+        [FLASHCART_SAVE_TYPE_EEPROM_4KBIT] = {ED64_PRO_BRM_EEP4K, 512},
+        [FLASHCART_SAVE_TYPE_EEPROM_16KBIT] = {ED64_PRO_BRM_EEP16K, 2048},
+        [FLASHCART_SAVE_TYPE_SRAM_256KBIT] = {ED64_PRO_BRM_SRM32K, 32768},
+        [FLASHCART_SAVE_TYPE_SRAM_BANKED] = {ED64_PRO_BRM_SRM96K, 98304},
+        [FLASHCART_SAVE_TYPE_SRAM_1MBIT] = {ED64_PRO_BRM_SRM128K, 131072},
+        [FLASHCART_SAVE_TYPE_FLASHRAM_1MBIT] = {ED64_PRO_BRM_FLASH, 131072},
+        [FLASHCART_SAVE_TYPE_FLASHRAM_PKST2] = {ED64_PRO_BRM_FLASH, 131072},
+    };
+    pro_diagnostics.save_ready = false;
+    pro_diagnostics.save_path[0] = '\0';
+    if ((unsigned)save_type >= __FLASHCART_SAVE_TYPE_END) {
+        return FLASHCART_ERR_ARGS;
+    }
+    if (pro_disk_status() != 0) {
+        return FLASHCART_ERR_LOAD;
+    }
+    pro_diagnostics.brm_type = saves[save_type].type;
+    pro_diagnostics.brm_size = saves[save_type].size;
+    pro_diagnostics.save_ready = save_type == FLASHCART_SAVE_TYPE_NONE;
+    return FLASHCART_OK;
 }
 
 /** @brief Supply retained startup details for the errors this adapter returns. */
