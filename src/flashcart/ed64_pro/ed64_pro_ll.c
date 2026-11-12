@@ -51,6 +51,7 @@ typedef enum {
     PRO_CMD_SYS = 0x84,
     PRO_CMD_SD_INIT = 0x80,
     PRO_CMD_STOP = 0x85,
+    PRO_CMD_DEV = 0x85,
 } pro_command_t;
 
 /**
@@ -527,7 +528,8 @@ static ed64_pro_ll_error_t pro_send_frame (
     bool selected =
         (command == PRO_CMD_STATUS && subcommand == -1) || (command == PRO_CMD_NRESP && subcommand == -1) ||
         ((command == PRO_CMD_STOP || command == PRO_CMD_SD_INIT || command == PRO_CMD_SYS) && subcommand == 0x10) ||
-        (command == PRO_CMD_EPO && (subcommand == 0x10 || subcommand == 0x11));
+        (command == PRO_CMD_EPO && (subcommand == 0x10 || subcommand == 0x11)) ||
+        (command == PRO_CMD_DEV && subcommand == 0x28);
     if (!selected) {
         return ED64_PRO_LL_ARGUMENT;
     }
@@ -956,4 +958,80 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_write (
 ) {
     /* Once WRE has been sent, any failure leaves the write ambiguous. Never retry. */
     return pro_sd_transfer(transaction, (void *)input, lba, count, true, deadline);
+}
+
+ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
+    ed64_pro_ll_transaction_t *transaction,
+    uint32_t fci,
+    uint32_t lba,
+    uint32_t count,
+    uint32_t deadline
+) {
+    if (!count || count > 256 || count - 1 > UINT32_MAX - lba || (fci & 511) || fci >= ED64_PRO_FCI_ROM_LIMIT ||
+        count * 512 > ED64_PRO_FCI_ROM_LIMIT - fci) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_IO_TIMEOUT_MS);
+    pro_ll.status_valid = false;
+    pro_ll.nresp_valid = false;
+    error = pro_assert_idle(transaction, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    uint8_t payload[17] = {0};
+    pro_put_u32(&payload[0], lba);
+    pro_put_u32(&payload[4], fci);
+    pro_put_u32(&payload[8], count * 512);
+    payload[12] = 0x19;
+    payload[13] = 0x13;
+    error = pro_send_frame(transaction, PRO_CMD_EPO, 0x10, payload, sizeof(payload), deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    ed64_pro_status_t status;
+    return ed64_pro_ll_check_status(transaction, &status, deadline);
+}
+
+ed64_pro_ll_error_t
+ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline) {
+    if (mask != ED64_PRO_FLAG_WRSW || (value & ~mask)) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_IO_TIMEOUT_MS);
+    pro_ll.status_valid = false;
+    pro_ll.nresp_valid = false;
+    error = pro_assert_idle(transaction, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    uint8_t payload[4];
+    pro_put_u32(payload, (uint32_t)mask << 16 | value);
+    error = pro_send_frame(transaction, PRO_CMD_DEV, 0x28, payload, sizeof(payload), deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    for (;;) {
+        if (pro_expired(pro_deadline(transaction, deadline))) {
+            return pro_fail(ED64_PRO_LL_TIMEOUT);
+        }
+        uint32_t first = 0, second = 0;
+        error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_SYSSTAT, &first, deadline);
+        if (error == ED64_PRO_LL_OK) {
+            error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_SYSSTAT, &second, deadline);
+        }
+        if (error != ED64_PRO_LL_OK) {
+            return error;
+        }
+        if ((first & ~8u) == (second & ~8u) && !(second & 1u)) {
+            return pro_assert_idle(transaction, deadline);
+        }
+    }
 }

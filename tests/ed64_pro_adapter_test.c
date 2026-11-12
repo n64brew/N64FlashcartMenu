@@ -5,6 +5,20 @@
 
 static struct {
     uint32_t now;
+    FATFS fs;
+    FSIZE_t file_size;
+    unsigned opens, file_reads, closes, seeks;
+    FRESULT open_result, read_result, close_result, seek_result;
+    UINT short_read;
+    uintptr_t destinations[8];
+    UINT read_sizes[8];
+    char opened_path[ED64_PRO_PATH_MAX + 1];
+    uint32_t fci[8];
+    uint16_t flags;
+    unsigned flag_calls;
+    unsigned fail_flag_call;
+    float progress[8];
+    unsigned progress_calls;
     uint32_t info[2];
     unsigned info_calls;
     unsigned begin_calls;
@@ -26,7 +40,7 @@ static struct {
     unsigned unmounts;
     unsigned fs_inits;
     const fat_disk_t *disk;
-    char events[32];
+    char events[64];
     unsigned events_count;
 } mock;
 
@@ -152,6 +166,84 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_write (
     return sector_transfer(lba, count, true);
 }
 
+char cart_card_byteswap;
+
+FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
+    TEST_CHECK(mode == FA_READ);
+    mock.opens++;
+    snprintf(mock.opened_path, sizeof(mock.opened_path), "%s", path);
+    file->obj.fs = &mock.fs;
+    file->obj.objsize = mock.file_size;
+    file->fptr = 0;
+    return mock.open_result;
+}
+FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
+    TEST_ASSERT(mock.file_reads < 8);
+    mock.destinations[mock.file_reads] = (uintptr_t)buffer;
+    mock.read_sizes[mock.file_reads++] = bytes;
+    *read = 0;
+    if (mock.read_result != FR_OK) {
+        return mock.read_result;
+    }
+    if (pro_disk_read(buffer, 1000 + file->fptr / 512, bytes / 512) != RES_OK) {
+        return FR_DISK_ERR;
+    }
+    *read = mock.short_read ? bytes - mock.short_read : bytes;
+    file->fptr += *read;
+    return FR_OK;
+}
+FRESULT f_lseek (FIL *file, FSIZE_t offset) {
+    mock.seeks++;
+    file->fptr = offset;
+    return mock.seek_result;
+}
+FRESULT f_close (FIL *file) {
+    (void)file;
+    mock.closes++;
+    return mock.close_result;
+}
+void fatfs_fix_file_size (FIL *file) {
+    file->obj.objsize = (file->obj.objsize + 511) & ~UINT64_C(511);
+}
+char *strip_fs_prefix (char *path) {
+    char *prefix = strstr(path, ":/");
+    return prefix ? prefix + 1 : path;
+}
+
+ed64_pro_ll_error_t
+ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline) {
+    (void)transaction;
+    (void)deadline;
+    TEST_CHECK(mask == ED64_PRO_FLAG_WRSW);
+    mock.flag_calls++;
+    mock.events[mock.events_count++] = value ? 'S' : 'C';
+    if (mock.flag_calls == mock.fail_flag_call) {
+        return ED64_PRO_LL_TIMEOUT;
+    }
+    mock.flags = value;
+    return ED64_PRO_LL_OK;
+}
+
+ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
+    ed64_pro_ll_transaction_t *transaction,
+    uint32_t fci,
+    uint32_t lba,
+    uint32_t count,
+    uint32_t deadline
+) {
+    (void)transaction;
+    (void)deadline;
+    TEST_CHECK(mock.flags == (pro_diagnostics.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0));
+    mock.fci[mock.operations] = fci;
+    mock.events[mock.events_count++] = 'R';
+    return sector_transfer(lba, count, false);
+}
+
+static void progress_callback (float progress) {
+    TEST_ASSERT(mock.progress_calls < 8);
+    mock.progress[mock.progress_calls++] = progress;
+}
+
 int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
     TEST_CHECK(strcmp(prefix, "sd:/") == 0 && flags == 0);
     TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_MOUNTING);
@@ -184,6 +276,8 @@ static void fixture (void) {
     mock.info[0] = 0x90555D4Eu;
     mock.info[1] = 0x10000000u;
     mock.io_error = ED64_PRO_LL_TIMEOUT;
+    mock.file_size = 1024;
+    cart_card_byteswap = 0;
 }
 
 static void mounted_fixture (void) {
@@ -297,7 +391,7 @@ static void test_sector_arguments (void) {
     TEST_CHECK(pro_disk.disk_read(data, -1, 1) == RES_PARERR);
     TEST_CHECK(pro_disk.disk_read(data, 0, 0) == RES_PARERR);
     TEST_CHECK(pro_disk.disk_read(data, UINT32_MAX, 2) == RES_PARERR);
-    TEST_CHECK(pro_disk.disk_read((void *)0x10000000u, 0, 1) == RES_PARERR);
+    TEST_CHECK(pro_disk.disk_read((void *)0x10000001u, 0, 1) == RES_PARERR);
     TEST_CHECK(pro_disk.disk_write((void *)0x807FFF00u, 0, 1) == RES_PARERR);
     TEST_CHECK(mock.begin_calls == 0);
     TEST_CHECK(pro_disk.disk_read(data, UINT32_MAX, 1) == RES_OK);
@@ -366,7 +460,89 @@ static void test_release_refusals (void) {
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD && mock.fs_inits == 1);
 }
 
+static void test_rom_loading (void) {
+    mounted_fixture();
+    mock.file_size = 300 * 1024;
+    cart_card_byteswap = 1;
+    TEST_CHECK(pro_load_rom("sd:/games/test.v64", progress_callback) == FLASHCART_OK);
+    TEST_CHECK(mock.opens == 1 && mock.closes == 1 && mock.file_reads == 3);
+    TEST_CHECK(strcmp(mock.opened_path, "/games/test.v64") == 0);
+    TEST_CHECK(mock.destinations[0] == 0x10000000u && mock.destinations[1] == 0x10020000u);
+    TEST_CHECK(mock.read_sizes[0] == 128 * 1024 && mock.read_sizes[2] == 44 * 1024);
+    TEST_CHECK(mock.fci[0] == 0 && mock.fci[1] == 128 * 1024 && mock.fci[2] == 256 * 1024);
+    TEST_CHECK(mock.flag_calls == 6 && mock.flags == 0);
+    TEST_CHECK(memcmp(mock.events, "SRCSRCSRC", 9) == 0);
+    TEST_CHECK(mock.progress_calls == 3 && mock.progress[0] > 0 && mock.progress[2] == 1.0f);
+    TEST_CHECK(pro_diagnostics.launch_ready && pro_diagnostics.launch_extent == 300 * 1024);
+    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/games/test.v64") == 0);
+    TEST_CHECK(!pro_diagnostics.load_byte_swap);
+}
+
+static void test_rom_load_refusals (void) {
+    mounted_fixture();
+    mock.file_size = (uint64_t)pro_diagnostics.rom_capacity + 1;
+    TEST_CHECK(pro_load_rom("sd:/too-big.z64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(mock.file_reads == 0 && mock.closes == 1 && !pro_diagnostics.launch_ready);
+    mounted_fixture();
+    mock.fs.wflag = 1;
+    TEST_CHECK(pro_load_rom("sd:/dirty.z64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(mock.file_reads == 0 && mock.closes == 1);
+    mounted_fixture();
+    mock.short_read = 512;
+    TEST_CHECK(pro_load_rom("sd:/short.z64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(mock.closes == 1 && !pro_diagnostics.launch_ready);
+    mounted_fixture();
+    mock.close_result = FR_DISK_ERR;
+    TEST_CHECK(pro_load_rom("sd:/close.z64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(!pro_diagnostics.launch_ready);
+    mounted_fixture();
+    mock.fail_flag_call = 2;
+    cart_card_byteswap = 1;
+    TEST_CHECK(pro_load_rom("sd:/swap.v64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(pro_diagnostics.storage_failed && mock.flag_calls == 2 && mock.operations == 1);
+}
+
+static void test_auxiliary_loading (void) {
+    mounted_fixture();
+    TEST_ASSERT(pro_load_rom("sd:/emulator.z64", NULL) == FLASHCART_OK);
+    mock.file_size = 4608;
+    mock.file_reads = 0;
+    mock.operations = 0;
+    TEST_CHECK(pro_load_file("sd:/rom.smc", 0x80000, 512) == FLASHCART_OK);
+    TEST_CHECK(mock.seeks == 1 && mock.destinations[0] == 0x10080000u && mock.read_sizes[0] == 4096);
+    TEST_CHECK(pro_diagnostics.launch_ready && pro_diagnostics.launch_extent == 0x81000);
+    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/emulator.z64") == 0);
+}
+
+static void test_load_arguments (void) {
+    mounted_fixture();
+    TEST_CHECK(pro_load_rom(NULL, NULL) == FLASHCART_ERR_ARGS);
+    TEST_CHECK(mock.opens == 0);
+    char too_long[ED64_PRO_PATH_MAX + 5];
+    memcpy(too_long, "sd:/", 4);
+    memset(too_long + 4, 'a', sizeof(too_long) - 5);
+    too_long[sizeof(too_long) - 1] = '\0';
+    TEST_CHECK(pro_load_rom(too_long, NULL) == FLASHCART_ERR_ARGS);
+    TEST_CHECK(mock.opens == 0);
+    TEST_ASSERT(pro_load_rom("sd:/emulator.z64", NULL) == FLASHCART_OK);
+    unsigned opens = mock.opens;
+    TEST_CHECK(pro_load_file("sd:/rom.smc", 1, 0) == FLASHCART_ERR_ARGS && mock.opens == opens);
+    TEST_ASSERT(pro_load_rom("sd:/emulator.z64", NULL) == FLASHCART_OK);
+    unsigned reads = mock.file_reads;
+    TEST_CHECK(pro_load_file("sd:/rom.smc", 0, 1536) == FLASHCART_ERR_ARGS && mock.file_reads == reads);
+    TEST_ASSERT(pro_load_rom("sd:/emulator.z64", NULL) == FLASHCART_OK);
+    TEST_CHECK(pro_load_file("sd:/rom.smc", pro_diagnostics.rom_capacity, 0) == FLASHCART_ERR_ARGS);
+    TEST_CHECK(!pro_diagnostics.launch_ready);
+    TEST_CHECK(pro_disk_read((void *)0x10000001u, 0, 1) == RES_PARERR);
+    TEST_CHECK(pro_disk_read((void *)(uintptr_t)(0x10000000u + pro_diagnostics.rom_capacity), 0, 1) == RES_PARERR);
+    TEST_CHECK(pro_disk_write((void *)0x10000000u, 0, 1) == RES_PARERR);
+}
+
 TEST_LIST = {
+    {"ROM chunking byte-swap bracketing and staging", test_rom_loading},
+    {"ROM load failure and dirty-window guards", test_rom_load_refusals},
+    {"emulator offsets extend staged ROM extent", test_auxiliary_loading},
+    {"ROM paths offsets and capacity reject safely", test_load_arguments},
     {"cached firmware identity and capacity", test_firmware_info},
     {"firmware date and minimum boundaries", test_firmware_boundaries},
     {"firmware query failure is latched", test_firmware_query_failure},

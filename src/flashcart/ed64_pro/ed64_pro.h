@@ -69,6 +69,10 @@ typedef struct {
     uint32_t storage_lba;
     uint32_t storage_count;
     ed64_pro_ll_failure_t storage_failure;
+    bool launch_ready;
+    bool load_byte_swap;
+    uint32_t launch_extent;
+    char rom_path[ED64_PRO_PATH_MAX + 1];
 } ed64_pro_diagnostics_t;
 
 /**

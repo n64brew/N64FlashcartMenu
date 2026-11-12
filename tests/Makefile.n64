@@ -3,7 +3,8 @@
 PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 BUILD_DIR ?= $(PROJECT_ROOT)/build/ed64-pro-test
 OUTPUT_DIR ?= $(PROJECT_ROOT)/output/ed64-pro-test
-# Modes: -DED64_PRO_TEST_INFO, or -DED64_PRO_TEST_STORAGE with the host fixture CRC.
+# Modes: -DED64_PRO_TEST_INFO, -DED64_PRO_TEST_LOAD, or -DED64_PRO_TEST_STORAGE with the host fixture CRC.
+# LOAD optionally enables ED64_PRO_TEST_OVERSIZE; ED64_PRO_TEST_OVERSIZE_PATH overrides its path.
 # Raw-write gate additionally requires -DED64_PRO_TEST_RAW_WRITE and a 64 KiB A5 scratch file.
 TEST_FLAGS ?=
 

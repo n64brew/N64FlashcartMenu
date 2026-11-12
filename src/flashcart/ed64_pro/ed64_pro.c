@@ -9,13 +9,17 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <fatfs/ff.h>
 
 #include <fatfs/diskio.h>
+#include <libcart/cart.h>
 #include <libdragon.h>
 
+#include "../flashcart_utils.h"
 #include "ed64_pro.h"
+#include "utils/fs.h"
 
 static ed64_pro_diagnostics_t pro_diagnostics;
 static uint32_t pro_attempt_start;
@@ -415,31 +419,54 @@ pro_storage_fail (const char *detail, const char *operation, uint32_t lba, uint3
     pro_diagnostics.storage_failure.code = error;
 }
 
-static bool pro_disk_arguments (const void *buffer, int64_t sector, int count) {
+static bool pro_disk_arguments (const void *buffer, int64_t sector, int count, bool write) {
     if (!buffer || sector < 0 || count <= 0 || (uint64_t)sector + (unsigned)count > UINT64_C(0x100000000)) {
         return false;
     }
     uintptr_t physical = PhysicalAddr(buffer);
     uint64_t bytes = (uint64_t)(unsigned)count * 512;
-    return physical < 0x00800000u && bytes <= 0x00800000u - physical;
+    if (physical < 0x00800000u) {
+        return bytes <= 0x00800000u - physical;
+    }
+    return !write && physical >= 0x10000000u && (physical & 511u) == 0 &&
+           physical - 0x10000000u <= pro_diagnostics.rom_capacity &&
+           bytes <= pro_diagnostics.rom_capacity - (physical - 0x10000000u);
 }
 
 static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool write) {
-    if (!pro_disk_arguments(buffer, sector, count)) {
+    if (!pro_disk_arguments(buffer, sector, count, write)) {
         return RES_PARERR;
     }
     if (pro_disk_status() != 0) {
         return RES_NOTRDY;
     }
     uint8_t *cursor = buffer;
+    bool fci = PhysicalAddr(buffer) >= 0x10000000u;
+    unsigned max_chunk = fci ? 256 : 64;
     while (count > 0) {
-        uint32_t chunk = count > 64 ? 64 : count;
+        uint32_t chunk = (unsigned)count > max_chunk ? max_chunk : (unsigned)count;
         uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
         ed64_pro_ll_transaction_t transaction;
         ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
         if (error == ED64_PRO_LL_OK) {
-            error = write ? ed64_pro_ll_sd_write(&transaction, cursor, sector, chunk, deadline)
-                          : ed64_pro_ll_sd_read(&transaction, cursor, sector, chunk, deadline);
+            if (fci) {
+                /* WRSW is confined to the SD-to-FCI operation; FIFO metadata
+                 * transfers must always run with it cleared. */
+                error = ed64_pro_ll_set_flags(
+                    &transaction, ED64_PRO_FLAG_WRSW, pro_diagnostics.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0, deadline
+                );
+                if (error == ED64_PRO_LL_OK) {
+                    error = ed64_pro_ll_sd_read_fci(
+                        &transaction, PhysicalAddr(cursor) - 0x10000000u, sector, chunk, deadline
+                    );
+                }
+                if (error == ED64_PRO_LL_OK) {
+                    error = ed64_pro_ll_set_flags(&transaction, ED64_PRO_FLAG_WRSW, 0, deadline);
+                }
+            } else {
+                error = write ? ed64_pro_ll_sd_write(&transaction, cursor, sector, chunk, deadline)
+                              : ed64_pro_ll_sd_read(&transaction, cursor, sector, chunk, deadline);
+            }
             ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
             if (error == ED64_PRO_LL_OK) {
                 error = end_error;
@@ -555,17 +582,128 @@ static flashcart_err_t pro_deinit (void) {
     return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
 }
 
+static const char *pro_mcu_path (char *path) {
+    if (!path || strnlen(path, ED64_PRO_PATH_MAX + 4) == ED64_PRO_PATH_MAX + 4) {
+        return NULL;
+    }
+    char *mcu_path = strip_fs_prefix(path);
+    if (mcu_path[0] != '/' || strnlen(mcu_path, ED64_PRO_PATH_MAX + 1) > ED64_PRO_PATH_MAX) {
+        return NULL;
+    }
+    return mcu_path;
+}
+
 static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback_t *progress) {
-    (void)rom_path;
-    (void)progress;
-    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+    pro_diagnostics.launch_ready = false;
+    pro_diagnostics.launch_extent = 0;
+    pro_diagnostics.rom_path[0] = '\0';
+    const char *mcu_path = pro_mcu_path(rom_path);
+    if (!mcu_path) {
+        return FLASHCART_ERR_ARGS;
+    }
+    if (pro_disk_status() != 0) {
+        return FLASHCART_ERR_LOAD;
+    }
+    FIL file;
+    if (f_open(&file, mcu_path, FA_READ) != FR_OK) {
+        return FLASHCART_ERR_LOAD;
+    }
+    flashcart_err_t result = FLASHCART_ERR_LOAD;
+    if (!file.obj.fs || file.obj.fs->wflag || f_size(&file) == 0 || f_size(&file) > pro_diagnostics.rom_capacity) {
+        goto done;
+    }
+    fatfs_fix_file_size(&file);
+    if (f_size(&file) > pro_diagnostics.rom_capacity) {
+        goto done;
+    }
+    uint32_t size = f_size(&file);
+    pro_diagnostics.load_byte_swap = cart_card_byteswap != 0;
+    for (uint32_t offset = 0; offset < size;) {
+        UINT chunk = size - offset > 128 * 1024u ? 128 * 1024u : size - offset;
+        UINT read = 0;
+        if (f_read(&file, (void *)(uintptr_t)(0x10000000u + offset), chunk, &read) != FR_OK || read != chunk) {
+            goto done;
+        }
+        offset += chunk;
+        if (progress) {
+            progress(f_tell(&file) / (float)size);
+        }
+    }
+    if (f_tell(&file) != size) {
+        goto done;
+    }
+    result = FLASHCART_OK;
+
+done:
+    pro_diagnostics.load_byte_swap = false;
+    if (f_close(&file) != FR_OK) {
+        result = FLASHCART_ERR_LOAD;
+    }
+    if (result == FLASHCART_OK) {
+        memcpy(pro_diagnostics.rom_path, mcu_path, strlen(mcu_path) + 1);
+        pro_diagnostics.launch_extent = f_size(&file);
+        pro_diagnostics.launch_ready = true;
+    }
+    return result;
 }
 
 static flashcart_err_t pro_load_file (char *file_path, uint32_t rom_offset, uint32_t file_offset) {
-    (void)file_path;
-    (void)rom_offset;
-    (void)file_offset;
-    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+    const char *mcu_path = pro_mcu_path(file_path);
+    if (!mcu_path || (rom_offset & 511u) || (file_offset & 511u) || rom_offset > pro_diagnostics.rom_capacity) {
+        pro_diagnostics.launch_ready = false;
+        return FLASHCART_ERR_ARGS;
+    }
+    if (!pro_diagnostics.launch_ready || pro_disk_status() != 0) {
+        return FLASHCART_ERR_LOAD;
+    }
+    pro_diagnostics.launch_ready = false;
+    FIL file;
+    if (f_open(&file, mcu_path, FA_READ) != FR_OK) {
+        return FLASHCART_ERR_LOAD;
+    }
+    flashcart_err_t result = FLASHCART_ERR_LOAD;
+    if (file_offset > f_size(&file) || f_size(&file) - file_offset > pro_diagnostics.rom_capacity - rom_offset) {
+        result = FLASHCART_ERR_ARGS;
+        goto done;
+    }
+    if (!file.obj.fs || file.obj.fs->wflag) {
+        goto done;
+    }
+    fatfs_fix_file_size(&file);
+    if (f_size(&file) < file_offset || f_size(&file) - file_offset > pro_diagnostics.rom_capacity - rom_offset) {
+        result = FLASHCART_ERR_ARGS;
+        goto done;
+    }
+    if (f_lseek(&file, file_offset) != FR_OK || f_tell(&file) != file_offset) {
+        goto done;
+    }
+    uint32_t size = f_size(&file) - file_offset;
+    for (uint32_t offset = 0; offset < size;) {
+        UINT chunk = size - offset > 128 * 1024u ? 128 * 1024u : size - offset;
+        UINT read = 0;
+        if (f_read(&file, (void *)(uintptr_t)(0x10000000u + rom_offset + offset), chunk, &read) != FR_OK ||
+            read != chunk) {
+            goto done;
+        }
+        offset += chunk;
+    }
+    if (f_tell(&file) != f_size(&file)) {
+        goto done;
+    }
+    result = FLASHCART_OK;
+
+done:
+    if (f_close(&file) != FR_OK) {
+        result = FLASHCART_ERR_LOAD;
+    }
+    if (result == FLASHCART_OK) {
+        uint32_t end = rom_offset + f_size(&file) - file_offset;
+        if (end > pro_diagnostics.launch_extent) {
+            pro_diagnostics.launch_extent = end;
+        }
+        pro_diagnostics.launch_ready = true;
+    }
+    return result;
 }
 
 static flashcart_err_t pro_load_save (char *save_path) {

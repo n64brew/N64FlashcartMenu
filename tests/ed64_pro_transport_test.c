@@ -93,7 +93,16 @@ static struct {
     uint8_t nresp_detail;
     bool nresp_missing;
     bool nresp_trailing;
-    uint8_t sectors[128 * 512];
+    uint8_t sectors[256 * 512];
+    uint8_t fci[512 * 512];
+    unsigned fci_transfers;
+    uint32_t fci_address;
+    uint16_t flags;
+    unsigned flag_commands;
+    bool sysstat_busy;
+    bool sysstat_unstable;
+    unsigned sysstat_reads;
+    bool flags_trailing;
     bool wre;
     bool wre_reply;
     unsigned wre_commands;
@@ -370,14 +379,25 @@ static void finish_pending (void) {
                     );
                     mock.transfer_write = mock.ram[17] == 0x11;
                     TEST_ASSERT(mock.ram[17] == (mock.transfer_write ? 0x11 : 0x19));
-                    TEST_ASSERT(mock.ram[18] == (mock.transfer_write ? 0x19 : 0x11));
+                    TEST_ASSERT(mock.ram[18] == (mock.transfer_write ? 0x19 : 0x11) || mock.ram[18] == 0x13);
                     size_t address_offset = mock.transfer_write ? 9 : 5;
                     mock.transfer_lba = mock.ram[address_offset] << 24 | mock.ram[address_offset + 1] << 16 |
                                         mock.ram[address_offset + 2] << 8 | mock.ram[address_offset + 3];
                     mock.transfer_length = mock.ram[13] << 24 | mock.ram[14] << 16 | mock.ram[15] << 8 | mock.ram[16];
                     mock.transfer_done = 0;
                     mock.transfer_active = true;
-                    if (mock.transfer_write) {
+                    if (mock.ram[18] == 0x13) {
+                        mock.fci_address = mock.ram[9] << 24 | mock.ram[10] << 16 | mock.ram[11] << 8 | mock.ram[12];
+                        mock.fci_transfers++;
+                        TEST_ASSERT(mock.fci_address + mock.transfer_length <= sizeof(mock.fci));
+                        TEST_ASSERT(mock.transfer_lba * 512 + mock.transfer_length <= sizeof(mock.sectors));
+                        for (size_t i = 0; i < mock.transfer_length; i++) {
+                            size_t source = mock.transfer_lba * 512 + (mock.flags & 1 ? i ^ 1 : i);
+                            mock.fci[mock.fci_address + i] = mock.sectors[source];
+                        }
+                        mock.transfer_done = mock.transfer_length;
+                        mock.transfer_active = false;
+                    } else if (mock.transfer_write) {
                         TEST_ASSERT(mock.wre);
                         mock.wre = false;
                         mock.write_acks++;
@@ -388,6 +408,18 @@ static void finish_pending (void) {
                 }
                 break;
             case 0x85:
+                if (mock.ram[4] == 0x28) {
+                    TEST_ASSERT(bytes == 9);
+                    uint16_t mask = mock.ram[5] << 8 | mock.ram[6];
+                    uint16_t value = mock.ram[7] << 8 | mock.ram[8];
+                    TEST_ASSERT(mask == 1 && (value & ~mask) == 0);
+                    mock.flags = (mock.flags & ~mask) | value;
+                    mock.flag_commands++;
+                    if (mock.flags_trailing) {
+                        rx_push(0xEF);
+                    }
+                    break;
+                }
                 TEST_ASSERT(mock.length == 20 && mock.ram[4] == 0x10);
                 mock.stop_commands++;
                 mock.ready_tick = mock.now + mock.stop_delay;
@@ -423,6 +455,13 @@ static void finish_pending (void) {
         case 0x1F800004u:
             release_reply();
             mock.ram[0] = mock.fifo_upper | (mock.count_override ? mock.reported_count : mock.rx_count);
+            break;
+        case 0x1F800008u:
+            mock.ram[0] = mock.sysstat_busy ? 1 : 0;
+            if (mock.sysstat_unstable && (mock.sysstat_reads & 1)) {
+                mock.ram[0] ^= 0x10;
+            }
+            mock.ram[0] |= (mock.sysstat_reads++ & 1) << 3;
             break;
         case 0x1F800010u:
             if (mock.stop_commands && !mock.mailbox_stalled && (int32_t)(mock.now - mock.ready_tick) >= 0) {
@@ -1825,10 +1864,8 @@ static void test_adapter_initialization (void) {
         TEST_CHECK(diagnostics->state == (failed ? ED64_PRO_POISONED : ED64_PRO_READY));
         unsigned enqueues = mock.enqueues;
         TEST_CHECK(
-            strstr(
-                adapter->get_error_message(failed ? expected : FLASHCART_ERR_FUNCTION_NOT_SUPPORTED),
-                failed ? "startup failed" : "not implemented"
-            ) != NULL
+            failed ? strstr(adapter->get_error_message(expected), "startup failed") != NULL
+                   : adapter->get_error_message(expected) == NULL
         );
         TEST_CHECK(adapter->get_error_message(FLASHCART_ERR_SD_CARD) != NULL);
         TEST_CHECK(adapter->get_error_message(FLASHCART_OK) == NULL);
@@ -1854,8 +1891,8 @@ static void test_adapter_unavailable_operations (void) {
         }
         flashcart_firmware_version_t version = adapter->get_firmware_version();
         TEST_CHECK(version.major == (failed ? 0 : 26) && version.minor == (failed ? 0 : 1014) && version.revision == 0);
-        TEST_CHECK(adapter->load_rom("sd:/test.z64", NULL) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
-        TEST_CHECK(adapter->load_file("sd:/test.bin", 0, 0) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+        TEST_CHECK(adapter->load_rom("sd:/test.z64", NULL) == FLASHCART_ERR_LOAD);
+        TEST_CHECK(adapter->load_file("sd:/test.bin", 0, 0) == FLASHCART_ERR_LOAD);
         TEST_CHECK(adapter->load_save("sd:/test.sra") == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
         TEST_CHECK(adapter->set_save_type(FLASHCART_SAVE_TYPE_SRAM_256KBIT) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
         TEST_CHECK(adapter->deinit != NULL && adapter->load_64dd_ipl == NULL && adapter->load_64dd_disk == NULL);
@@ -1863,6 +1900,38 @@ static void test_adapter_unavailable_operations (void) {
         TEST_CHECK(adapter->get_voltage_temperature == NULL && adapter->set_save_writeback == NULL);
         TEST_CHECK(adapter->set_next_boot_mode == NULL && mock.enqueues == enqueues);
     }
+}
+
+char cart_card_byteswap;
+
+FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
+    (void)file;
+    (void)path;
+    (void)mode;
+    return FR_NO_FILE;
+}
+FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
+    (void)file;
+    (void)buffer;
+    (void)bytes;
+    *read = 0;
+    return FR_DISK_ERR;
+}
+FRESULT f_lseek (FIL *file, FSIZE_t offset) {
+    (void)file;
+    (void)offset;
+    return FR_DISK_ERR;
+}
+FRESULT f_close (FIL *file) {
+    (void)file;
+    return FR_OK;
+}
+void fatfs_fix_file_size (FIL *file) {
+    file->obj.objsize = (file->obj.objsize + 511) & ~UINT64_C(511);
+}
+char *strip_fs_prefix (char *path) {
+    char *prefix = strstr(path, ":/");
+    return prefix ? prefix + 1 : path;
 }
 
 int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
@@ -2155,6 +2224,123 @@ static void test_sd_faults (void) {
     }
 }
 
+static void test_fci_transfers (void) {
+    const uint32_t counts[] = {1, 3, 256};
+    for (size_t i = 0; i < sizeof(counts) / sizeof(counts[0]); i++) {
+        for (unsigned swap = 0; swap < 2; swap++) {
+            power_on();
+            identify();
+            ed64_pro_ll_transaction_t transaction;
+            begin(&transaction);
+            uint32_t count = counts[i];
+            uint32_t fci = 0x10000;
+            TEST_ASSERT(
+                ed64_pro_ll_set_flags(&transaction, ED64_PRO_FLAG_WRSW, swap, deadline_ms(5000)) == ED64_PRO_LL_OK
+            );
+            size_t frame_start = mock.tx_count;
+            TEST_CHECK(ed64_pro_ll_sd_read_fci(&transaction, fci, 0, count, deadline_ms(5000)) == ED64_PRO_LL_OK);
+            TEST_CHECK(mock.fci_transfers == 1 && mock.fci_address == fci && mock.transfer_done == count * 512);
+            const uint8_t header[] = {0x2B, 0xD4, 0x81, 0x7E, 0x10, 0, 0, 0, 0, 0, 1, 0, 0};
+            TEST_CHECK(memcmp(mock.tx_bytes + frame_start, header, sizeof(header)) == 0);
+            TEST_CHECK(mock.tx_bytes[frame_start + 13] == 0 && mock.tx_bytes[frame_start + 14] == (count * 512 >> 16));
+            TEST_CHECK(
+                mock.tx_bytes[frame_start + 15] == (uint8_t)(count * 512 >> 8) && mock.tx_bytes[frame_start + 16] == 0
+            );
+            TEST_CHECK(mock.tx_bytes[frame_start + 17] == 0x19 && mock.tx_bytes[frame_start + 18] == 0x13);
+            TEST_CHECK(
+                mock.tx_bytes[frame_start + 19] == 0 && mock.tx_bytes[frame_start + 20] == 0 &&
+                mock.tx_bytes[frame_start + 21] == 0
+            );
+            for (size_t j = 0; j < count * 512; j++) {
+                TEST_ASSERT(mock.fci[fci + j] == mock.sectors[swap ? j ^ 1 : j]);
+            }
+            TEST_CHECK(mock.read_acks == 0 && mock.write_acks == 0 && mock.status_requests == 1);
+            TEST_ASSERT(
+                ed64_pro_ll_set_flags(&transaction, ED64_PRO_FLAG_WRSW, 0, deadline_ms(5000)) == ED64_PRO_LL_OK
+            );
+            TEST_CHECK(mock.flags == 0 && mock.flag_commands == 2 && mock.status_requests == 1);
+            end(&transaction);
+        }
+    }
+}
+
+static void test_fci_invalid (void) {
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    const struct {
+        uint32_t fci;
+        uint32_t lba;
+        uint32_t count;
+    } cases[] = {
+        {0, 0, 0},
+        {0, 0, 257},
+        {1, 0, 1},
+        {0, UINT32_MAX, 2},
+        {ED64_PRO_FCI_ROM_LIMIT, 0, 1},
+        {ED64_PRO_FCI_ROM_LIMIT - 512, 0, 2},
+        {UINT32_MAX - 511, 0, 1}
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        TEST_CHECK(
+            ed64_pro_ll_sd_read_fci(&transaction, cases[i].fci, cases[i].lba, cases[i].count, deadline_ms(5000)) ==
+            ED64_PRO_LL_ARGUMENT
+        );
+    }
+    TEST_CHECK(ed64_pro_ll_set_flags(&transaction, 0, 0, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_set_flags(&transaction, 2, 2, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_set_flags(&transaction, 1, 2, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(mock.enqueues == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
+    end(&transaction);
+}
+
+static void test_flag_frames_and_faults (void) {
+    for (unsigned fault = 0; fault < 4; fault++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        mock.sysstat_busy = fault == 1;
+        mock.sysstat_unstable = fault == 2;
+        mock.flags_trailing = fault == 3;
+        mock.tick_step = TICKS_FROM_MS(1) / 8;
+        ed64_pro_ll_error_t error = ed64_pro_ll_set_flags(&transaction, 1, 1, deadline_ms(1000));
+        TEST_CHECK(
+            fault == 0   ? error == ED64_PRO_LL_OK
+            : fault == 3 ? error == ED64_PRO_LL_TRAILING_DATA
+                         : (error == ED64_PRO_LL_TIMEOUT || is_deadline_error(error))
+        );
+        const uint8_t frame[] = {0x2B, 0xD4, 0x85, 0x7A, 0x28, 0, 1, 0, 1};
+        TEST_CHECK(mock.tx_count == sizeof(frame) && memcmp(mock.tx_bytes, frame, sizeof(frame)) == 0);
+        TEST_CHECK(mock.flag_commands == 1 && mock.status_requests == 0 && mock.sysstat_reads >= 2);
+        if (fault) {
+            unsigned enqueues = mock.enqueues;
+            TEST_CHECK(ed64_pro_ll_set_flags(&transaction, 1, 0, deadline_ms(1000)) == error);
+            TEST_CHECK(mock.enqueues == enqueues);
+        }
+        end(&transaction);
+    }
+}
+
+static void test_fci_status_failure (void) {
+    for (unsigned malformed = 0; malformed < 2; malformed++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        mock.replies[0].bytes[0] = malformed ? 0xEE : 0x5A;
+        mock.replies[0].bytes[3] = 0xB0;
+        ed64_pro_ll_error_t error = ed64_pro_ll_sd_read_fci(&transaction, 0, 0, 1, deadline_ms(5000));
+        TEST_CHECK(error == (malformed ? ED64_PRO_LL_FRAME : ED64_PRO_LL_MCU_ERROR));
+        TEST_CHECK(mock.nresp_requests == (malformed ? 0 : 1));
+        unsigned enqueues = mock.enqueues;
+        TEST_CHECK(ed64_pro_ll_sd_read_fci(&transaction, 0, 0, 1, deadline_ms(5000)) == error);
+        TEST_CHECK(mock.enqueues == enqueues && mock.fci_transfers == 1);
+        end(&transaction);
+    }
+}
+
 #ifdef ED64_PRO_TEST_FAIL_WRITE_N
 static void test_sd_injected_write_failure (void) {
     power_on();
@@ -2181,6 +2367,10 @@ static void test_sd_injected_write_failure (void) {
 #endif
 
 TEST_LIST = {
+    {"SD to FCI byte-exact frames and swap bracketing", test_fci_transfers},
+    {"FCI bounds and flags reject without I/O", test_fci_invalid},
+    {"flag apply waits are bounded and have no STATUS", test_flag_frames_and_faults},
+    {"FCI MCU and malformed status faults latch", test_fci_status_failure},
 #ifdef ED64_PRO_TEST_FAIL_WRITE_N
     {"injected nth write fails after first ACK block", test_sd_injected_write_failure},
 #endif

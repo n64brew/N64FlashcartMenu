@@ -45,6 +45,9 @@ enum {
     ED64_PRO_STOP_TIMEOUT_MS = 5000,
     ED64_PRO_SD_TIMEOUT_MS = 5000,
     ED64_PRO_IO_TIMEOUT_MS = 5000,
+    ED64_PRO_FLAG_WRSW = 0x01,
+    ED64_PRO_PATH_MAX = 1023,
+    ED64_PRO_FCI_ROM_LIMIT = 0x0F000000,
     ED64_PRO_FRAME_MAX = 1536,
     ED64_PRO_ACK_BLOCK = 1024,
     ED64_PRO_INFS_TS_FW = 6,
@@ -168,5 +171,15 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_write (
     uint32_t count,
     uint32_t deadline
 );
+
+ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
+    ed64_pro_ll_transaction_t *transaction,
+    uint32_t fci,
+    uint32_t lba,
+    uint32_t count,
+    uint32_t deadline
+);
+ed64_pro_ll_error_t
+ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline);
 
 #endif

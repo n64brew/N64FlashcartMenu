@@ -3,8 +3,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifdef ED64_PRO_TEST_STORAGE
+#if defined(ED64_PRO_TEST_STORAGE) || defined(ED64_PRO_TEST_LOAD)
 #include <fatfs/ff.h>
+#endif
+#ifdef ED64_PRO_TEST_LOAD
+#include "flashcart/flashcart_utils.h"
+#include <libcart/cart.h>
 #endif
 
 #include "flashcart/ed64_pro/ed64_pro.h"
@@ -13,14 +17,14 @@
 #error Build this ROM with tests/Makefile.n64
 #endif
 
-#if defined(ED64_PRO_TEST_INFO) && defined(ED64_PRO_TEST_STORAGE)
+#if (defined(ED64_PRO_TEST_INFO) + defined(ED64_PRO_TEST_STORAGE) + defined(ED64_PRO_TEST_LOAD)) > 1
 #error Select one qualification mode
 #endif
 #if defined(ED64_PRO_TEST_RAW_WRITE) && !defined(ED64_PRO_TEST_STORAGE)
 #error Raw-write qualification requires storage mode
 #endif
 
-#if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO)
+#if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO) && !defined(ED64_PRO_TEST_LOAD)
 enum {
     STRESS_OPERATIONS = 100000,
     STRESS_TIMER_US = 50,
@@ -160,7 +164,7 @@ static void terminal (void) {
     }
 }
 
-#if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO)
+#if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO) && !defined(ED64_PRO_TEST_LOAD)
 /**
  * @brief Exercise 100,000 status/EDID operations under timer-driven cache-line contention.
  *
@@ -256,6 +260,20 @@ static void run_stress (void) {
 
 #endif
 
+#if defined(ED64_PRO_TEST_STORAGE) || defined(ED64_PRO_TEST_LOAD)
+static void print_volume (const FIL *file) {
+    const FATFS *fs = file->obj.fs;
+    const char *type = "unknown";
+    switch (fs->fs_type) {
+    case FS_FAT12: type = "FAT12"; break;
+    case FS_FAT16: type = "FAT16"; break;
+    case FS_FAT32: type = "FAT32"; break;
+    case FS_EXFAT: type = "exFAT"; break;
+    }
+    printf("SD: %s, cluster %" PRIu32 " bytes\n", type, (uint32_t)fs->csize * 512u);
+}
+#endif
+
 #ifdef ED64_PRO_TEST_STORAGE
 #ifndef ED64_PRO_TEST_FIXTURE_PATH
 #define ED64_PRO_TEST_FIXTURE_PATH "/ed64pro-test/read.bin"
@@ -284,6 +302,7 @@ static bool read_fixture (void) {
         printf("H2.1 FAILED: cannot open read.bin\n");
         return false;
     }
+    print_volume(&file);
     bool valid = f_size(&file) == STORAGE_FIXTURE_SIZE;
     uint32_t crc = UINT32_MAX;
     uint32_t bytes = 0;
@@ -481,6 +500,201 @@ static void run_storage (void) {
 }
 #endif
 
+#ifdef ED64_PRO_TEST_LOAD
+#ifndef ED64_PRO_TEST_LOAD_PATH
+#define ED64_PRO_TEST_LOAD_PATH "/ed64pro-test/load.z64"
+#endif
+#ifndef ED64_PRO_TEST_V64_PATH
+#define ED64_PRO_TEST_V64_PATH "/ed64pro-test/load.v64"
+#endif
+#ifndef ED64_PRO_TEST_AUX_PATH
+#define ED64_PRO_TEST_AUX_PATH "/ed64pro-test/load-offset.bin"
+#endif
+#ifndef ED64_PRO_TEST_OVERSIZE_PATH
+#define ED64_PRO_TEST_OVERSIZE_PATH "/ed64pro-test/oversize.z64"
+#endif
+
+static uint8_t source_buffer[4096] __attribute__((aligned(16)));
+static uint8_t pi_buffer[4096] __attribute__((aligned(16)));
+static unsigned load_progress_percent;
+static bool load_progress_valid;
+
+static void load_progress (float progress) {
+    if (!(progress >= 0.0f && progress <= 1.0f)) {
+        load_progress_valid = false;
+        return;
+    }
+    unsigned percent = (unsigned)(progress * 100.0f);
+    if (percent < load_progress_percent) {
+        load_progress_valid = false;
+    }
+    if (percent / 25 > load_progress_percent / 25) {
+        printf("%u%% ", percent);
+        console_render();
+    }
+    load_progress_percent = percent;
+}
+
+static bool fixture_size (const char *path, uint32_t *size) {
+    FIL file;
+    if (f_open(&file, path, FA_READ) != FR_OK) {
+        printf("FAILED: cannot open %s\n", path);
+        return false;
+    }
+    print_volume(&file);
+    FSIZE_t bytes = f_size(&file);
+    if (bytes == 0 || bytes > UINT32_MAX || (bytes & 511u)) {
+        printf("FAILED: fixture must have a nonzero sector-aligned size.\n");
+        return false;
+    }
+    if (f_close(&file) != FR_OK) {
+        printf("FAILED: fixture close\n");
+        return false;
+    }
+    *size = (uint32_t)bytes;
+    return true;
+}
+
+static bool compare_loaded (const char *path, uint32_t rom_offset, uint32_t file_offset, bool normalize_v64) {
+    FIL file;
+    if (f_open(&file, path, FA_READ) != FR_OK || f_size(&file) < file_offset) {
+        printf("FAILED: comparison open/size\n");
+        return false;
+    }
+    if (f_lseek(&file, file_offset) != FR_OK || f_tell(&file) != file_offset) {
+        printf("FAILED: comparison seek\n");
+        return false;
+    }
+    uint32_t extent = (uint32_t)(f_size(&file) - file_offset);
+    for (uint32_t offset = 0; offset < extent;) {
+        UINT chunk = extent - offset;
+        if (chunk > sizeof(source_buffer)) {
+            chunk = sizeof(source_buffer);
+        }
+        UINT read = 0;
+        if (f_read(&file, source_buffer, chunk, &read) != FR_OK || read != chunk) {
+            printf("FAILED: source read at %" PRIu32 "\n", offset);
+            return false;
+        }
+        if (normalize_v64) {
+            for (UINT byte = 0; byte < chunk; byte += 2) {
+                uint8_t first = source_buffer[byte];
+                source_buffer[byte] = source_buffer[byte + 1];
+                source_buffer[byte + 1] = first;
+            }
+        }
+        pi_dma_read_data((void *)(uintptr_t)(0x10000000u + rom_offset + offset), pi_buffer, chunk);
+        if (memcmp(source_buffer, pi_buffer, chunk) != 0) {
+            for (UINT byte = 0; byte < chunk; byte++) {
+                if (source_buffer[byte] != pi_buffer[byte]) {
+                    printf(
+                        "FAILED: PI offset %08" PRIX32 ": %02X != %02X\n",
+                        rom_offset + offset + byte,
+                        pi_buffer[byte],
+                        source_buffer[byte]
+                    );
+                    break;
+                }
+            }
+            return false;
+        }
+        offset += chunk;
+    }
+    if (f_tell(&file) != f_size(&file) || f_close(&file) != FR_OK) {
+        printf("FAILED: comparison completion/close\n");
+        return false;
+    }
+    printf("Compared %" PRIu32 " bytes at PI +%08" PRIX32 ".\n", extent, rom_offset);
+    return true;
+}
+
+static bool load_rom_fixture (flashcart_t *adapter, char *path, bool normalize_v64) {
+    cart_card_byteswap = normalize_v64;
+    load_progress_percent = 0;
+    load_progress_valid = true;
+    uint32_t submissions = ed64_pro_ll_get_metrics()->submissions;
+    uint32_t start = TICKS_READ();
+    flashcart_err_t error = adapter->load_rom(path, load_progress);
+    uint32_t elapsed = TICKS_READ() - start;
+    cart_card_byteswap = 0;
+    printf(
+        "\nLoad: %" PRIu32 " ms, PI submissions %" PRIu32 "\n",
+        TICKS_TO_MS(elapsed),
+        ed64_pro_ll_get_metrics()->submissions - submissions
+    );
+    if (error != FLASHCART_OK) {
+        printf("Load FAILED (%u): %s\n", (unsigned)error, ed64_pro_get_error_message());
+        return false;
+    }
+    if (!load_progress_valid || load_progress_percent != 100) {
+        printf("FAILED: progress callbacks\n");
+        return false;
+    }
+    return compare_loaded(path, 0, 0, normalize_v64);
+}
+
+static void run_load (void) {
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    flashcart_err_t error = adapter->init();
+    print_identity();
+    print_init_metrics();
+    if (error != FLASHCART_OK || !ed64_pro_init_sdfs("sd:/", 4)) {
+        printf("Startup/mount FAILED: %s\n", ed64_pro_get_error_message());
+        terminal();
+    }
+#if defined(ED64_PRO_TEST_OVERSIZE)
+    uint32_t oversize_size;
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    if (!fixture_size(ED64_PRO_TEST_OVERSIZE_PATH, &oversize_size) || oversize_size <= diagnostics->rom_capacity) {
+        printf("H3.3 REFUSED: fixture must exceed reported capacity.\n");
+        terminal();
+    }
+    error = adapter->load_rom(ED64_PRO_TEST_OVERSIZE_PATH, NULL);
+    if (error != FLASHCART_ERR_LOAD || diagnostics->storage_failed || diagnostics->state != ED64_PRO_READY ||
+        diagnostics->storage_state != ED64_PRO_STORAGE_FATFS_OWNED ||
+        ed64_pro_ll_get_failure()->code != ED64_PRO_LL_OK) {
+        printf("H3.3 FAILED: oversized ROM refusal (%u).\n", (unsigned)error);
+        terminal();
+    }
+    printf("H3.3 PASS: oversized ROM refused, storage healthy.\n");
+    console_render();
+#endif
+    uint32_t rom_size;
+    uint32_t auxiliary_size;
+    if (!fixture_size(ED64_PRO_TEST_LOAD_PATH, &rom_size) || !fixture_size(ED64_PRO_TEST_AUX_PATH, &auxiliary_size) ||
+        auxiliary_size <= 512u) {
+        terminal();
+    }
+    printf("H3.1: z64 (%" PRIu32 " bytes)\n", rom_size);
+    console_render();
+    if (!load_rom_fixture(adapter, ED64_PRO_TEST_LOAD_PATH, false)) {
+        terminal();
+    }
+    uint32_t start = TICKS_READ();
+    error = adapter->load_file(ED64_PRO_TEST_AUX_PATH, rom_size, 512);
+    printf("Auxiliary: %" PRIu32 " ms, skip512, ROM +%08" PRIX32 "\n", TICKS_TO_MS(TICKS_READ() - start), rom_size);
+    if (error != FLASHCART_OK || !compare_loaded(ED64_PRO_TEST_AUX_PATH, rom_size, 512, false)) {
+        printf("H3.1 auxiliary FAILED (%u)\n", (unsigned)error);
+        terminal();
+    }
+    printf("H3.1 PASS for these ROM/auxiliary fixtures.\n");
+    console_render();
+    uint32_t v64_size;
+    if (!fixture_size(ED64_PRO_TEST_V64_PATH, &v64_size) || v64_size != rom_size) {
+        printf("H3.2 REFUSED: v64 size must match z64.\n");
+        terminal();
+    }
+    printf("H3.2: v64 (%" PRIu32 " bytes)\n", v64_size);
+    console_render();
+    if (!load_rom_fixture(adapter, ED64_PRO_TEST_V64_PATH, true)) {
+        terminal();
+    }
+    printf("H3.2 PASS: PI read-back matches normalized v64.\n");
+    printf("No release or START attempted. Power off before host access.\n");
+    terminal();
+}
+#endif
+
 /**
  * @brief Run the selected Pro qualification without starting USB polling or game services.
  *
@@ -509,6 +723,9 @@ int main (void) {
 #elif defined(ED64_PRO_TEST_STORAGE)
     screen_init();
     run_storage();
+#elif defined(ED64_PRO_TEST_LOAD)
+    screen_init();
+    run_load();
 #else
     ed64_pro_ll_error_t error = ed64_pro_init_transport();
     screen_init();
