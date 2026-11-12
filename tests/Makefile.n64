@@ -6,6 +6,7 @@ OUTPUT_DIR ?= $(PROJECT_ROOT)/output/ed64-pro-test
 # Modes: -DED64_PRO_TEST_INFO, -DED64_PRO_TEST_LOAD, or -DED64_PRO_TEST_STORAGE with the host fixture CRC.
 # LOAD optionally enables ED64_PRO_TEST_OVERSIZE; ED64_PRO_TEST_OVERSIZE_PATH overrides its path.
 # Raw-write gate additionally requires -DED64_PRO_TEST_RAW_WRITE and a 64 KiB A5 scratch file.
+# Write-fault/refusal gate: STORAGE + STORAGE_FAIL_WRITE + FAIL_WRITE_N=1 + fixture CRC.
 TEST_FLAGS ?=
 
 ifneq ($(ED64_PRO_HARDWARE_INNER),1)
@@ -34,6 +35,10 @@ N64_CFLAGS += -I$(PROJECT_ROOT)/src -Wall -Wextra -Werror $(TEST_FLAGS)
 
 SOURCES := tests/ed64_pro_hardware.c src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro_ll.c \
 	src/utils/fs.c src/flashcart/flashcart_utils.c
+ifneq ($(filter -DED64_PRO_TEST_STORAGE_FAIL_WRITE -DED64_PRO_TEST_STORAGE_FAIL_WRITE=%,$(TEST_FLAGS)),)
+N64_CFLAGS += -I$(PROJECT_ROOT)/src/libs -isystem $(PROJECT_ROOT)/src/libs/miniz
+SOURCES += src/menu/views/fault.c
+endif
 OBJS := $(addprefix $(BUILD_DIR)/,$(SOURCES:.c=.o))
 BUILD_ID := $(shell git -C "$(PROJECT_ROOT)" describe --always --dirty)
 
