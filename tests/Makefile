@@ -2,6 +2,9 @@ CC ?= cc
 HOST_BUILD_DIR ?= build/tests
 PRO_TEST := $(HOST_BUILD_DIR)/ed64_pro_transport_test
 PRO_TEST_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_transport_test_sanitize
+PRO_WRITE_FAILURE_TEST := $(HOST_BUILD_DIR)/ed64_pro_write_failure_test
+PRO_WRITE_FAILURE_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_write_failure_test_sanitize
+PRO_WRITE_FAILURE_CASE := injected nth write fails after first ACK block
 PRO_SOURCE := tests/ed64_pro_transport_test.c
 PRO_DEPS := $(PRO_SOURCE) tests/stubs/libdragon.h tests/stubs/fatfs/ff.h tests/stubs/fatfs/diskio.h \
 	tests/stubs/libcart/cart.h src/utils/fs.h src/flashcart/flashcart_utils.h \
@@ -21,22 +24,24 @@ LIFECYCLE_DEPS := $(LIFECYCLE_SOURCE) tests/stubs/libdragon.h tests/stubs/libcar
 	src/libs/acutest/acutest.h tests/Makefile
 ADAPTER_TEST := $(HOST_BUILD_DIR)/ed64_pro_adapter_test
 ADAPTER_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_adapter_test_sanitize
-ADAPTER_DEPS := tests/ed64_pro_adapter_test.c $(PRO_DEPS)
+ADAPTER_DEPS := tests/ed64_pro_adapter_test.c $(PRO_DEPS) $(LIFECYCLE_DEPS)
 HOST_FLAGS := -std=gnu11 -Wall -Wextra -Werror -g -Itests/stubs -Isrc -isystem src/libs/acutest
 SANITIZE_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
 .PHONY: test-ed64-pro test-ed64-pro-sanitize
-test-ed64-pro: $(PRO_TEST) $(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE) $(ADAPTER_TEST)
+test-ed64-pro: $(PRO_TEST) $(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE) $(ADAPTER_TEST) $(PRO_WRITE_FAILURE_TEST)
 	$(PRO_TEST)
 	$(LIFECYCLE_TEST)
 	$(LIFECYCLE_RELEASE)
 	$(ADAPTER_TEST)
+	$(PRO_WRITE_FAILURE_TEST) "$(PRO_WRITE_FAILURE_CASE)"
 
-test-ed64-pro-sanitize: $(PRO_TEST_SANITIZE) $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE) $(ADAPTER_SANITIZE)
+test-ed64-pro-sanitize: $(PRO_TEST_SANITIZE) $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE) $(ADAPTER_SANITIZE) $(PRO_WRITE_FAILURE_SANITIZE)
 	$(PRO_TEST_SANITIZE)
 	$(LIFECYCLE_SANITIZE)
 	$(LIFECYCLE_RELEASE_SANITIZE)
 	$(ADAPTER_SANITIZE)
+	$(PRO_WRITE_FAILURE_SANITIZE) "$(PRO_WRITE_FAILURE_CASE)"
 
 $(PRO_TEST): $(PRO_DEPS)
 	@mkdir -p $(dir $@)
@@ -45,6 +50,14 @@ $(PRO_TEST): $(PRO_DEPS)
 $(PRO_TEST_SANITIZE): $(PRO_DEPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) $(PRO_SOURCE) $(LDFLAGS) -o $@
+
+$(PRO_WRITE_FAILURE_TEST): $(PRO_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -DED64_PRO_TEST_FAIL_WRITE_N=2 -O2 $(PRO_SOURCE) $(LDFLAGS) -o $@
+
+$(PRO_WRITE_FAILURE_SANITIZE): $(PRO_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -DED64_PRO_TEST_FAIL_WRITE_N=2 -O1 $(SANITIZE_FLAGS) $(PRO_SOURCE) $(LDFLAGS) -o $@
 
 $(LIFECYCLE_RELEASE) $(LIFECYCLE_RELEASE_SANITIZE): HOST_MODE_FLAGS=-DNDEBUG
 

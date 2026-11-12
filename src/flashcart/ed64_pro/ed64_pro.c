@@ -226,8 +226,8 @@ static const char *pro_error_name (ed64_pro_ll_error_t error) {
 /**
  * @brief Format the startup result without accessing the cartridge or filesystem.
  *
- * Failures report retained MCU status or confirmed RX progress; READY reports
- * the missing storage backend. The shared output buffer is overwritten on each call.
+ * Failures report retained MCU status or confirmed RX progress.
+ * The shared output buffer is overwritten on each call.
  */
 char *ed64_pro_get_error_message (void) {
     ed64_pro_ll_error_t error = pro_diagnostics.failure.code != ED64_PRO_LL_OK ? pro_diagnostics.failure.code
@@ -253,14 +253,26 @@ char *ed64_pro_get_error_message (void) {
                     );
                 }
             }
+            char location[80];
+            if (strcmp(pro_diagnostics.storage_operation, "Read") == 0 ||
+                strcmp(pro_diagnostics.storage_operation, "Write") == 0) {
+                snprintf(
+                    location,
+                    sizeof(location),
+                    "%s: LBA %" PRIu32 ", sectors %" PRIu32,
+                    pro_diagnostics.storage_operation,
+                    pro_diagnostics.storage_lba,
+                    pro_diagnostics.storage_count
+                );
+            } else {
+                snprintf(location, sizeof(location), "%s", pro_diagnostics.storage_operation);
+            }
             snprintf(
                 pro_error_message,
                 sizeof(pro_error_message),
-                "EverDrive-64 Pro: %s.\n%s: LBA %" PRIu32 ", sectors %" PRIu32 ".\n%s.%s Power-cycle console and USB.",
+                "EverDrive-64 Pro: %s.\n%s.\n%s.%s Power-cycle console and USB.",
                 pro_diagnostics.storage_detail,
-                pro_diagnostics.storage_operation,
-                pro_diagnostics.storage_lba,
-                pro_diagnostics.storage_count,
+                location,
                 pro_error_name(pro_diagnostics.storage_failure.code),
                 mcu_detail
             );
@@ -279,11 +291,7 @@ char *ed64_pro_get_error_message (void) {
             pro_error_message, sizeof(pro_error_message), "EverDrive-64 Pro returned invalid firmware or ROM capacity."
         );
     } else if (pro_diagnostics.state == ED64_PRO_READY) {
-        snprintf(
-            pro_error_message,
-            sizeof(pro_error_message),
-            "EverDrive-64 Pro storage backend is not implemented.\nTransport and SD readiness only."
-        );
+        snprintf(pro_error_message, sizeof(pro_error_message), "EverDrive-64 Pro transport ready.");
     } else if (pro_diagnostics.state == ED64_PRO_ABSENT) {
         snprintf(
             pro_error_message,
@@ -341,7 +349,7 @@ static bool pro_decode_firmware (uint32_t timestamp, flashcart_firmware_version_
     return true;
 }
 
-/** @brief Cache firmware and capacity while keeping storage activation behind its hardware gate. */
+/** @brief Cache firmware and capacity before mounting storage. */
 static flashcart_err_t pro_init (void) {
     if (ed64_pro_init_transport() != ED64_PRO_LL_OK) {
         return FLASHCART_ERR_INT;
@@ -387,7 +395,7 @@ static const char *pro_get_name (void) {
     return "EverDrive-64 Pro";
 }
 
-/** @brief No menu features are available before the storage backend is implemented. */
+/** @brief Keep optional features disabled until their hardware qualification passes. */
 static bool pro_has_feature (flashcart_features_t feature) {
     (void)feature;
     return false;
@@ -574,12 +582,73 @@ static flashcart_err_t pro_release_storage (void) {
 }
 
 static flashcart_err_t pro_deinit (void) {
-    flashcart_err_t error = pro_release_storage();
-    if (error != FLASHCART_OK) {
-        return error;
+    if (pro_diagnostics.storage_failed) {
+        return FLASHCART_ERR_SD_CARD;
     }
-    pro_diagnostics.storage_detail = "Game launch not implemented; storage released. Power-cycle console and USB";
+#ifndef ED64_PRO_TEST_STORAGE
+    if (!pro_diagnostics.launch_ready || !pro_diagnostics.save_ready || pro_diagnostics.launch_extent == 0 ||
+        pro_diagnostics.launch_extent > pro_diagnostics.rom_capacity ||
+        (pro_diagnostics.brm_type != ED64_PRO_BRM_OFF && pro_diagnostics.save_path[0] == '\0')) {
+        pro_diagnostics.storage_detail = "Game launch is not prepared";
+        return FLASHCART_ERR_LOAD;
+    }
+#endif
+    flashcart_err_t release_error = pro_release_storage();
+    if (release_error != FLASHCART_OK) {
+        return release_error;
+    }
+#if defined(ED64_PRO_TEST_HALT_AFTER_RELEASE) || defined(ED64_PRO_TEST_STORAGE)
+    pro_diagnostics.storage_detail = "Test halt after storage release. Power-cycle console and USB";
     return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+#endif
+    ed64_pro_dev_cfg_t config = {
+        .brom_type = ED64_PRO_ROM_GPAK,
+        .gpak_size = (pro_diagnostics.launch_extent + 511u) & ~511u,
+        .brm_size = pro_diagnostics.brm_size,
+        .brm_type = pro_diagnostics.brm_type,
+        .rtc_mode = ED64_PRO_RTC_RDO,
+    };
+    ed64_pro_ll_transaction_t transaction;
+    uint32_t deadline = TICKS_READ() + 4u * TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
+    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+    const char *step = "Game services";
+    if (error == ED64_PRO_LL_OK) {
+        step = "GPAK path";
+        error = ed64_pro_ll_dev_set_path(
+            &transaction,
+            ED64_PRO_PATH_GPAK,
+            pro_diagnostics.rom_path,
+            TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
+        );
+        if (error == ED64_PRO_LL_OK && pro_diagnostics.brm_type != ED64_PRO_BRM_OFF) {
+            step = "Save path";
+            error = ed64_pro_ll_dev_set_path(
+                &transaction,
+                ED64_PRO_PATH_BRM,
+                pro_diagnostics.save_path,
+                TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
+            );
+        }
+        if (error == ED64_PRO_LL_OK) {
+            step = "Game configuration";
+            error =
+                ed64_pro_ll_dev_set_cfg(&transaction, &config, TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS));
+        }
+        if (error == ED64_PRO_LL_OK) {
+            step = "Game start";
+            error = ed64_pro_ll_dev_start(&transaction, TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS));
+        }
+        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
+        if (error == ED64_PRO_LL_OK) {
+            error = end_error;
+        }
+    }
+    if (error != ED64_PRO_LL_OK) {
+        pro_storage_fail("Game startup failed", step, 0, 0, error);
+        return FLASHCART_ERR_INT;
+    }
+    pro_diagnostics.launch_ready = false;
+    return FLASHCART_OK;
 }
 
 static const char *pro_mcu_path (char *path) {
@@ -752,16 +821,19 @@ static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
     return FLASHCART_OK;
 }
 
-/** @brief Supply retained startup details for the errors this adapter returns. */
+/** @brief Supply retained diagnostics for the errors this adapter returns. */
 static char *pro_get_error_message (flashcart_err_t error) {
+    if (error == FLASHCART_ERR_LOAD && !pro_diagnostics.storage_detail) {
+        return NULL;
+    }
     if (error != FLASHCART_ERR_INT && error != FLASHCART_ERR_FUNCTION_NOT_SUPPORTED &&
-        error != FLASHCART_ERR_OUTDATED && error != FLASHCART_ERR_SD_CARD) {
+        error != FLASHCART_ERR_OUTDATED && error != FLASHCART_ERR_SD_CARD && error != FLASHCART_ERR_LOAD) {
         return NULL;
     }
     return ed64_pro_get_error_message();
 }
 
-/** @brief Pro callbacks retain the shared flashcart interface while storage is unavailable. */
+/** @brief Supply the Pro backend through the shared flashcart interface. */
 static flashcart_t flashcart_ed64_pro = {
     .init = pro_init,
     .deinit = pro_deinit,

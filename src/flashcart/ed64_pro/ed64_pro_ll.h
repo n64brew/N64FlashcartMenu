@@ -78,6 +78,11 @@ typedef struct {
 } ed64_pro_status_t;
 
 typedef enum {
+    ED64_PRO_PATH_GPAK = 0,
+    ED64_PRO_PATH_BRM = 2,
+} ed64_pro_path_t;
+
+typedef enum {
     ED64_PRO_BRM_OFF = 0,
     ED64_PRO_BRM_EEP4K,
     ED64_PRO_BRM_EEP16K,
@@ -86,6 +91,23 @@ typedef enum {
     ED64_PRO_BRM_FLASH,
     ED64_PRO_BRM_SRM128K,
 } ed64_pro_brm_t;
+
+enum {
+    ED64_PRO_ROM_GPAK = 2,
+    ED64_PRO_RTC_RDO = 2,
+};
+
+typedef struct {
+    uint32_t brom_type;
+    uint32_t gpak_size;
+    uint32_t brm_size;
+    uint32_t brm_type;
+    uint32_t rtc_mode;
+    uint32_t dd_en;
+    uint32_t gpak_wren;
+    uint32_t gpak_key;
+    uint32_t reserved[8];
+} ed64_pro_dev_cfg_t;
 
 typedef struct {
     uint32_t deadline;
@@ -191,5 +213,15 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
 );
 ed64_pro_ll_error_t
 ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline);
+
+ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
+    ed64_pro_ll_transaction_t *transaction,
+    ed64_pro_path_t type,
+    const char *path,
+    uint32_t deadline
+);
+ed64_pro_ll_error_t
+ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline);
+ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline);
 
 #endif

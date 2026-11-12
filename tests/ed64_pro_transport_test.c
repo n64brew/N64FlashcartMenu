@@ -103,6 +103,16 @@ static struct {
     bool sysstat_unstable;
     unsigned sysstat_reads;
     bool flags_trailing;
+    uint8_t dev_path_frame[ED64_PRO_FRAME_MAX];
+    size_t dev_path_expected;
+    size_t dev_path_received;
+    char dev_paths[2][ED64_PRO_PATH_MAX + 1];
+    unsigned path_commands;
+    uint8_t config_bytes[64];
+    unsigned config_commands;
+    unsigned start_commands;
+    char dev_steps[16];
+    size_t dev_step_count;
     bool wre;
     bool wre_reply;
     unsigned wre_commands;
@@ -259,6 +269,21 @@ static void release_reply (void) {
     }
 }
 
+static void record_dev_path (const uint8_t *frame, size_t length) {
+    TEST_ASSERT(
+        length >= 9 && frame[0] == 0x2B && frame[1] == 0xD4 && frame[2] == 0x85 && frame[3] == 0x7A &&
+        frame[4] == 0x21 && (frame[5] == 0 || frame[5] == 2)
+    );
+    size_t path_length = (size_t)frame[6] << 8 | frame[7];
+    TEST_ASSERT(path_length <= ED64_PRO_PATH_MAX && length == path_length + 8);
+    size_t slot = frame[5] == 0 ? 0 : 1;
+    memcpy(mock.dev_paths[slot], frame + 8, path_length);
+    mock.dev_paths[slot][path_length] = '\0';
+    mock.path_commands++;
+    TEST_ASSERT(mock.dev_step_count < sizeof(mock.dev_steps));
+    mock.dev_steps[mock.dev_step_count++] = slot == 0 ? 'G' : 'B';
+}
+
 /**
  * @brief Complete the pending DMA with literal FIFO/mailbox protocol and RDRAM-side effects.
  *
@@ -275,6 +300,28 @@ static void finish_pending (void) {
         }
         if (mock.raw_frames) {
             /* Framing-only fixtures deliberately bypass the simulated MCU. */
+        } else if (mock.dev_path_expected) {
+            TEST_ASSERT(bytes <= mock.dev_path_expected - mock.dev_path_received);
+            for (size_t i = 0; i < bytes; i++) {
+                mock.dev_path_frame[mock.dev_path_received++] = mock.ram[i];
+            }
+            if (mock.dev_path_received == mock.dev_path_expected) {
+                record_dev_path(mock.dev_path_frame, mock.dev_path_expected);
+                mock.dev_path_expected = 0;
+                mock.dev_path_received = 0;
+            }
+        } else if (bytes >= 8 && mock.ram[0] == 0x2B && mock.ram[2] == 0x85 && mock.ram[4] == 0x21) {
+            size_t expected = (size_t)mock.ram[6] * 256 + mock.ram[7] + 8;
+            TEST_ASSERT(expected <= sizeof(mock.dev_path_frame) && bytes <= expected);
+            for (size_t i = 0; i < bytes; i++) {
+                mock.dev_path_frame[i] = mock.ram[i];
+            }
+            if (bytes < expected) {
+                mock.dev_path_expected = expected;
+                mock.dev_path_received = bytes;
+            } else {
+                record_dev_path(mock.dev_path_frame, expected);
+            }
         } else if (mock.transfer_active && mock.transfer_write) {
             TEST_ASSERT(bytes <= mock.transfer_length - mock.transfer_done);
             TEST_ASSERT(mock.transfer_lba * 512 + mock.transfer_done + bytes <= sizeof(mock.sectors));
@@ -408,6 +455,23 @@ static void finish_pending (void) {
                 }
                 break;
             case 0x85:
+                if (mock.ram[4] == 0x20) {
+                    TEST_ASSERT(bytes == 69);
+                    for (size_t i = 0; i < sizeof(mock.config_bytes); i++) {
+                        mock.config_bytes[i] = mock.ram[i + 5];
+                    }
+                    mock.config_commands++;
+                    TEST_ASSERT(mock.dev_step_count < sizeof(mock.dev_steps));
+                    mock.dev_steps[mock.dev_step_count++] = 'C';
+                    break;
+                }
+                if (mock.ram[4] == 0x11) {
+                    TEST_ASSERT(bytes == 5);
+                    mock.start_commands++;
+                    TEST_ASSERT(mock.dev_step_count < sizeof(mock.dev_steps));
+                    mock.dev_steps[mock.dev_step_count++] = 'S';
+                    break;
+                }
                 if (mock.ram[4] == 0x28) {
                     TEST_ASSERT(bytes == 9);
                     uint16_t mask = mock.ram[5] << 8 | mock.ram[6];
@@ -1408,7 +1472,7 @@ static void test_init_transcript (void) {
         TEST_CHECK(diagnostics->phase_ticks[phase] > 0);
     }
     TEST_CHECK(diagnostics->attempt_ticks < TICKS_FROM_MS(15000));
-    TEST_CHECK(strstr(ed64_pro_get_error_message(), "not implemented") != NULL);
+    TEST_CHECK(strstr(ed64_pro_get_error_message(), "transport ready") != NULL);
     TEST_CHECK(mock.irq_depth == 0 && pro_ll.owner == NULL);
 
     ed64_pro_diagnostics_t before = *diagnostics;
@@ -1667,7 +1731,7 @@ static void test_cold_start_rejections (void) {
             TEST_CHECK(diagnostics->state == ED64_PRO_READY && diagnostics->probe.error == ED64_PRO_LL_OK);
             TEST_CHECK(diagnostics->failure.code == ED64_PRO_LL_OK);
             unsigned enqueues = mock.enqueues;
-            TEST_CHECK(strstr(ed64_pro_get_error_message(), "storage backend is not implemented") != NULL);
+            TEST_CHECK(strstr(ed64_pro_get_error_message(), "transport ready") != NULL);
             TEST_CHECK(mock.enqueues == enqueues);
         }
     }
@@ -2341,6 +2405,183 @@ static void test_fci_status_failure (void) {
     }
 }
 
+static ed64_pro_dev_cfg_t launch_config (void) {
+    return (ed64_pro_dev_cfg_t){
+        .brom_type = ED64_PRO_ROM_GPAK,
+        .gpak_size = 0x01000200,
+        .brm_size = 512,
+        .brm_type = ED64_PRO_BRM_EEP4K,
+        .rtc_mode = ED64_PRO_RTC_RDO,
+    };
+}
+
+static void test_dev_path_frames (void) {
+    const char *paths[] = {"/game.z64", "/saves/caf\xC3\xA9.sav"};
+    for (unsigned type = 0; type < 2; type++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        ed64_pro_path_t path_type = type ? ED64_PRO_PATH_BRM : ED64_PRO_PATH_GPAK;
+        TEST_CHECK(ed64_pro_ll_dev_set_path(&transaction, path_type, paths[type], deadline_ms(5000)) == ED64_PRO_LL_OK);
+        const uint8_t header[] = {0x2B, 0xD4, 0x85, 0x7A, 0x21, type ? 2 : 0, 0, strlen(paths[type])};
+        TEST_CHECK(memcmp(mock.tx_bytes, header, sizeof(header)) == 0);
+        TEST_CHECK(memcmp(mock.tx_bytes + sizeof(header), paths[type], strlen(paths[type])) == 0);
+        const uint8_t status[] = {0x2B, 0xD4, 0x10, 0xEF};
+        TEST_CHECK(memcmp(mock.tx_bytes + sizeof(header) + strlen(paths[type]), status, sizeof(status)) == 0);
+        TEST_CHECK(mock.tx_count == sizeof(header) + strlen(paths[type]) + sizeof(status));
+        TEST_CHECK(
+            strcmp(mock.dev_paths[type], paths[type]) == 0 && mock.path_commands == 1 && mock.status_requests == 1
+        );
+        end(&transaction);
+    }
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    char path[ED64_PRO_PATH_MAX + 1];
+    memset(path, 'a', sizeof(path));
+    path[0] = '/';
+    path[ED64_PRO_PATH_MAX] = '\0';
+    TEST_CHECK(ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_GPAK, path, deadline_ms(5000)) == ED64_PRO_LL_OK);
+    TEST_CHECK(strcmp(mock.dev_paths[0], path) == 0 && mock.tx_count == ED64_PRO_PATH_MAX + 12);
+    size_t frame_bytes = 0;
+    unsigned frame_dmas = 0;
+    for (size_t i = 0; i < mock.bus_count && frame_bytes < ED64_PRO_PATH_MAX + 8; i++) {
+        if (mock.bus[i].write && mock.bus[i].address == ED64_PRO_REG_FIFO) {
+            TEST_CHECK(mock.bus[i].length <= 512);
+            frame_bytes += mock.bus[i].length / 4;
+            frame_dmas++;
+        }
+    }
+    TEST_CHECK(frame_bytes == ED64_PRO_PATH_MAX + 8 && frame_dmas == 9);
+    end(&transaction);
+}
+
+static void test_dev_invalid_arguments (void) {
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    const char *paths[] = {NULL, "", "relative/file", "sd:/game.z64"};
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        TEST_CHECK(
+            ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_GPAK, paths[i], deadline_ms(5000)) ==
+            ED64_PRO_LL_ARGUMENT
+        );
+    }
+    char path[ED64_PRO_PATH_MAX + 2];
+    memset(path, 'a', sizeof(path));
+    path[0] = '/';
+    path[sizeof(path) - 1] = '\0';
+    TEST_CHECK(
+        ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_GPAK, path, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
+    );
+    TEST_CHECK(
+        ed64_pro_ll_dev_set_path(&transaction, (ed64_pro_path_t)1, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
+    );
+    TEST_CHECK(
+        ed64_pro_ll_dev_set_path(&transaction, (ed64_pro_path_t)3, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
+    );
+    TEST_CHECK(
+        ed64_pro_ll_dev_set_path(&transaction, (ed64_pro_path_t)4, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
+    );
+    TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, NULL, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    for (unsigned invalid = 0; invalid < 12; invalid++) {
+        ed64_pro_dev_cfg_t config = launch_config();
+        switch (invalid) {
+        case 0: config.brom_type = 1; break;
+        case 1: config.gpak_size = 0; break;
+        case 2: config.gpak_size = 1; break;
+        case 3: config.gpak_size = ED64_PRO_FCI_ROM_LIMIT + 512; break;
+        case 4: config.brm_type = 7; break;
+        case 5: config.brm_size = 0; break;
+        case 6: config.rtc_mode = 1; break;
+        case 7: config.dd_en = 1; break;
+        case 8: config.gpak_wren = 1; break;
+        case 9: config.gpak_key = 1; break;
+        case 10: config.reserved[0] = 1; break;
+        case 11: config.reserved[7] = 1; break;
+        }
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    }
+    TEST_CHECK(mock.enqueues == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
+    end(&transaction);
+}
+
+static void test_dev_config_frame (void) {
+    const uint32_t sizes[] = {0, 512, 2048, 32768, 98304, 131072, 131072};
+    for (unsigned type = 0; type < sizeof(sizes) / sizeof(sizes[0]); type++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        ed64_pro_dev_cfg_t config = launch_config();
+        config.brm_type = type;
+        config.brm_size = sizes[type];
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_OK);
+        const uint8_t header[] = {0x2B, 0xD4, 0x85, 0x7A, 0x20, 0, 0, 0, 2, 1, 0, 2, 0};
+        TEST_CHECK(memcmp(mock.tx_bytes, header, sizeof(header)) == 0 && mock.tx_count == 73);
+        TEST_CHECK(
+            mock.config_bytes[8] == 0 && mock.config_bytes[9] == (sizes[type] >> 16) &&
+            mock.config_bytes[10] == (uint8_t)(sizes[type] >> 8) && mock.config_bytes[11] == 0
+        );
+        TEST_CHECK(
+            mock.config_bytes[12] == 0 && mock.config_bytes[13] == 0 && mock.config_bytes[14] == 0 &&
+            mock.config_bytes[15] == type
+        );
+        TEST_CHECK(
+            mock.config_bytes[16] == 0 && mock.config_bytes[17] == 0 && mock.config_bytes[18] == 0 &&
+            mock.config_bytes[19] == 2
+        );
+        for (size_t i = 20; i < sizeof(mock.config_bytes); i++) {
+            TEST_CHECK(mock.config_bytes[i] == 0);
+        }
+        TEST_CHECK(mock.config_commands == 1 && mock.status_requests == 1);
+        end(&transaction);
+    }
+}
+
+static void test_dev_order_and_faults (void) {
+    for (unsigned failed_step = 0; failed_step <= 4; failed_step++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        if (failed_step < 4) {
+            mock.replies[failed_step].bytes[3] = 0xB0;
+        }
+        ed64_pro_dev_cfg_t config = launch_config();
+        ed64_pro_ll_error_t error =
+            ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_GPAK, "/game.z64", deadline_ms(5000));
+        if (error == ED64_PRO_LL_OK) {
+            error = ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_BRM, "/saves/game.sav", deadline_ms(5000));
+        }
+        if (error == ED64_PRO_LL_OK) {
+            error = ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000));
+        }
+        if (error == ED64_PRO_LL_OK) {
+            error = ed64_pro_ll_dev_start(&transaction, deadline_ms(5000));
+        }
+        TEST_CHECK(error == (failed_step == 4 ? ED64_PRO_LL_OK : ED64_PRO_LL_MCU_ERROR));
+        size_t steps = failed_step == 4 ? 4 : failed_step + 1;
+        TEST_CHECK(mock.dev_step_count == steps && memcmp(mock.dev_steps, "GBCS", steps) == 0);
+        TEST_CHECK(mock.status_requests == steps && mock.nresp_requests == (failed_step == 4 ? 0 : 1));
+        TEST_CHECK(mock.start_commands == (failed_step >= 3 ? 1 : 0));
+        if (failed_step == 4) {
+            const uint8_t start_frame[] = {0x2B, 0xD4, 0x85, 0x7A, 0x11, 0x2B, 0xD4, 0x10, 0xEF};
+            TEST_CHECK(
+                memcmp(mock.tx_bytes + mock.tx_count - sizeof(start_frame), start_frame, sizeof(start_frame)) == 0
+            );
+        } else {
+            unsigned enqueues = mock.enqueues;
+            TEST_CHECK(ed64_pro_ll_dev_start(&transaction, deadline_ms(5000)) == error);
+            TEST_CHECK(mock.enqueues == enqueues);
+        }
+        end(&transaction);
+    }
+}
+
 #ifdef ED64_PRO_TEST_FAIL_WRITE_N
 static void test_sd_injected_write_failure (void) {
     power_on();
@@ -2367,6 +2608,10 @@ static void test_sd_injected_write_failure (void) {
 #endif
 
 TEST_LIST = {
+    {"device paths encode lengths and long UTF8 bytes", test_dev_path_frames},
+    {"device paths and configuration whitelist reject before I/O", test_dev_invalid_arguments},
+    {"device configuration encodes sixteen BE words", test_dev_config_frame},
+    {"device handoff commands stop at first failed step", test_dev_order_and_faults},
     {"SD to FCI byte-exact frames and swap bracketing", test_fci_transfers},
     {"FCI bounds and flags reject without I/O", test_fci_invalid},
     {"flag apply waits are bounded and have no STATUS", test_flag_frames_and_faults},

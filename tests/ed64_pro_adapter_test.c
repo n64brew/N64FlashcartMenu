@@ -3,6 +3,94 @@
 
 #include "../src/flashcart/ed64_pro/ed64_pro.c"
 
+/* Compare the adapter's mapping with the table used by actual shared save allocation. */
+#undef ALIGN
+#undef MIN
+#undef MAX
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#include "../src/flashcart/flashcart.c"
+#pragma GCC diagnostic pop
+
+int cart_type;
+
+/* These legacy dispatch paths must stay unused by the Pro adapter tests. */
+bool sys_bbplayer (void) {
+    TEST_CHECK(false);
+    return false;
+}
+int bbfs_init (void) {
+    TEST_CHECK(false);
+    return -1;
+}
+bool daisydrive_detected (void) {
+    TEST_CHECK(false);
+    return false;
+}
+bool daisydrive_init_sdfs (const char *prefix, int max_files) {
+    (void)prefix;
+    (void)max_files;
+    TEST_CHECK(false);
+    return false;
+}
+bool debug_init_sdfs (const char *prefix, int npart) {
+    (void)prefix;
+    (void)npart;
+    TEST_CHECK(false);
+    return false;
+}
+bool debug_init_isviewer (void) {
+    TEST_CHECK(false);
+    return false;
+}
+bool debug_init_usblog (void) {
+    TEST_CHECK(false);
+    return false;
+}
+flashcart_t *d64_get_flashcart (void) {
+    TEST_CHECK(false);
+    return NULL;
+}
+flashcart_t *ed64_xseries_get_flashcart (void) {
+    TEST_CHECK(false);
+    return NULL;
+}
+flashcart_t *ed64_vseries_get_flashcart (void) {
+    TEST_CHECK(false);
+    return NULL;
+}
+flashcart_t *sc64_get_flashcart (void) {
+    TEST_CHECK(false);
+    return NULL;
+}
+flashcart_t *daisydrive_get_flashcart (void) {
+    TEST_CHECK(false);
+    return NULL;
+}
+bool file_exists (char *path) {
+    (void)path;
+    TEST_CHECK(false);
+    return false;
+}
+int64_t file_get_size (char *path) {
+    (void)path;
+    TEST_CHECK(false);
+    return -1;
+}
+bool file_allocate (char *path, size_t size) {
+    (void)path;
+    (void)size;
+    TEST_CHECK(false);
+    return true;
+}
+bool file_fill (char *path, uint8_t value) {
+    (void)path;
+    (void)value;
+    TEST_CHECK(false);
+    return true;
+}
+
 static struct {
     uint32_t now;
     FATFS fs;
@@ -19,6 +107,10 @@ static struct {
     unsigned fail_flag_call;
     float progress[8];
     unsigned progress_calls;
+    unsigned command_calls;
+    unsigned fail_command;
+    ed64_pro_dev_cfg_t config;
+    char launch_paths[2][ED64_PRO_PATH_MAX + 1];
     uint32_t info[2];
     unsigned info_calls;
     unsigned begin_calls;
@@ -239,6 +331,45 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     return sector_transfer(lba, count, false);
 }
 
+static ed64_pro_ll_error_t launch_command (char event) {
+    mock.events[mock.events_count++] = event;
+    mock.command_calls++;
+    if (mock.command_calls == mock.fail_command) {
+        mock.failure.code = ED64_PRO_LL_MCU_ERROR;
+        mock.failure.status_valid = true;
+        mock.failure.status = 0x31;
+        mock.failure.nresp_valid = true;
+        mock.failure.nresp = 0xA3;
+        return ED64_PRO_LL_MCU_ERROR;
+    }
+    return ED64_PRO_LL_OK;
+}
+
+ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
+    ed64_pro_ll_transaction_t *transaction,
+    ed64_pro_path_t type,
+    const char *path,
+    uint32_t deadline
+) {
+    (void)transaction;
+    (void)deadline;
+    unsigned index = type == ED64_PRO_PATH_GPAK ? 0 : 1;
+    snprintf(mock.launch_paths[index], sizeof(mock.launch_paths[index]), "%s", path);
+    return launch_command(index == 0 ? 'P' : 'B');
+}
+ed64_pro_ll_error_t
+ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
+    (void)transaction;
+    (void)deadline;
+    mock.config = *config;
+    return launch_command('G');
+}
+ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
+    (void)transaction;
+    (void)deadline;
+    return launch_command('S');
+}
+
 static void progress_callback (float progress) {
     TEST_ASSERT(mock.progress_calls < 8);
     mock.progress[mock.progress_calls++] = progress;
@@ -415,7 +546,7 @@ static void test_storage_latch (void) {
     TEST_CHECK(pro_disk.disk_ioctl(CTRL_SYNC, NULL) == RES_NOTRDY);
     TEST_CHECK(mock.operations == 2);
     unsigned calls = mock.begin_calls;
-    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD);
+    TEST_CHECK(pro_release_storage() == FLASHCART_ERR_SD_CARD);
     TEST_CHECK(mock.begin_calls == calls && mock.unmounts == 0);
     TEST_CHECK(strstr(ed64_pro_get_error_message(), "LBA 187") != NULL);
     TEST_CHECK(strstr(ed64_pro_get_error_message(), "MCU status 0x31, NRESP 0xA3") != NULL);
@@ -431,33 +562,32 @@ static void test_unsupported_context (void) {
 
 static void test_release (void) {
     mounted_fixture();
-    TEST_CHECK(pro_deinit() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+    TEST_CHECK(pro_release_storage() == FLASHCART_OK);
     TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 1);
     TEST_CHECK(mock.events[0] == 'U' && mock.events[1] == 'F');
     TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_MCU_OWNED);
     TEST_CHECK(pro_disk.disk_status() == STA_NOINIT);
-    TEST_CHECK(strstr(ed64_pro_get_error_message(), "storage released") != NULL);
 }
 
 static void test_release_refusals (void) {
     mounted_fixture();
     uint8_t data[512] = {0};
     TEST_CHECK(pro_disk.disk_write(data, 2, 1) == RES_OK);
-    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD);
+    TEST_CHECK(pro_release_storage() == FLASHCART_ERR_SD_CARD);
     TEST_CHECK(mock.unmounts == 0 && mock.fs_inits == 0);
     TEST_CHECK(strstr(ed64_pro_get_error_message(), "unclosed write") != NULL);
 
     mounted_fixture();
     mock.unmount_result = -1;
-    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD);
+    TEST_CHECK(pro_release_storage() == FLASHCART_ERR_SD_CARD);
     TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 0);
-    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD && mock.unmounts == 1);
+    TEST_CHECK(pro_release_storage() == FLASHCART_ERR_SD_CARD && mock.unmounts == 1);
 
     mounted_fixture();
     mock.init_error = ED64_PRO_LL_MCU_ERROR;
-    TEST_CHECK(pro_deinit() == FLASHCART_ERR_INT);
+    TEST_CHECK(pro_release_storage() == FLASHCART_ERR_INT);
     TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 1);
-    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD && mock.fs_inits == 1);
+    TEST_CHECK(pro_release_storage() == FLASHCART_ERR_SD_CARD && mock.fs_inits == 1);
 }
 
 static void test_rom_loading (void) {
@@ -483,6 +613,7 @@ static void test_rom_load_refusals (void) {
     mock.file_size = (uint64_t)pro_diagnostics.rom_capacity + 1;
     TEST_CHECK(pro_load_rom("sd:/too-big.z64", NULL) == FLASHCART_ERR_LOAD);
     TEST_CHECK(mock.file_reads == 0 && mock.closes == 1 && !pro_diagnostics.launch_ready);
+    TEST_CHECK(pro_get_error_message(FLASHCART_ERR_LOAD) == NULL);
     mounted_fixture();
     mock.fs.wflag = 1;
     TEST_CHECK(pro_load_rom("sd:/dirty.z64", NULL) == FLASHCART_ERR_LOAD);
@@ -539,7 +670,6 @@ static void test_load_arguments (void) {
 }
 
 static void test_save_mapping (void) {
-    static const uint32_t sizes[] = {0, 512, 2048, 32768, 98304, 131072, 131072, 131072};
     static const uint32_t types[] = {
         ED64_PRO_BRM_OFF,
         ED64_PRO_BRM_EEP4K,
@@ -554,7 +684,7 @@ static void test_save_mapping (void) {
     unsigned traffic = mock.begin_calls;
     for (unsigned type = 0; type < __FLASHCART_SAVE_TYPE_END; type++) {
         TEST_CHECK(pro_set_save_type(type) == FLASHCART_OK);
-        TEST_CHECK(pro_diagnostics.brm_type == types[type] && pro_diagnostics.brm_size == sizes[type]);
+        TEST_CHECK(pro_diagnostics.brm_type == types[type] && pro_diagnostics.brm_size == SAVE_SIZE[type]);
         if (type != FLASHCART_SAVE_TYPE_NONE) {
             TEST_CHECK(!pro_diagnostics.save_ready);
             TEST_CHECK(pro_load_save("sd:/saves/test.sav") == FLASHCART_OK);
@@ -584,7 +714,71 @@ static void test_save_staging_reset (void) {
     TEST_CHECK(pro_diagnostics.save_path[0] == '\0');
 }
 
+static void staged_game_fixture (bool save) {
+    mounted_fixture();
+    TEST_ASSERT(pro_load_rom("sd:/game.z64", NULL) == FLASHCART_OK);
+    TEST_ASSERT(pro_set_save_type(save ? FLASHCART_SAVE_TYPE_SRAM_1MBIT : FLASHCART_SAVE_TYPE_NONE) == FLASHCART_OK);
+    if (save) {
+        TEST_ASSERT(pro_load_save("sd:/saves/game.sav") == FLASHCART_OK);
+    }
+    mock.events_count = 0;
+    memset(mock.events, 0, sizeof(mock.events));
+    mock.begin_calls = 0;
+}
+
+static void test_game_handoff (void) {
+    for (unsigned save = 0; save < 2; save++) {
+        staged_game_fixture(save);
+        TEST_CHECK(pro_deinit() == FLASHCART_OK);
+        TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 1);
+        TEST_CHECK(mock.command_calls == (save ? 4u : 3u));
+        TEST_CHECK(strcmp(mock.events, save ? "UFPBGS" : "UFPGS") == 0);
+        TEST_CHECK(strcmp(mock.launch_paths[0], "/game.z64") == 0);
+        TEST_CHECK(strcmp(mock.launch_paths[1], save ? "/saves/game.sav" : "") == 0);
+        TEST_CHECK(mock.config.brom_type == ED64_PRO_ROM_GPAK && mock.config.gpak_size == 1024);
+        TEST_CHECK(mock.config.brm_type == (save ? ED64_PRO_BRM_SRM128K : ED64_PRO_BRM_OFF));
+        TEST_CHECK(mock.config.brm_size == (save ? 131072u : 0u) && mock.config.rtc_mode == ED64_PRO_RTC_RDO);
+        TEST_CHECK(mock.config.dd_en == 0 && mock.config.gpak_wren == 0 && mock.config.gpak_key == 0);
+        for (unsigned i = 0; i < 8; i++) {
+            TEST_CHECK(mock.config.reserved[i] == 0);
+        }
+        unsigned commands = mock.command_calls;
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.command_calls == commands);
+    }
+}
+
+static void test_game_handoff_failures (void) {
+    static const char *steps[] = {"GPAK path", "Save path", "Game configuration", "Game start"};
+    for (unsigned failure = 1; failure <= 4; failure++) {
+        staged_game_fixture(true);
+        mock.fail_command = failure;
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_INT);
+        TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 1 && mock.command_calls == failure);
+        TEST_CHECK(pro_diagnostics.storage_failed && pro_disk_status() == STA_NOINIT);
+        TEST_CHECK(strstr(ed64_pro_get_error_message(), steps[failure - 1]) != NULL);
+        TEST_CHECK(strstr(ed64_pro_get_error_message(), "MCU status 0x31, NRESP 0xA3") != NULL);
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD && mock.command_calls == failure);
+    }
+}
+
+static void test_launch_preflight (void) {
+    mounted_fixture();
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD);
+    TEST_CHECK(mock.unmounts == 0 && mock.fs_inits == 0 && mock.command_calls == 0);
+    TEST_ASSERT(pro_load_rom("sd:/game.z64", NULL) == FLASHCART_OK);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0);
+    TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0);
+    TEST_ASSERT(pro_load_save("sd:/game.eep") == FLASHCART_OK);
+    pro_diagnostics.unsynced = true;
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD);
+    TEST_CHECK(mock.unmounts == 0 && mock.fs_inits == 0 && mock.command_calls == 0);
+}
+
 TEST_LIST = {
+    {"game handoff command order and exact configuration", test_game_handoff},
+    {"each game handoff fault is terminal", test_game_handoff_failures},
+    {"incomplete launch and unsynced writes block handoff", test_launch_preflight},
     {"save mappings stage without MCU traffic", test_save_mapping},
     {"save paths and ROM changes clear staged state", test_save_staging_reset},
     {"ROM chunking byte-swap bracketing and staging", test_rom_loading},

@@ -23,6 +23,16 @@
 #if defined(ED64_PRO_TEST_RAW_WRITE) && !defined(ED64_PRO_TEST_STORAGE)
 #error Raw-write qualification requires storage mode
 #endif
+#if defined(ED64_PRO_TEST_STORAGE_FAIL_WRITE) && !defined(ED64_PRO_TEST_STORAGE)
+#error Injected-write qualification requires storage mode
+#endif
+#if defined(ED64_PRO_TEST_STORAGE_FAIL_WRITE) && defined(ED64_PRO_TEST_RAW_WRITE)
+#error Select raw-write qualification or injected-write qualification
+#endif
+#if defined(ED64_PRO_TEST_STORAGE_FAIL_WRITE) && \
+    (!defined(ED64_PRO_TEST_FAIL_WRITE_N) || ED64_PRO_TEST_FAIL_WRITE_N != 1)
+#error Injected-write qualification requires ED64_PRO_TEST_FAIL_WRITE_N=1
+#endif
 
 #if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO) && !defined(ED64_PRO_TEST_LOAD)
 enum {
@@ -462,6 +472,63 @@ static bool write_scratch (void) {
 }
 #endif
 
+#ifdef ED64_PRO_TEST_STORAGE_FAIL_WRITE
+static void run_storage_fail_write (void) {
+    FIL writer;
+    if (f_open(&writer, SCRATCH_PATH, FA_READ | FA_WRITE) != FR_OK || f_size(&writer) != SCRATCH_SIZE) {
+        printf("FAIL-WRITE REFUSED: existing scratch.bin must be 64 KiB.\n");
+        terminal();
+    }
+    for (uint32_t offset = 0; offset < SCRATCH_SIZE; offset += sizeof(storage_buffer)) {
+        UINT read = 0;
+        if (f_read(&writer, storage_buffer, sizeof(storage_buffer), &read) != FR_OK || read != sizeof(storage_buffer)) {
+            printf("FAIL-WRITE REFUSED: scratch read.\n");
+            terminal();
+        }
+        for (size_t byte = 0; byte < sizeof(storage_buffer); byte++) {
+            if (storage_buffer[byte] != SCRATCH_PATTERN_A) {
+                printf("FAIL-WRITE REFUSED: scratch must contain A5.\n");
+                terminal();
+            }
+        }
+    }
+    FIL reader;
+    if (f_open(&reader, ED64_PRO_TEST_FIXTURE_PATH, FA_READ) != FR_OK || f_lseek(&writer, 0) != FR_OK ||
+        f_tell(&writer) != 0 || writer.obj.fs->wflag) {
+        printf("FAIL-WRITE REFUSED: handle preparation/dirty window.\n");
+        terminal();
+    }
+    for (size_t byte = 0; byte < 1024; byte++) {
+        storage_buffer[byte] = (uint8_t)(byte * 29u + 0x3Cu);
+    }
+    UINT written = 0;
+    FRESULT write_result = f_write(&writer, storage_buffer, 1024, &written);
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    if (write_result != FR_DISK_ERR || !diagnostics->storage_failed ||
+        diagnostics->storage_failure.code != ED64_PRO_LL_TIMEOUT || diagnostics->storage_failure.transferred != 1 ||
+        diagnostics->storage_failure.pi_context_valid || !diagnostics->storage_operation ||
+        strcmp(diagnostics->storage_operation, "Write") != 0) {
+        printf("FAIL-WRITE FAILED: expected latched write fault (%u, %u bytes).\n", (unsigned)write_result, written);
+        terminal();
+    }
+    uint32_t submissions = ed64_pro_ll_get_metrics()->submissions;
+    UINT read = 0;
+    FRESULT read_result = f_read(&reader, storage_buffer, 512, &read);
+    FRESULT reader_close = f_close(&reader);
+    FRESULT writer_close = f_close(&writer);
+    if (read_result != FR_INVALID_OBJECT || reader_close != FR_INVALID_OBJECT || writer_close != FR_INVALID_OBJECT ||
+        read != 0 || ed64_pro_ll_get_metrics()->submissions != submissions) {
+        printf("FAIL-WRITE FAILED: old handles were not inert.\n");
+        terminal();
+    }
+    printf("EXPECTED FAIL-WRITE PASS\n");
+    printf("Old read/write handles invalid; no further PI submissions.\n");
+    printf("%s\n", ed64_pro_get_error_message());
+    printf("No release/retry. Power-cycle console and USB.\n");
+    terminal();
+}
+#endif
+
 static void run_storage (void) {
     flashcart_t *adapter = ed64_pro_get_flashcart();
     flashcart_err_t error = adapter->init();
@@ -482,6 +549,9 @@ static void run_storage (void) {
     if (!read_fixture()) {
         terminal();
     }
+#ifdef ED64_PRO_TEST_STORAGE_FAIL_WRITE
+    run_storage_fail_write();
+#endif
 #ifdef ED64_PRO_TEST_RAW_WRITE
     if (!write_scratch()) {
         terminal();

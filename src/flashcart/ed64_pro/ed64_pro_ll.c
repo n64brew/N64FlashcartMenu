@@ -43,6 +43,7 @@ static struct {
 
 _Static_assert(sizeof(pro_staging) == 512, "Pro staging must own complete cache lines");
 _Static_assert(sizeof(ed64_pro_status_t) == 4, "Pro status is exactly four protocol bytes");
+_Static_assert(sizeof(ed64_pro_dev_cfg_t) == 64, "Pro device configuration is sixteen 32-bit fields");
 
 typedef enum {
     PRO_CMD_STATUS = 0x10,
@@ -529,7 +530,8 @@ static ed64_pro_ll_error_t pro_send_frame (
         (command == PRO_CMD_STATUS && subcommand == -1) || (command == PRO_CMD_NRESP && subcommand == -1) ||
         ((command == PRO_CMD_STOP || command == PRO_CMD_SD_INIT || command == PRO_CMD_SYS) && subcommand == 0x10) ||
         (command == PRO_CMD_EPO && (subcommand == 0x10 || subcommand == 0x11)) ||
-        (command == PRO_CMD_DEV && subcommand == 0x28);
+        (command == PRO_CMD_DEV &&
+         (subcommand == 0x11 || subcommand == 0x20 || subcommand == 0x21 || subcommand == 0x28));
     if (!selected) {
         return ED64_PRO_LL_ARGUMENT;
     }
@@ -1034,4 +1036,86 @@ ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, ui
             return pro_assert_idle(transaction, deadline);
         }
     }
+}
+
+static ed64_pro_ll_error_t pro_dev_command (
+    ed64_pro_ll_transaction_t *transaction,
+    uint8_t subcommand,
+    const uint8_t *payload,
+    size_t length,
+    uint32_t deadline
+) {
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_IO_TIMEOUT_MS);
+    pro_ll.status_valid = false;
+    pro_ll.nresp_valid = false;
+    error = pro_assert_idle(transaction, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    error = pro_send_frame(transaction, PRO_CMD_DEV, subcommand, payload, length, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    ed64_pro_status_t status;
+    return ed64_pro_ll_check_status(transaction, &status, deadline);
+}
+
+ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
+    ed64_pro_ll_transaction_t *transaction,
+    ed64_pro_path_t type,
+    const char *path,
+    uint32_t deadline
+) {
+    if ((type != ED64_PRO_PATH_GPAK && type != ED64_PRO_PATH_BRM) || !path || path[0] != '/') {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    size_t length = strnlen(path, ED64_PRO_PATH_MAX + 1);
+    if (!length || length > ED64_PRO_PATH_MAX) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    uint8_t payload[ED64_PRO_PATH_MAX + 3];
+    payload[0] = type;
+    payload[1] = length >> 8;
+    payload[2] = length;
+    memcpy(payload + 3, path, length);
+    return pro_dev_command(transaction, 0x21, payload, length + 3, deadline);
+}
+
+ed64_pro_ll_error_t
+ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
+    static const uint32_t brm_sizes[] = {0, 512, 2048, 32768, 98304, 131072, 131072};
+    if (!config || config->brom_type != ED64_PRO_ROM_GPAK || !config->gpak_size || (config->gpak_size & 511) ||
+        config->gpak_size > ED64_PRO_FCI_ROM_LIMIT || config->brm_type > ED64_PRO_BRM_SRM128K ||
+        config->brm_size != brm_sizes[config->brm_type] || config->rtc_mode != ED64_PRO_RTC_RDO || config->dd_en ||
+        config->gpak_wren || config->gpak_key) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    for (size_t i = 0; i < sizeof(config->reserved) / sizeof(config->reserved[0]); i++) {
+        if (config->reserved[i]) {
+            return ED64_PRO_LL_ARGUMENT;
+        }
+    }
+    uint32_t values[16] = {
+        config->brom_type,
+        config->gpak_size,
+        config->brm_size,
+        config->brm_type,
+        config->rtc_mode,
+        config->dd_en,
+        config->gpak_wren,
+        config->gpak_key,
+    };
+    uint8_t payload[64];
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        pro_put_u32(payload + i * 4, values[i]);
+    }
+    return pro_dev_command(transaction, 0x20, payload, sizeof(payload), deadline);
+}
+
+ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
+    return pro_dev_command(transaction, 0x11, NULL, 0, deadline);
 }
