@@ -1850,7 +1850,7 @@ static void test_adapter_unavailable_operations (void) {
             TEST_CHECK(!adapter->has_feature(feature));
         }
         flashcart_firmware_version_t version = adapter->get_firmware_version();
-        TEST_CHECK(version.major == 0 && version.minor == 0 && version.revision == 0);
+        TEST_CHECK(version.major == (failed ? 0 : 26) && version.minor == (failed ? 0 : 1014) && version.revision == 0);
         TEST_CHECK(adapter->load_rom("sd:/test.z64", NULL) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
         TEST_CHECK(adapter->load_file("sd:/test.bin", 0, 0) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
         TEST_CHECK(adapter->load_save("sd:/test.sra") == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);

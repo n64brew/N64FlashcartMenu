@@ -29,6 +29,7 @@ typedef enum {
     ED64_PRO_PHASE_STOP_STATUS,
     ED64_PRO_PHASE_SD_INIT,
     ED64_PRO_PHASE_READY,
+    ED64_PRO_PHASE_FIRMWARE_INFO,
     ED64_PRO_PHASE_COUNT,
 } ed64_pro_phase_t;
 
@@ -45,6 +46,11 @@ typedef struct {
     size_t post_stop_drained;
     uint32_t phase_ticks[ED64_PRO_PHASE_COUNT];
     uint32_t attempt_ticks;
+    bool info_queried;
+    flashcart_err_t info_result;
+    flashcart_firmware_version_t firmware_version;
+    uint32_t firmware_timestamp;
+    uint32_t rom_capacity;
 } ed64_pro_diagnostics_t;
 
 /**

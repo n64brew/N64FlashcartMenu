@@ -7,13 +7,12 @@ void view_fault_init (menu_t *menu) {
     console_init();
     console_set_debug(false);
 
-    const char *firmware_message = (
-        "Minimum supported firmware versions:\n"
-        "64drive: 2.05+\n"
-        "EverDrive-64 V/X series: ???+\n"
-        "EverDrive-64 Pro: ???+\n"
-        "SummerCart64: 2.17.0+"
-    );
+    const char *firmware_message =
+        ("Minimum supported firmware versions:\n"
+         "64drive: 2.05+\n"
+         "EverDrive-64 V/X series: ???+\n"
+         "EverDrive-64 Pro: 26.1014+\n"
+         "SummerCart64: 2.17.0+");
 
     printf(
         "UNRECOVERABLE ERROR\n"

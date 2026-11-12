@@ -78,8 +78,13 @@ static char *pro_error_message (flashcart_err_t error) {
     return error == FLASHCART_ERR_INT || error == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED ? spy.message : NULL;
 }
 
+static const char *pro_backend_name (void) {
+    return "EverDrive-64 Pro";
+}
+
 static flashcart_t pro_backend = {
     .init = pro_backend_init,
+    .get_name = pro_backend_name,
     .get_error_message = pro_error_message,
 };
 
@@ -260,6 +265,7 @@ static void require_terminal_result (bool identified) {
                                   : FLASHCART_ERR_INT;
     TEST_CHECK(flashcart_init(&prefix) == expected);
     TEST_CHECK(prefix == NULL && flashcart == &pro_backend);
+    TEST_CHECK(strcmp(flashcart_get_name(), "EverDrive-64 Pro") == 0);
     TEST_CHECK(spy.probes == 1 && spy.pro_inits == (unsigned)identified && spy.pro_getters == 1);
     TEST_CHECK(spy.daisy_detects == 0 && spy.daisy_mounts == 0 && spy.getters == 0);
     TEST_CHECK(spy.sdfs == 0 && spy.bbfs == 0 && spy.usb == 0 && spy.isviewer == 0);
@@ -342,6 +348,7 @@ static void test_ique_bypass (void) {
         const char *prefix = NULL;
         TEST_CHECK(flashcart_init(&prefix) == (fail ? FLASHCART_ERR_BBFS : FLASHCART_OK));
         TEST_CHECK(strcmp(prefix, "bbfs:/") == 0 && flashcart == fallback);
+        TEST_CHECK(flashcart_get_name() == NULL);
         TEST_CHECK(spy.bbfs == 1 && spy.probes == 0 && spy.pro_inits == 0 && spy.daisy_detects == 0);
         TEST_CHECK(spy.sdfs == 0 && spy.getters == 0 && spy.usb == 0 && spy.callbacks == 0);
     }
@@ -358,9 +365,11 @@ static void test_non_pro_dispatch (void) {
         const char *prefix = NULL;
         TEST_CHECK(flashcart_init(&prefix) == FLASHCART_OK);
         TEST_CHECK(strcmp(prefix, "sd:/") == 0 && flashcart == &backend);
+        TEST_CHECK(flashcart_get_name() == NULL);
         TEST_CHECK(spy.probes == 1 && spy.pro_inits == 0 && spy.sdfs == 1);
         TEST_CHECK(spy.daisy_detects == 1 && spy.daisy_mounts == 0 && spy.getters == 1);
         TEST_CHECK(spy.selected_cart == types[i] && spy.init_callbacks == 1 && spy.callbacks == 1);
+        TEST_CHECK(cart_type == types[i]);
         TEST_CHECK(spy.file_calls == 0 && spy.isviewer == 0);
 #ifdef NDEBUG
         TEST_CHECK(spy.usb == 0);
@@ -404,6 +413,7 @@ static void test_non_pro_rom_fallback (void) {
                 flashcart_init(&prefix) == (types[i] != CART_NULL && !sd_ok ? FLASHCART_ERR_SD_CARD : FLASHCART_OK)
             );
             TEST_CHECK(strcmp(prefix, "rom:/") == 0 && flashcart == fallback);
+            TEST_CHECK(flashcart_get_name() == NULL);
             TEST_CHECK(spy.probes == 1 && spy.pro_inits == 0 && spy.sdfs == 1 && spy.isviewer == 1);
             TEST_CHECK(spy.getters == 0 && spy.callbacks == 0 && spy.file_calls == 0);
         }
@@ -421,6 +431,7 @@ static void test_non_pro_daisy_dispatch (void) {
         const char *prefix;
         TEST_CHECK(flashcart_init(&prefix) == spy.backend_result);
         TEST_CHECK(strcmp(prefix, "sd:/") == 0 && flashcart == &backend);
+        TEST_CHECK(flashcart_get_name() == NULL);
         TEST_CHECK(spy.probes == 1 && spy.pro_inits == 0 && spy.daisy_detects == 1 && spy.daisy_mounts == 1);
         TEST_CHECK(spy.getters == 1 && spy.selected_cart == 100 && spy.init_callbacks == 1);
         TEST_CHECK(spy.sdfs == 0 && spy.isviewer == 0 && spy.usb == 0);

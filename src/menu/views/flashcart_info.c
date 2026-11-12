@@ -16,6 +16,10 @@ static inline const char *format_boolean_type (bool bool_value) {
 }
 
 static const char *format_cart_type () {
+    const char *name = flashcart_get_name();
+    if (name) {
+        return name;
+    }
     switch (cart_type) {
         case CART_CI:
             return "64drive";

@@ -261,6 +261,10 @@ flashcart_firmware_version_t flashcart_get_firmware_version (void) {
     return flashcart->get_firmware_version();
 }
 
+const char *flashcart_get_name (void) {
+    return flashcart->get_name ? flashcart->get_name() : NULL;
+}
+
 /**
  * @brief Load a ROM into the flashcart.
  * 

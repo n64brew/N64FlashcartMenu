@@ -1,5 +1,5 @@
 CC ?= cc
-HOST_BUILD_DIR := build/tests
+HOST_BUILD_DIR ?= build/tests
 PRO_TEST := $(HOST_BUILD_DIR)/ed64_pro_transport_test
 PRO_TEST_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_transport_test_sanitize
 PRO_SOURCE := tests/ed64_pro_transport_test.c
@@ -18,19 +18,24 @@ LIFECYCLE_DEPS := $(LIFECYCLE_SOURCE) tests/stubs/libdragon.h tests/stubs/libcar
 	src/flashcart/64drive/64drive.h src/flashcart/ed64/ed64_vseries.h src/flashcart/ed64/ed64_xseries.h \
 	src/flashcart/sc64/sc64.h src/flashcart/daisydrive/daisydrive.h src/utils/fs.h src/utils/utils.h \
 	src/libs/acutest/acutest.h tests/Makefile
+ADAPTER_TEST := $(HOST_BUILD_DIR)/ed64_pro_adapter_test
+ADAPTER_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_adapter_test_sanitize
+ADAPTER_DEPS := tests/ed64_pro_adapter_test.c $(PRO_DEPS)
 HOST_FLAGS := -std=gnu11 -Wall -Wextra -Werror -g -Itests/stubs -Isrc -isystem src/libs/acutest
 SANITIZE_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
 .PHONY: test-ed64-pro test-ed64-pro-sanitize
-test-ed64-pro: $(PRO_TEST) $(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE)
+test-ed64-pro: $(PRO_TEST) $(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE) $(ADAPTER_TEST)
 	$(PRO_TEST)
 	$(LIFECYCLE_TEST)
 	$(LIFECYCLE_RELEASE)
+	$(ADAPTER_TEST)
 
-test-ed64-pro-sanitize: $(PRO_TEST_SANITIZE) $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE)
+test-ed64-pro-sanitize: $(PRO_TEST_SANITIZE) $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE) $(ADAPTER_SANITIZE)
 	$(PRO_TEST_SANITIZE)
 	$(LIFECYCLE_SANITIZE)
 	$(LIFECYCLE_RELEASE_SANITIZE)
+	$(ADAPTER_SANITIZE)
 
 $(PRO_TEST): $(PRO_DEPS)
 	@mkdir -p $(dir $@)
@@ -49,3 +54,11 @@ $(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE): $(LIFECYCLE_DEPS)
 $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE): $(LIFECYCLE_DEPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(HOST_MODE_FLAGS) -O1 $(SANITIZE_FLAGS) $(LIFECYCLE_SOURCE) $(LDFLAGS) -o $@
+
+$(ADAPTER_TEST): $(ADAPTER_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 tests/ed64_pro_adapter_test.c $(LDFLAGS) -o $@
+
+$(ADAPTER_SANITIZE): $(ADAPTER_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro_adapter_test.c $(LDFLAGS) -o $@

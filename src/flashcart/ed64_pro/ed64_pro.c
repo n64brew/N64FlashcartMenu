@@ -187,6 +187,7 @@ const char *ed64_pro_phase_name (ed64_pro_phase_t phase) {
     case ED64_PRO_PHASE_STOP_STATUS: return "Fresh stop status";
     case ED64_PRO_PHASE_SD_INIT: return "SD readiness";
     case ED64_PRO_PHASE_READY: return "Transport ready";
+    case ED64_PRO_PHASE_FIRMWARE_INFO: return "Firmware info";
     default: return "Unknown phase";
     }
 }
@@ -224,7 +225,16 @@ static const char *pro_error_name (ed64_pro_ll_error_t error) {
 char *ed64_pro_get_error_message (void) {
     ed64_pro_ll_error_t error = pro_diagnostics.failure.code != ED64_PRO_LL_OK ? pro_diagnostics.failure.code
                                                                            : pro_diagnostics.probe.error;
-    if (pro_diagnostics.state == ED64_PRO_READY) {
+    if (pro_diagnostics.info_queried && pro_diagnostics.info_result == FLASHCART_ERR_OUTDATED) {
+        snprintf(pro_error_message, sizeof(pro_error_message), "EverDrive-64 Pro requires firmware 26.1014 or newer.");
+    } else if (
+        pro_diagnostics.info_queried && pro_diagnostics.info_result == FLASHCART_ERR_INT &&
+        pro_diagnostics.failure.code == ED64_PRO_LL_OK
+    ) {
+        snprintf(
+            pro_error_message, sizeof(pro_error_message), "EverDrive-64 Pro returned invalid firmware or ROM capacity."
+        );
+    } else if (pro_diagnostics.state == ED64_PRO_READY) {
         snprintf(
             pro_error_message,
             sizeof(pro_error_message),
@@ -267,14 +277,67 @@ char *ed64_pro_get_error_message (void) {
     return pro_error_message;
 }
 
-/**
- * @brief Initialize the Pro transport without claiming a usable storage backend.
- */
+static bool pro_decode_firmware (uint32_t timestamp, flashcart_firmware_version_t *version) {
+    unsigned date = timestamp & 0xFFFFu;
+    unsigned year = 1980u + (date >> 9);
+    unsigned month = (date >> 5) & 15u;
+    unsigned day = date & 31u;
+    static const uint8_t days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (year < 2000 || month == 0 || month > 12 || day == 0) {
+        return false;
+    }
+    unsigned max_day = days[month - 1];
+    if (month == 2 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) {
+        max_day++;
+    }
+    if (day > max_day) {
+        return false;
+    }
+    *version = (flashcart_firmware_version_t){.major = year - 2000, .minor = month * 100 + day};
+    return true;
+}
+
+/** @brief Cache firmware and capacity while keeping storage activation behind its hardware gate. */
 static flashcart_err_t pro_init (void) {
     if (ed64_pro_init_transport() != ED64_PRO_LL_OK) {
         return FLASHCART_ERR_INT;
     }
-    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+    if (!pro_diagnostics.info_queried) {
+        const uint32_t ids[] = {ED64_PRO_INFS_TS_FW, ED64_PRO_INFS_MAX_ROM_SIZE};
+        uint32_t values[2];
+        uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_SD_TIMEOUT_MS);
+        ed64_pro_ll_transaction_t transaction;
+        pro_set_phase(ED64_PRO_PHASE_FIRMWARE_INFO);
+        ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+        if (error == ED64_PRO_LL_OK) {
+            error = ed64_pro_ll_get_sys_info(&transaction, ids, values, 2, deadline);
+            ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
+            if (error == ED64_PRO_LL_OK) {
+                error = end_error;
+            }
+        }
+        pro_diagnostics.info_queried = true;
+        pro_diagnostics.info_result = FLASHCART_ERR_INT;
+        if (error != ED64_PRO_LL_OK) {
+            pro_init_fail(error);
+            return FLASHCART_ERR_INT;
+        }
+        pro_diagnostics.firmware_timestamp = values[0];
+        pro_diagnostics.rom_capacity = values[1] < 0x0F000000u ? values[1] : 0x0F000000u;
+        if (!pro_decode_firmware(values[0], &pro_diagnostics.firmware_version) || values[1] == 0) {
+            return FLASHCART_ERR_INT;
+        }
+        flashcart_firmware_version_t version = pro_diagnostics.firmware_version;
+        pro_diagnostics.info_result =
+            version.major < 26 || (version.major == 26 && version.minor < 1014) ? FLASHCART_ERR_OUTDATED : FLASHCART_OK;
+        pro_set_phase(ED64_PRO_PHASE_READY);
+    }
+    return pro_diagnostics.info_result == FLASHCART_OK ? FLASHCART_ERR_FUNCTION_NOT_SUPPORTED
+                                                       : pro_diagnostics.info_result;
+}
+
+static const char *pro_get_name (void) {
+    return "EverDrive-64 Pro";
 }
 
 /** @brief No menu features are available before the storage backend is implemented. */
@@ -283,9 +346,9 @@ static bool pro_has_feature (flashcart_features_t feature) {
     return false;
 }
 
-/** @brief Firmware version retrieval is not implemented. */
+/** @brief Return cached information without MCU traffic. */
 static flashcart_firmware_version_t pro_get_firmware_version (void) {
-    return (flashcart_firmware_version_t){0};
+    return pro_diagnostics.firmware_version;
 }
 
 static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback_t *progress) {
@@ -313,7 +376,8 @@ static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
 
 /** @brief Supply retained startup details for the errors this adapter returns. */
 static char *pro_get_error_message (flashcart_err_t error) {
-    if (error != FLASHCART_ERR_INT && error != FLASHCART_ERR_FUNCTION_NOT_SUPPORTED) {
+    if (error != FLASHCART_ERR_INT && error != FLASHCART_ERR_FUNCTION_NOT_SUPPORTED &&
+        error != FLASHCART_ERR_OUTDATED) {
         return NULL;
     }
     return ed64_pro_get_error_message();
@@ -325,6 +389,7 @@ static flashcart_t flashcart_ed64_pro = {
     .deinit = NULL,
     .has_feature = pro_has_feature,
     .get_firmware_version = pro_get_firmware_version,
+    .get_name = pro_get_name,
     .load_rom = pro_load_rom,
     .load_file = pro_load_file,
     .load_save = pro_load_save,
