@@ -6,7 +6,9 @@ PRO_WRITE_FAILURE_TEST := $(HOST_BUILD_DIR)/ed64_pro_write_failure_test
 PRO_WRITE_FAILURE_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_write_failure_test_sanitize
 PRO_WRITE_FAILURE_CASE := injected nth write fails after first ACK block
 PRO_SOURCE := tests/ed64_pro_transport_test.c
-PRO_DEPS := $(PRO_SOURCE) tests/stubs/libdragon.h tests/stubs/fatfs/ff.h tests/stubs/fatfs/diskio.h \
+FATFS_UNICODE_SOURCE := libdragon/src/fatfs/ffunicode.c
+FATFS_UNICODE_DEPS := $(FATFS_UNICODE_SOURCE) libdragon/src/fatfs/ff.h libdragon/src/fatfs/ffconf.h
+PRO_DEPS := $(PRO_SOURCE) $(FATFS_UNICODE_DEPS) tests/stubs/libdragon.h tests/stubs/fatfs/ff.h tests/stubs/fatfs/diskio.h \
 	tests/stubs/libcart/cart.h src/utils/fs.h src/flashcart/flashcart_utils.h \
 	src/flashcart/ed64_pro/ed64_pro_ll.c src/flashcart/ed64_pro/ed64_pro_ll.h \
 	src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro.h src/flashcart/flashcart.h \
@@ -48,19 +50,19 @@ test-ed64-pro-sanitize: $(PRO_TEST_SANITIZE) $(LIFECYCLE_SANITIZE) $(LIFECYCLE_R
 
 $(PRO_TEST): $(PRO_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 $(PRO_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 $(PRO_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
 
 $(PRO_TEST_SANITIZE): $(PRO_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) $(PRO_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) $(PRO_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
 
 $(PRO_WRITE_FAILURE_TEST): $(PRO_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -DED64_PRO_TEST_FAIL_WRITE_N=2 -O2 $(PRO_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -DED64_PRO_TEST_FAIL_WRITE_N=2 -O2 $(PRO_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
 
 $(PRO_WRITE_FAILURE_SANITIZE): $(PRO_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -DED64_PRO_TEST_FAIL_WRITE_N=2 -O1 $(SANITIZE_FLAGS) $(PRO_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -DED64_PRO_TEST_FAIL_WRITE_N=2 -O1 $(SANITIZE_FLAGS) $(PRO_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
 
 $(LIFECYCLE_RELEASE) $(LIFECYCLE_RELEASE_SANITIZE): HOST_MODE_FLAGS=-DNDEBUG
 
@@ -74,11 +76,11 @@ $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE): $(LIFECYCLE_DEPS)
 
 $(ADAPTER_TEST): $(ADAPTER_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 tests/ed64_pro_adapter_test.c $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 tests/ed64_pro_adapter_test.c $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
 
 $(ADAPTER_SANITIZE): $(ADAPTER_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro_adapter_test.c $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro_adapter_test.c $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
 
 .PHONY: test-menu-path test-menu-path-sanitize
 test-menu-path: $(MENU_PATH_TEST)

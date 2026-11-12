@@ -101,6 +101,15 @@ static struct {
     uintptr_t destinations[8];
     UINT read_sizes[8];
     char opened_path[ED64_PRO_PATH_MAX + 1];
+    struct {
+        const char *path;
+        const char *alias;
+        FRESULT result;
+        bool unterminated;
+    } aliases[8];
+    unsigned alias_count;
+    unsigned stats;
+    char stat_paths[8][ED64_PRO_PATH_MAX + 1];
     uint32_t fci[8];
     uint16_t flags;
     unsigned flag_calls;
@@ -259,6 +268,23 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_write (
 }
 
 char cart_card_byteswap;
+
+FRESULT f_stat (const char *path, FILINFO *info) {
+    TEST_ASSERT(mock.stats < 8);
+    snprintf(mock.stat_paths[mock.stats++], sizeof(mock.stat_paths[0]), "%s", path);
+    for (unsigned i = 0; i < mock.alias_count; i++) {
+        if (strcmp(path, mock.aliases[i].path) == 0) {
+            /* A failed lookup may leave altname stale; callers must check status. */
+            if (mock.aliases[i].unterminated) {
+                memset(info->altname, 'A', sizeof(info->altname));
+            } else {
+                snprintf(info->altname, sizeof(info->altname), "%s", mock.aliases[i].alias);
+            }
+            return mock.aliases[i].result;
+        }
+    }
+    return FR_NO_FILE;
+}
 
 FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
     TEST_CHECK(mode == FA_READ);
@@ -775,7 +801,197 @@ static void test_launch_preflight (void) {
     TEST_CHECK(mock.unmounts == 0 && mock.fs_inits == 0 && mock.command_calls == 0);
 }
 
+static void test_cp437_paths (void) {
+    mounted_fixture();
+    char rom[] = "sd:/Caf\xC3\xA9/\xC3\xA9.z64";
+    TEST_CHECK(pro_load_rom(rom, NULL) == FLASHCART_OK);
+    TEST_CHECK(strcmp(mock.opened_path, "/Caf\xC3\xA9/\xC3\xA9.z64") == 0);
+    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/Caf\x82/\x82.z64") == 0);
+    TEST_CHECK(strcmp(rom, "sd:/Caf\xC3\xA9/\xC3\xA9.z64") == 0);
+    TEST_CHECK(mock.stats == 0);
+    TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
+    TEST_CHECK(pro_load_save("sd:/Caf\xC3\xA9/saves/\xC3\xA9.sav") == FLASHCART_OK);
+    TEST_CHECK(strcmp(pro_diagnostics.save_path, "/Caf\x82/saves/\x82.sav") == 0);
+    TEST_CHECK(mock.stats == 0);
+    TEST_CHECK(pro_deinit() == FLASHCART_OK);
+    TEST_CHECK(strcmp(mock.launch_paths[0], "/Caf\x82/\x82.z64") == 0);
+    TEST_CHECK(strcmp(mock.launch_paths[1], "/Caf\x82/saves/\x82.sav") == 0);
+
+    mounted_fixture();
+    TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
+    TEST_CHECK(pro_load_save("/µùÑµ£¼Φ¬₧-├⌐.sav") == FLASHCART_OK);
+    TEST_CHECK(strcmp(pro_diagnostics.save_path, "/\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E-\xC3\xA9.sav") == 0);
+    TEST_CHECK(mock.stats == 0);
+}
+
+static void test_unicode_short_aliases (void) {
+    mounted_fixture();
+    mock.aliases[0].path = "/日本語";
+    mock.aliases[0].alias = "NIPPON~1";
+    mock.aliases[1].path = "/日本語/Café/雪-😀.z64";
+    mock.aliases[1].alias = "CAFÉ~2.Z64";
+    mock.aliases[2].path = "/日本語/Café/雪-😀.sav";
+    mock.aliases[2].alias = "ÉTÉ~1.SAV";
+    mock.alias_count = 3;
+    TEST_CHECK(pro_load_rom("sd:/日本語/Café/雪-😀.z64", NULL) == FLASHCART_OK);
+    TEST_CHECK(strcmp(mock.opened_path, "/日本語/Café/雪-😀.z64") == 0);
+    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/NIPPON~1/Caf\x82/CAF\x90~2.Z64") == 0);
+    TEST_CHECK(mock.stats == 2);
+    TEST_CHECK(strcmp(mock.stat_paths[0], "/日本語") == 0);
+    TEST_CHECK(strcmp(mock.stat_paths[1], "/日本語/Café/雪-😀.z64") == 0);
+    TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
+    TEST_CHECK(mock.stats == 2);
+    TEST_CHECK(pro_load_save("sd:/日本語/Café/雪-😀.sav") == FLASHCART_OK);
+    TEST_CHECK(strcmp(pro_diagnostics.save_path, "/NIPPON~1/Caf\x82/\x90T\x90~1.SAV") == 0);
+    TEST_CHECK(mock.stats == 4 && strcmp(mock.stat_paths[3], "/日本語/Café/雪-😀.sav") == 0);
+    TEST_CHECK(pro_deinit() == FLASHCART_OK);
+    TEST_CHECK(mock.stats == 4);
+    TEST_CHECK(strcmp(mock.launch_paths[0], "/NIPPON~1/Caf\x82/CAF\x90~2.Z64") == 0);
+    TEST_CHECK(strcmp(mock.launch_paths[1], "/NIPPON~1/Caf\x82/\x90T\x90~1.SAV") == 0);
+}
+
+static void test_invalid_utf8_paths (void) {
+    static const char *paths[] = {
+        "/\x80.z64",
+        "/\xC0\xAF.z64",
+        "/\xE0\x80\xAF.z64",
+        "/\xED\xA0\x80.z64",
+        "/\xF4\x90\x80\x80.z64",
+        "/\xF5\x80\x80\x80.z64",
+        "/\xE2\x28\xA1.z64",
+        "/\xC2",
+        "/\xE2\x82",
+        "/\xF0\x9F\x92",
+        "/日本語/\x80.z64"
+    };
+    for (unsigned i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        mounted_fixture();
+        TEST_ASSERT(pro_load_rom("sd:/old.z64", NULL) == FLASHCART_OK);
+        unsigned opens = mock.opens;
+        unsigned reads = mock.file_reads;
+        unsigned io = mock.begin_calls;
+        TEST_CHECK(pro_load_rom((char *)paths[i], NULL) == FLASHCART_ERR_ARGS);
+        TEST_CHECK(!pro_diagnostics.launch_ready && !pro_diagnostics.save_ready && pro_diagnostics.rom_path[0] == '\0');
+        TEST_CHECK(mock.opens == opens && mock.file_reads == reads && mock.stats == 0 && mock.begin_calls == io);
+        TEST_CHECK(strstr(pro_get_error_message(FLASHCART_ERR_ARGS), "invalid UTF-8") != NULL);
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
+    }
+}
+
+static void test_invalid_utf8_save_path (void) {
+    mounted_fixture();
+    TEST_ASSERT(pro_load_rom("/game.z64", NULL) == FLASHCART_OK);
+    TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
+    TEST_ASSERT(pro_load_save("/old.sav") == FLASHCART_OK);
+    unsigned io = mock.begin_calls;
+    TEST_CHECK(pro_load_save("/日本語/\xED\xA0\x80.sav") == FLASHCART_ERR_ARGS);
+    TEST_CHECK(!pro_diagnostics.save_ready && pro_diagnostics.save_path[0] == '\0');
+    TEST_CHECK(mock.stats == 0 && mock.begin_calls == io);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
+}
+
+static void test_missing_or_invalid_alias (void) {
+    static const struct {
+        const char *alias;
+        FRESULT result;
+        bool unterminated;
+    } cases[] = {
+        {"", FR_OK, false},
+        {"日本語", FR_OK, false},
+        {"BAD/NAME", FR_OK, false},
+        {"BAD?NAME", FR_OK, false},
+        {"\xC3", FR_OK, false},
+        {"IGNORED", FR_OK, true},
+        {"STALE~1.SAV", FR_NO_FILE, false},
+        {"STALE~1.SAV", FR_DISK_ERR, false}
+    };
+    for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        mounted_fixture();
+        TEST_ASSERT(pro_load_rom("/game.z64", NULL) == FLASHCART_OK);
+        TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
+        TEST_ASSERT(pro_load_save("/old.sav") == FLASHCART_OK);
+        mock.aliases[0].path = "/日本語.sav";
+        mock.aliases[0].alias = cases[i].alias;
+        mock.aliases[0].result = cases[i].result;
+        mock.aliases[0].unterminated = cases[i].unterminated;
+        mock.alias_count = 1;
+        flashcart_err_t expected = cases[i].result == FR_OK ? FLASHCART_ERR_ARGS : FLASHCART_ERR_LOAD;
+        unsigned io = mock.begin_calls;
+        TEST_CHECK(pro_load_save("/日本語.sav") == expected);
+        TEST_CHECK(pro_diagnostics.save_path[0] == '\0' && !pro_diagnostics.save_ready);
+        TEST_CHECK(mock.stats == 1 && mock.begin_calls == io);
+        TEST_CHECK(pro_get_error_message(expected) != NULL);
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
+        TEST_CHECK(pro_load_save("/new.sav") == FLASHCART_OK && pro_diagnostics.path_error == NULL);
+    }
+    mounted_fixture();
+    TEST_CHECK(pro_load_rom("/日本語.z64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(mock.opens == 0 && mock.file_reads == 0 && !pro_diagnostics.launch_ready);
+    TEST_CHECK(pro_diagnostics.rom_path[0] == '\0');
+}
+
+static void test_encoded_path_bounds (void) {
+    mounted_fixture();
+    char path[ED64_PRO_PATH_MAX + 2];
+    memset(path, 'a', ED64_PRO_PATH_MAX + 1);
+    path[0] = '/';
+    for (unsigned i = 64; i < ED64_PRO_PATH_MAX; i += 64) {
+        path[i] = '/';
+    }
+    path[ED64_PRO_PATH_MAX] = '\0';
+    TEST_CHECK(pro_load_rom(path, NULL) == FLASHCART_OK);
+    TEST_CHECK(strlen(pro_diagnostics.rom_path) == ED64_PRO_PATH_MAX && mock.stats == 0);
+    unsigned opens = mock.opens;
+    path[ED64_PRO_PATH_MAX] = 'a';
+    path[ED64_PRO_PATH_MAX + 1] = '\0';
+    TEST_CHECK(pro_load_rom(path, NULL) == FLASHCART_ERR_ARGS && mock.opens == opens && mock.stats == 0);
+
+    mounted_fixture();
+    path[ED64_PRO_PATH_MAX - 4] = '/';
+    memcpy(path + ED64_PRO_PATH_MAX - 3, "水", 3);
+    path[ED64_PRO_PATH_MAX] = '\0';
+    mock.aliases[0].path = path;
+    mock.aliases[0].alias = "WATER~1";
+    mock.alias_count = 1;
+    TEST_CHECK(pro_load_rom(path, NULL) == FLASHCART_ERR_ARGS);
+    TEST_CHECK(mock.stats == 1 && mock.opens == 0 && pro_diagnostics.rom_path[0] == '\0');
+    mock.aliases[0].alias = "W";
+    TEST_CHECK(pro_load_rom(path, NULL) == FLASHCART_OK);
+    TEST_CHECK(strlen(pro_diagnostics.rom_path) == ED64_PRO_PATH_MAX - 2);
+}
+
+static void test_path_metadata_requires_ownership (void) {
+    mounted_fixture();
+    TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
+    pro_diagnostics.storage_state = ED64_PRO_STORAGE_MOUNTING;
+    TEST_CHECK(pro_load_save("/日本語.sav") == FLASHCART_ERR_LOAD);
+    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && !pro_diagnostics.save_ready);
+    TEST_CHECK(pro_load_rom("/日本語.z64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && !pro_diagnostics.launch_ready);
+    pro_diagnostics.launch_ready = true;
+    TEST_CHECK(pro_load_file("/日本語.gb", 0x80000, 0) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && mock.begin_calls == 0 && !pro_diagnostics.launch_ready);
+}
+
+static void test_unicode_auxiliary_uses_fatfs_only (void) {
+    mounted_fixture();
+    TEST_ASSERT(pro_load_rom("/emulator.z64", NULL) == FLASHCART_OK);
+    mock.operations = 0;
+    mock.file_reads = 0;
+    TEST_CHECK(pro_load_file("sd:/日本語/雪.gb", 0x80000, 0) == FLASHCART_OK);
+    TEST_CHECK(strcmp(mock.opened_path, "/日本語/雪.gb") == 0 && mock.stats == 0);
+    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/emulator.z64") == 0);
+}
+
 TEST_LIST = {
+    {"staged paths use exact CP437 while FatFs keeps UTF-8", test_cp437_paths},
+    {"unmappable components use verified UTF-8 short aliases", test_unicode_short_aliases},
+    {"malformed UTF-8 rejects before metadata or data I/O", test_invalid_utf8_paths},
+    {"malformed save paths clear staged writeback", test_invalid_utf8_save_path},
+    {"missing exFAT or invalid short aliases block handoff", test_missing_or_invalid_alias},
+    {"encoded path bounds include alias expansion", test_encoded_path_bounds},
+    {"path metadata requires mounted FatFs ownership", test_path_metadata_requires_ownership},
+    {"Unicode auxiliary reads stay entirely in FatFs", test_unicode_auxiliary_uses_fatfs_only},
     {"game handoff command order and exact configuration", test_game_handoff},
     {"each game handoff fault is terminal", test_game_handoff_failures},
     {"incomplete launch and unsynced writes block handoff", test_launch_preflight},

@@ -21,6 +21,10 @@
 #include "ed64_pro.h"
 #include "utils/fs.h"
 
+#if FF_CODE_PAGE != 437 || FF_LFN_UNICODE != 2
+#error "ED64 Pro path staging requires CP437 and the UTF-8 FatFs API"
+#endif
+
 static ed64_pro_diagnostics_t pro_diagnostics;
 static uint32_t pro_attempt_start;
 static uint32_t pro_attempt_deadline;
@@ -650,18 +654,169 @@ static flashcart_err_t pro_deinit (void) {
     return FLASHCART_OK;
 }
 
-static const char *pro_mcu_path (char *path) {
+static bool pro_decode_utf8 (const char **cursor, const char *end, uint32_t *value) {
+    const unsigned char *bytes = (const unsigned char *)*cursor;
+    uint32_t codepoint = *bytes++;
+    unsigned continuation = 0;
+    uint32_t minimum = 0;
+    if (codepoint < 0x80) {
+        *cursor = (const char *)bytes;
+        *value = codepoint;
+        return true;
+    }
+    if (codepoint >= 0xC2 && codepoint <= 0xDF) {
+        codepoint &= 0x1F;
+        continuation = 1;
+        minimum = 0x80;
+    } else if (codepoint >= 0xE0 && codepoint <= 0xEF) {
+        codepoint &= 0x0F;
+        continuation = 2;
+        minimum = 0x800;
+    } else if (codepoint >= 0xF0 && codepoint <= 0xF4) {
+        codepoint &= 0x07;
+        continuation = 3;
+        minimum = 0x10000;
+    } else {
+        return false;
+    }
+    if ((size_t)(end - (const char *)bytes) < continuation) {
+        return false;
+    }
+    for (unsigned i = 0; i < continuation; i++) {
+        if ((bytes[i] & 0xC0) != 0x80) {
+            return false;
+        }
+        codepoint = (codepoint << 6) | (bytes[i] & 0x3F);
+    }
+    if (codepoint < minimum || codepoint > 0x10FFFF || (codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
+        return false;
+    }
+    *cursor = (const char *)bytes + continuation;
+    *value = codepoint;
+    return true;
+}
+
+static const char *pro_fatfs_path (char *path) {
     if (!path || strnlen(path, ED64_PRO_PATH_MAX + 4) == ED64_PRO_PATH_MAX + 4) {
+        pro_diagnostics.path_error = "Invalid or overlong file path";
         return NULL;
     }
-    char *mcu_path = strip_fs_prefix(path);
-    if (mcu_path[0] != '/' || strnlen(mcu_path, ED64_PRO_PATH_MAX + 1) > ED64_PRO_PATH_MAX) {
+    const char *utf8 = strip_fs_prefix(path);
+    size_t length = strnlen(utf8, ED64_PRO_PATH_MAX + 1);
+    if (utf8[0] != '/' || length > ED64_PRO_PATH_MAX) {
+        pro_diagnostics.path_error = "Invalid or overlong file path";
         return NULL;
     }
-    return mcu_path;
+    const char *cursor = utf8;
+    while (cursor != utf8 + length) {
+        uint32_t codepoint;
+        if (!pro_decode_utf8(&cursor, utf8 + length, &codepoint)) {
+            pro_diagnostics.path_error = "File path contains invalid UTF-8";
+            return NULL;
+        }
+    }
+    return utf8;
+}
+
+static bool
+pro_encode_oem (const char *utf8, size_t length, char *output, size_t capacity, size_t *written, bool *representable) {
+    const char *cursor = utf8;
+    *written = 0;
+    *representable = true;
+    while (cursor != utf8 + length) {
+        uint32_t codepoint;
+        if (!pro_decode_utf8(&cursor, utf8 + length, &codepoint)) {
+            return false;
+        }
+        WCHAR oem = ff_uni2oem(codepoint, 437);
+        if (oem == 0 || oem > 0xFF) {
+            *representable = false;
+        } else if (*written < capacity) {
+            output[*written] = (char)oem;
+        }
+        (*written)++;
+    }
+    return true;
+}
+
+static flashcart_err_t pro_stage_mcu_path (const char *utf8, char *output) {
+    size_t length = strlen(utf8);
+    size_t written;
+    bool representable;
+    flashcart_err_t result = FLASHCART_ERR_ARGS;
+    if (!pro_encode_oem(utf8, length, output, ED64_PRO_PATH_MAX, &written, &representable)) {
+        goto invalid;
+    }
+    if (representable && written <= ED64_PRO_PATH_MAX) {
+        output[written] = '\0';
+        return FLASHCART_OK;
+    }
+
+    /* FatFs uses UTF-8 while the MCU consumes OEM437 paths. Resolve only
+     * unmappable components through their actual FatFs short-name aliases. */
+    char lookup[ED64_PRO_PATH_MAX + 1];
+    memcpy(lookup, utf8, length + 1);
+    size_t position = 0;
+    const char *component = utf8;
+    while (*component) {
+        if (*component == '/' || *component == '\\') {
+            if (position == ED64_PRO_PATH_MAX) {
+                goto invalid;
+            }
+            output[position++] = *component++;
+            continue;
+        }
+        size_t component_length = strcspn(component, "/\\");
+        if (!pro_encode_oem(
+                component, component_length, output + position, ED64_PRO_PATH_MAX - position, &written, &representable
+            )) {
+            goto invalid;
+        }
+        if (!representable) {
+            size_t prefix_length = component + component_length - utf8;
+            char separator = lookup[prefix_length];
+            lookup[prefix_length] = '\0';
+            FILINFO info = {0};
+            FRESULT status = f_stat(lookup, &info);
+            lookup[prefix_length] = separator;
+            if (status != FR_OK) {
+                pro_diagnostics.path_error = "Could not resolve a file path alias";
+                result = FLASHCART_ERR_LOAD;
+                goto failed;
+            }
+            size_t alias_length = strnlen(info.altname, sizeof(info.altname));
+            if (!alias_length || alias_length == sizeof(info.altname) ||
+                strcspn(info.altname, "/\\:*?\"<>|") != alias_length ||
+                !pro_encode_oem(
+                    info.altname,
+                    alias_length,
+                    output + position,
+                    ED64_PRO_PATH_MAX - position,
+                    &written,
+                    &representable
+                ) ||
+                !representable) {
+                goto invalid;
+            }
+        }
+        if (written > ED64_PRO_PATH_MAX - position) {
+            goto invalid;
+        }
+        position += written;
+        component += component_length;
+    }
+    output[position] = '\0';
+    return FLASHCART_OK;
+
+invalid:
+    pro_diagnostics.path_error = "File path cannot be represented by the cartridge filesystem";
+failed:
+    output[0] = '\0';
+    return result;
 }
 
 static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback_t *progress) {
+    pro_diagnostics.path_error = NULL;
     pro_diagnostics.launch_ready = false;
     pro_diagnostics.launch_extent = 0;
     pro_diagnostics.rom_path[0] = '\0';
@@ -669,18 +824,23 @@ static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback
     pro_diagnostics.brm_type = ED64_PRO_BRM_OFF;
     pro_diagnostics.brm_size = 0;
     pro_diagnostics.save_ready = false;
-    const char *mcu_path = pro_mcu_path(rom_path);
-    if (!mcu_path) {
+    const char *utf8_path = pro_fatfs_path(rom_path);
+    if (!utf8_path) {
         return FLASHCART_ERR_ARGS;
     }
-    if (pro_disk_status() != 0) {
+    if (pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_disk_status() != 0) {
         return FLASHCART_ERR_LOAD;
+    }
+    flashcart_err_t result = pro_stage_mcu_path(utf8_path, pro_diagnostics.rom_path);
+    if (result != FLASHCART_OK) {
+        return result;
     }
     FIL file;
-    if (f_open(&file, mcu_path, FA_READ) != FR_OK) {
+    if (f_open(&file, utf8_path, FA_READ) != FR_OK) {
+        pro_diagnostics.rom_path[0] = '\0';
         return FLASHCART_ERR_LOAD;
     }
-    flashcart_err_t result = FLASHCART_ERR_LOAD;
+    result = FLASHCART_ERR_LOAD;
     if (!file.obj.fs || file.obj.fs->wflag || f_size(&file) == 0 || f_size(&file) > pro_diagnostics.rom_capacity) {
         goto done;
     }
@@ -712,25 +872,27 @@ done:
         result = FLASHCART_ERR_LOAD;
     }
     if (result == FLASHCART_OK) {
-        memcpy(pro_diagnostics.rom_path, mcu_path, strlen(mcu_path) + 1);
         pro_diagnostics.launch_extent = f_size(&file);
         pro_diagnostics.launch_ready = true;
+    } else {
+        pro_diagnostics.rom_path[0] = '\0';
     }
     return result;
 }
 
 static flashcart_err_t pro_load_file (char *file_path, uint32_t rom_offset, uint32_t file_offset) {
-    const char *mcu_path = pro_mcu_path(file_path);
-    if (!mcu_path || (rom_offset & 511u) || (file_offset & 511u) || rom_offset > pro_diagnostics.rom_capacity) {
-        pro_diagnostics.launch_ready = false;
+    bool launch_ready = pro_diagnostics.launch_ready;
+    pro_diagnostics.launch_ready = false;
+    pro_diagnostics.path_error = NULL;
+    const char *utf8_path = pro_fatfs_path(file_path);
+    if (!utf8_path || (rom_offset & 511u) || (file_offset & 511u) || rom_offset > pro_diagnostics.rom_capacity) {
         return FLASHCART_ERR_ARGS;
     }
-    if (!pro_diagnostics.launch_ready || pro_disk_status() != 0) {
+    if (!launch_ready || pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_disk_status() != 0) {
         return FLASHCART_ERR_LOAD;
     }
-    pro_diagnostics.launch_ready = false;
     FIL file;
-    if (f_open(&file, mcu_path, FA_READ) != FR_OK) {
+    if (f_open(&file, utf8_path, FA_READ) != FR_OK) {
         return FLASHCART_ERR_LOAD;
     }
     flashcart_err_t result = FLASHCART_ERR_LOAD;
@@ -779,21 +941,26 @@ done:
 }
 
 static flashcart_err_t pro_load_save (char *save_path) {
-    const char *mcu_path = pro_mcu_path(save_path);
+    pro_diagnostics.path_error = NULL;
+    const char *utf8_path = pro_fatfs_path(save_path);
     pro_diagnostics.save_ready = false;
     pro_diagnostics.save_path[0] = '\0';
-    if (!mcu_path || pro_diagnostics.brm_type == ED64_PRO_BRM_OFF) {
+    if (!utf8_path || pro_diagnostics.brm_type == ED64_PRO_BRM_OFF) {
         return FLASHCART_ERR_ARGS;
     }
-    if (pro_disk_status() != 0) {
+    if (pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_disk_status() != 0) {
         return FLASHCART_ERR_LOAD;
     }
-    memcpy(pro_diagnostics.save_path, mcu_path, strlen(mcu_path) + 1);
+    flashcart_err_t result = pro_stage_mcu_path(utf8_path, pro_diagnostics.save_path);
+    if (result != FLASHCART_OK) {
+        return result;
+    }
     pro_diagnostics.save_ready = true;
     return FLASHCART_OK;
 }
 
 static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
+    pro_diagnostics.path_error = NULL;
     static const struct {
         uint32_t type, size;
     } saves[] = {
@@ -822,6 +989,11 @@ static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
 
 /** @brief Supply retained diagnostics for the errors this adapter returns. */
 static char *pro_get_error_message (flashcart_err_t error) {
+    if (!pro_diagnostics.storage_failed && pro_diagnostics.path_error &&
+        (error == FLASHCART_ERR_ARGS || error == FLASHCART_ERR_LOAD)) {
+        snprintf(pro_error_message, sizeof(pro_error_message), "EverDrive-64 Pro: %s.", pro_diagnostics.path_error);
+        return pro_error_message;
+    }
     if (error == FLASHCART_ERR_LOAD && !pro_diagnostics.storage_detail) {
         return NULL;
     }

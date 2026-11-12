@@ -1969,6 +1969,12 @@ static void test_adapter_unavailable_operations (void) {
 
 char cart_card_byteswap;
 
+FRESULT f_stat (const char *path, FILINFO *info) {
+    (void)path;
+    (void)info;
+    TEST_CHECK(false);
+    return FR_NO_FILE;
+}
 FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
     (void)file;
     (void)path;
