@@ -24,6 +24,9 @@ jobs:
       - name: Test ED64 Pro transport
         run: make -f tests/Makefile test-ed64-pro test-ed64-pro-sanitize
 
+      - name: Test menu paths
+        run: make -f tests/Makefile test-menu-path test-menu-path-sanitize
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:

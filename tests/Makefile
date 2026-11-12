@@ -27,6 +27,9 @@ ADAPTER_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_adapter_test_sanitize
 ADAPTER_DEPS := tests/ed64_pro_adapter_test.c $(PRO_DEPS) $(LIFECYCLE_DEPS)
 HOST_FLAGS := -std=gnu11 -Wall -Wextra -Werror -g -Itests/stubs -Isrc -isystem src/libs/acutest
 SANITIZE_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
+MENU_PATH_TEST := $(HOST_BUILD_DIR)/menu_path_test
+MENU_PATH_SANITIZE := $(HOST_BUILD_DIR)/menu_path_test_sanitize
+MENU_PATH_DEPS := tests/menu_path_test.c src/menu/path.c src/menu/path.h src/libs/acutest/acutest.h tests/Makefile
 
 .PHONY: test-ed64-pro test-ed64-pro-sanitize
 test-ed64-pro: $(PRO_TEST) $(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE) $(ADAPTER_TEST) $(PRO_WRITE_FAILURE_TEST)
@@ -76,3 +79,18 @@ $(ADAPTER_TEST): $(ADAPTER_DEPS)
 $(ADAPTER_SANITIZE): $(ADAPTER_DEPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro_adapter_test.c $(LDFLAGS) -o $@
+
+.PHONY: test-menu-path test-menu-path-sanitize
+test-menu-path: $(MENU_PATH_TEST)
+	$(MENU_PATH_TEST)
+
+test-menu-path-sanitize: $(MENU_PATH_SANITIZE)
+	$(MENU_PATH_SANITIZE)
+
+$(MENU_PATH_TEST): $(MENU_PATH_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 tests/menu_path_test.c $(LDFLAGS) -o $@
+
+$(MENU_PATH_SANITIZE): $(MENU_PATH_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/menu_path_test.c $(LDFLAGS) -o $@
