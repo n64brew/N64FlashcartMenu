@@ -33,6 +33,15 @@ typedef enum {
     ED64_PRO_PHASE_COUNT,
 } ed64_pro_phase_t;
 
+typedef enum {
+    ED64_PRO_STORAGE_COLD,
+    ED64_PRO_STORAGE_MCU_OWNED,
+    ED64_PRO_STORAGE_MOUNTING,
+    ED64_PRO_STORAGE_FATFS_OWNED,
+    ED64_PRO_STORAGE_RELEASING,
+    ED64_PRO_STORAGE_FAILED,
+} ed64_pro_storage_state_t;
+
 typedef struct {
     ed64_pro_state_t state;
     ed64_pro_phase_t phase;
@@ -51,6 +60,15 @@ typedef struct {
     flashcart_firmware_version_t firmware_version;
     uint32_t firmware_timestamp;
     uint32_t rom_capacity;
+    ed64_pro_storage_state_t storage_state;
+    bool storage_failed;
+    bool unsynced;
+    int volume_id;
+    const char *storage_detail;
+    const char *storage_operation;
+    uint32_t storage_lba;
+    uint32_t storage_count;
+    ed64_pro_ll_failure_t storage_failure;
 } ed64_pro_diagnostics_t;
 
 /**
@@ -65,6 +83,7 @@ const ed64_pro_diagnostics_t *ed64_pro_get_diagnostics (void);
 const char *ed64_pro_phase_name (ed64_pro_phase_t phase);
 char *ed64_pro_get_error_message (void);
 flashcart_t *ed64_pro_get_flashcart (void);
+bool ed64_pro_init_sdfs (const char *prefix, int max_files);
 
 /** @} */ /* ed64_pro */
 

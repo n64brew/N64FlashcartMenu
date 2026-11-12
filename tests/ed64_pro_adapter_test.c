@@ -25,6 +25,7 @@ static struct {
     unsigned mounts;
     unsigned unmounts;
     unsigned fs_inits;
+    const fat_disk_t *disk;
     char events[32];
     unsigned events_count;
 } mock;
@@ -151,6 +152,27 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_write (
     return sector_transfer(lba, count, true);
 }
 
+int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
+    TEST_CHECK(strcmp(prefix, "sd:/") == 0 && flags == 0);
+    TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_MOUNTING);
+    mock.mounts++;
+    mock.disk = disk;
+    uint8_t sector[512];
+    TEST_CHECK(disk->disk_initialize() == 0);
+    if (disk->disk_read(sector, 0, 1) != RES_OK) {
+        return -1;
+    }
+    TEST_CHECK(sector[0] == 0xA5 && sector[511] == 0xA5);
+    return mock.mount_result;
+}
+
+int fat_unmount (int volume_id) {
+    TEST_CHECK(volume_id == mock.mount_result);
+    mock.unmounts++;
+    mock.events[mock.events_count++] = 'U';
+    return mock.unmount_result;
+}
+
 static uint32_t fat_date (unsigned year, unsigned month, unsigned day) {
     return ((year - 1980) << 9) | (month << 5) | day;
 }
@@ -162,6 +184,15 @@ static void fixture (void) {
     mock.info[0] = 0x90555D4Eu;
     mock.info[1] = 0x10000000u;
     mock.io_error = ED64_PRO_LL_TIMEOUT;
+}
+
+static void mounted_fixture (void) {
+    fixture();
+    TEST_ASSERT(pro_init() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+    TEST_ASSERT(ed64_pro_init_sdfs("sd:/", 4));
+    mock.operations = 0;
+    mock.reads = 0;
+    mock.begin_calls = 0;
 }
 
 static void test_firmware_info (void) {
@@ -213,9 +244,140 @@ static void test_firmware_query_failure (void) {
     TEST_CHECK(pro_init() == FLASHCART_ERR_INT && mock.info_calls == 1);
 }
 
+static void test_mount (void) {
+    mounted_fixture();
+    TEST_CHECK(mock.mounts == 1 && mock.disk == &pro_disk);
+    TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_FATFS_OWNED);
+    TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4) && mock.mounts == 1);
+    TEST_CHECK(pro_disk.disk_status() == 0);
+}
+
+static void test_mount_failure (void) {
+    for (int volume = -1; volume <= 1; volume += 2) {
+        fixture();
+        TEST_ASSERT(pro_init() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+        mock.mount_result = volume;
+        TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4));
+        TEST_CHECK(mock.unmounts == (volume > 0 ? 1u : 0u));
+        TEST_CHECK(pro_diagnostics.storage_failed && pro_disk.disk_status() == STA_NOINIT);
+        TEST_CHECK(mock.fs_inits == 0);
+        TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4) && mock.mounts == 1);
+    }
+}
+
+static void test_mount_io_failure (void) {
+    fixture();
+    TEST_ASSERT(pro_init() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+    mock.fail_operation = 1;
+    TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4));
+    TEST_CHECK(pro_diagnostics.storage_failed);
+    TEST_CHECK(pro_diagnostics.storage_failure.code == ED64_PRO_LL_TIMEOUT);
+    TEST_CHECK(mock.fs_inits == 0);
+}
+
+static void test_sector_chunks (void) {
+    mounted_fixture();
+    uint8_t data[129 * 512];
+    TEST_CHECK(pro_disk.disk_read(data, 100, 129) == RES_OK);
+    TEST_CHECK(mock.operations == 3);
+    TEST_CHECK(mock.lbas[0] == 100 && mock.lbas[1] == 164 && mock.lbas[2] == 228);
+    TEST_CHECK(mock.counts[0] == 64 && mock.counts[1] == 64 && mock.counts[2] == 1);
+    TEST_CHECK(data[0] == 0xA5 && data[sizeof(data) - 1] == 0xA5);
+    TEST_CHECK(!pro_diagnostics.unsynced);
+    TEST_CHECK(pro_disk.disk_write(data, 200, 65) == RES_OK);
+    TEST_CHECK(mock.writes == 2 && pro_diagnostics.unsynced);
+    TEST_CHECK(pro_disk.disk_ioctl(CTRL_SYNC, NULL) == RES_OK && !pro_diagnostics.unsynced);
+    TEST_CHECK(pro_disk.disk_ioctl(GET_SECTOR_COUNT, NULL) == RES_PARERR);
+}
+
+static void test_sector_arguments (void) {
+    mounted_fixture();
+    uint8_t data[512];
+    TEST_CHECK(pro_disk.disk_read(NULL, 0, 1) == RES_PARERR);
+    TEST_CHECK(pro_disk.disk_read(data, -1, 1) == RES_PARERR);
+    TEST_CHECK(pro_disk.disk_read(data, 0, 0) == RES_PARERR);
+    TEST_CHECK(pro_disk.disk_read(data, UINT32_MAX, 2) == RES_PARERR);
+    TEST_CHECK(pro_disk.disk_read((void *)0x10000000u, 0, 1) == RES_PARERR);
+    TEST_CHECK(pro_disk.disk_write((void *)0x807FFF00u, 0, 1) == RES_PARERR);
+    TEST_CHECK(mock.begin_calls == 0);
+    TEST_CHECK(pro_disk.disk_read(data, UINT32_MAX, 1) == RES_OK);
+}
+
+static void test_storage_latch (void) {
+    mounted_fixture();
+    uint8_t data[65 * 512];
+    mock.fail_operation = 2;
+    mock.failure.code = ED64_PRO_LL_TIMEOUT;
+    mock.failure.status_valid = true;
+    mock.failure.status = 0x31;
+    mock.failure.nresp_valid = true;
+    mock.failure.nresp = 0xA3;
+    TEST_CHECK(pro_disk.disk_write(data, 123, 65) == RES_ERROR);
+    TEST_CHECK(pro_diagnostics.unsynced && pro_diagnostics.storage_failed);
+    TEST_CHECK(pro_diagnostics.storage_lba == 187 && pro_diagnostics.storage_count == 1);
+    TEST_CHECK(pro_disk.disk_status() == STA_NOINIT);
+    TEST_CHECK(pro_disk.disk_read(data, 0, 1) == RES_NOTRDY);
+    TEST_CHECK(pro_disk.disk_write(data, 0, 1) == RES_NOTRDY);
+    TEST_CHECK(pro_disk.disk_ioctl(CTRL_SYNC, NULL) == RES_NOTRDY);
+    TEST_CHECK(mock.operations == 2);
+    unsigned calls = mock.begin_calls;
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD);
+    TEST_CHECK(mock.begin_calls == calls && mock.unmounts == 0);
+    TEST_CHECK(strstr(ed64_pro_get_error_message(), "LBA 187") != NULL);
+    TEST_CHECK(strstr(ed64_pro_get_error_message(), "MCU status 0x31, NRESP 0xA3") != NULL);
+}
+
+static void test_unsupported_context (void) {
+    mounted_fixture();
+    uint8_t data[512];
+    mock.begin_error = ED64_PRO_LL_CONTEXT;
+    TEST_CHECK(pro_disk.disk_read(data, 0, 1) == RES_NOTRDY);
+    TEST_CHECK(mock.operations == 0 && !pro_diagnostics.storage_failed && pro_disk.disk_status() == 0);
+}
+
+static void test_release (void) {
+    mounted_fixture();
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
+    TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 1);
+    TEST_CHECK(mock.events[0] == 'U' && mock.events[1] == 'F');
+    TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_MCU_OWNED);
+    TEST_CHECK(pro_disk.disk_status() == STA_NOINIT);
+    TEST_CHECK(strstr(ed64_pro_get_error_message(), "storage released") != NULL);
+}
+
+static void test_release_refusals (void) {
+    mounted_fixture();
+    uint8_t data[512] = {0};
+    TEST_CHECK(pro_disk.disk_write(data, 2, 1) == RES_OK);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD);
+    TEST_CHECK(mock.unmounts == 0 && mock.fs_inits == 0);
+    TEST_CHECK(strstr(ed64_pro_get_error_message(), "unclosed write") != NULL);
+
+    mounted_fixture();
+    mock.unmount_result = -1;
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD);
+    TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 0);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD && mock.unmounts == 1);
+
+    mounted_fixture();
+    mock.init_error = ED64_PRO_LL_MCU_ERROR;
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_INT);
+    TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 1);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD && mock.fs_inits == 1);
+}
+
 TEST_LIST = {
     {"cached firmware identity and capacity", test_firmware_info},
     {"firmware date and minimum boundaries", test_firmware_boundaries},
     {"firmware query failure is latched", test_firmware_query_failure},
+    {"immediate mount invokes disk callbacks", test_mount},
+    {"mount and nonzero volume failures are terminal", test_mount_failure},
+    {"mount retains sector I/O failure", test_mount_io_failure},
+    {"sector chunking and sync", test_sector_chunks},
+    {"sector bounds reject without I/O", test_sector_arguments},
+    {"storage failure invalidates subsequent I/O", test_storage_latch},
+    {"unsupported context is nonfatal and performs no I/O", test_unsupported_context},
+    {"release unmounts before MCU FS INIT", test_release},
+    {"release failures refuse handoff", test_release_refusals},
     {NULL, NULL},
 };

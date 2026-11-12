@@ -1,6 +1,11 @@
 #include <inttypes.h>
 #include <libdragon.h>
 #include <stdio.h>
+#include <string.h>
+
+#ifdef ED64_PRO_TEST_STORAGE
+#include <fatfs/ff.h>
+#endif
 
 #include "flashcart/ed64_pro/ed64_pro.h"
 
@@ -8,6 +13,14 @@
 #error Build this ROM with tests/Makefile.n64
 #endif
 
+#if defined(ED64_PRO_TEST_INFO) && defined(ED64_PRO_TEST_STORAGE)
+#error Select one qualification mode
+#endif
+#if defined(ED64_PRO_TEST_RAW_WRITE) && !defined(ED64_PRO_TEST_STORAGE)
+#error Raw-write qualification requires storage mode
+#endif
+
+#if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO)
 enum {
     STRESS_OPERATIONS = 100000,
     STRESS_TIMER_US = 50,
@@ -68,6 +81,8 @@ static void stress_interrupt (int overflow) {
         irq_dma_overlap++;
     }
 }
+
+#endif
 
 /**
  * @brief Label the console video standard, falling back for unknown values.
@@ -138,13 +153,14 @@ static void terminal (void) __attribute__((noreturn));
  * @brief Keep qualification results visible without activating storage, USB, or retries.
  */
 static void terminal (void) {
-    printf("\nNo storage backend, filesystem, or USB is active.\n");
+    printf("\nHalted; no further MCU commands or USB polling.\n");
     printf("After any failure: power cycle. Do not retry.\n");
     for (;;) {
         console_render();
     }
 }
 
+#if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO)
 /**
  * @brief Exercise 100,000 status/EDID operations under timer-driven cache-line contention.
  *
@@ -238,8 +254,235 @@ static void run_stress (void) {
     terminal();
 }
 
+#endif
+
+#ifdef ED64_PRO_TEST_STORAGE
+#ifndef ED64_PRO_TEST_FIXTURE_PATH
+#define ED64_PRO_TEST_FIXTURE_PATH "/ed64pro-test/read.bin"
+#endif
+#define STORAGE_FIXTURE_SIZE (1024u * 1024u)
+#define SCRATCH_PATH "/ed64pro-test/scratch.bin"
+#define SCRATCH_SIZE (64u * 1024u)
+#define SCRATCH_SECTORS (SCRATCH_SIZE / 512u)
+#define SCRATCH_PATTERN_A 0xA5u
+
+static uint8_t storage_buffer[4096] __attribute__((aligned(16)));
+
+static uint32_t fixture_crc32 (uint32_t crc, const uint8_t *data, size_t length) {
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (unsigned bit = 0; bit < 8; bit++) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+    }
+    return crc;
+}
+
+static bool read_fixture (void) {
+    FIL file;
+    if (f_open(&file, ED64_PRO_TEST_FIXTURE_PATH, FA_READ) != FR_OK) {
+        printf("H2.1 FAILED: cannot open read.bin\n");
+        return false;
+    }
+    bool valid = f_size(&file) == STORAGE_FIXTURE_SIZE;
+    uint32_t crc = UINT32_MAX;
+    uint32_t bytes = 0;
+    uint32_t read_ticks = 0;
+    while (valid && bytes < STORAGE_FIXTURE_SIZE) {
+        UINT count = 0;
+        uint32_t start = TICKS_READ();
+        FRESULT result = f_read(&file, storage_buffer, sizeof(storage_buffer), &count);
+        read_ticks += TICKS_READ() - start;
+        valid = result == FR_OK && count == sizeof(storage_buffer);
+        if (valid) {
+            crc = fixture_crc32(crc, storage_buffer, count);
+            bytes += count;
+        }
+    }
+    if (!valid) {
+        printf("H2.1 FAILED: size/read at %" PRIu32 " bytes\n", bytes);
+        return false;
+    }
+    if (f_close(&file) != FR_OK) {
+        printf("H2.1 FAILED: close\n");
+        return false;
+    }
+    crc ^= UINT32_MAX;
+    printf("H2.1: %" PRIu32 " bytes, CRC32 %08" PRIX32 "\n", bytes, crc);
+    printf(
+        "Read I/O: %" PRIu32 " ms, %" PRIu64 " KiB/s\n",
+        TICKS_TO_MS(read_ticks),
+        read_ticks ? (uint64_t)bytes * TICKS_PER_SECOND / read_ticks / 1024 : 0
+    );
+#ifdef ED64_PRO_TEST_FIXTURE_CRC32
+    if (crc != (uint32_t)ED64_PRO_TEST_FIXTURE_CRC32) {
+        printf("H2.1 FAILED: expected %08" PRIX32 "\n", (uint32_t)ED64_PRO_TEST_FIXTURE_CRC32);
+        return false;
+    }
+    printf("H2.1 PASS for this fixture and launch.\n");
+    return true;
+#else
+    printf("UNQUALIFIED: build needs ED64_PRO_TEST_FIXTURE_CRC32.\n");
+    return false;
+#endif
+}
+
+#ifdef ED64_PRO_TEST_RAW_WRITE
+/* Walk only an existing, exact-size read-only file; never allocate or alter FAT metadata. */
+static bool map_scratch (uint32_t sectors[SCRATCH_SECTORS]) {
+    FIL file;
+    if (f_open(&file, SCRATCH_PATH, FA_READ) != FR_OK) {
+        printf("H2.2 FAILED: cannot open scratch.bin\n");
+        return false;
+    }
+    FATFS *fs = file.obj.fs;
+    bool valid = f_size(&file) == SCRATCH_SIZE && fs && !fs->wflag && fs->csize && fs->database <= UINT32_MAX;
+    for (uint32_t index = 0; valid && index < SCRATCH_SECTORS;) {
+        if (f_lseek(&file, index * 512u + 256u) != FR_OK) {
+            valid = false;
+            break;
+        }
+        uint32_t cluster = file.clust;
+        if (cluster < 2 || cluster >= fs->n_fatent) {
+            valid = false;
+            break;
+        }
+        uint64_t base = (uint64_t)fs->database + (uint64_t)fs->csize * (cluster - 2u);
+        uint32_t in_cluster = index % fs->csize;
+        for (; valid && in_cluster < fs->csize && index < SCRATCH_SECTORS; in_cluster++, index++) {
+            uint64_t lba = base + in_cluster;
+            if (lba < fs->database || lba > UINT32_MAX) {
+                valid = false;
+                break;
+            }
+            for (uint32_t previous = 0; previous < index; previous++) {
+                if (sectors[previous] == lba) {
+                    valid = false;
+                    break;
+                }
+            }
+            sectors[index] = (uint32_t)lba;
+        }
+    }
+    if (!valid) {
+        printf("H2.2 FAILED: scratch size/cluster/LBA map\n");
+        return false;
+    }
+    if (f_close(&file) != FR_OK) {
+        printf("H2.2 FAILED: scratch close\n");
+        return false;
+    }
+    return true;
+}
+
+static bool scratch_sector_io (uint32_t lba, bool write) {
+    ed64_pro_ll_transaction_t transaction;
+    uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
+    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+    if (error == ED64_PRO_LL_OK) {
+        error = write ? ed64_pro_ll_sd_write(&transaction, storage_buffer, lba, 1, deadline)
+                      : ed64_pro_ll_sd_read(&transaction, storage_buffer, lba, 1, deadline);
+        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
+        if (error == ED64_PRO_LL_OK) {
+            error = end_error;
+        }
+    }
+    if (error != ED64_PRO_LL_OK) {
+        printf("H2.2 FAILED: %s LBA %" PRIu32 ", LL %u\n", write ? "write" : "read", lba, (unsigned)error);
+        return false;
+    }
+    return true;
+}
+
+static uint8_t scratch_pattern_b (uint32_t offset) {
+    return (uint8_t)(offset * 29u + 0x3Cu);
+}
+
+static bool write_scratch (void) {
+    uint32_t sectors[SCRATCH_SECTORS];
+    if (!map_scratch(sectors)) {
+        return false;
+    }
+    /* Verify every mapped sector is A before sending any WRE command. */
+    for (uint32_t sector = 0; sector < SCRATCH_SECTORS; sector++) {
+        if (!scratch_sector_io(sectors[sector], false)) {
+            return false;
+        }
+        for (uint32_t byte = 0; byte < 512; byte++) {
+            if (storage_buffer[byte] != SCRATCH_PATTERN_A) {
+                printf("H2.2 REFUSED: scratch is not pattern A (A5).\n");
+                return false;
+            }
+        }
+    }
+    printf("H2.2: writing B to even scratch sectors only...\n");
+    console_render();
+    for (uint32_t sector = 0; sector < SCRATCH_SECTORS; sector += 2) {
+        for (uint32_t byte = 0; byte < 512; byte++) {
+            storage_buffer[byte] = scratch_pattern_b(sector * 512u + byte);
+        }
+        /* An error after WRE can be an ambiguous write. Do not retry or release. */
+        if (!scratch_sector_io(sectors[sector], true)) {
+            return false;
+        }
+    }
+    for (uint32_t sector = 0; sector < SCRATCH_SECTORS; sector++) {
+        if (!scratch_sector_io(sectors[sector], false)) {
+            return false;
+        }
+        for (uint32_t byte = 0; byte < 512; byte++) {
+            uint8_t expected = (sector & 1u) ? SCRATCH_PATTERN_A : scratch_pattern_b(sector * 512u + byte);
+            if (storage_buffer[byte] != expected) {
+                printf("H2.2 FAILED: verify at %" PRIu32 "\n", sector * 512u + byte);
+                return false;
+            }
+        }
+    }
+    printf("H2.2 read-back matches; host verification still required.\n");
+    return true;
+}
+#endif
+
+static void run_storage (void) {
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    flashcart_err_t error = adapter->init();
+    print_identity();
+    print_init_metrics();
+    if (error != FLASHCART_ERR_FUNCTION_NOT_SUPPORTED && error != FLASHCART_OK) {
+        printf("Startup failed: %s\n", ed64_pro_get_error_message());
+        terminal();
+    }
+    flashcart_firmware_version_t firmware = adapter->get_firmware_version();
+    printf("Firmware: %u.%u.%" PRIu32 "\n", firmware.major, firmware.minor, firmware.revision);
+    if (!ed64_pro_init_sdfs("sd:/", 4)) {
+        printf("Mount failed: %s\n", ed64_pro_get_error_message());
+        terminal();
+    }
+    printf("Mounted; host tools must remain idle.\n");
+    console_render();
+    if (!read_fixture()) {
+        terminal();
+    }
+#ifdef ED64_PRO_TEST_RAW_WRITE
+    if (!write_scratch()) {
+        terminal();
+    }
+#else
+    printf("H2.2 not run: ED64_PRO_TEST_RAW_WRITE is disabled.\n");
+#endif
+    error = adapter->deinit();
+    if (error != FLASHCART_ERR_FUNCTION_NOT_SUPPORTED) {
+        printf("Release FAILED: %s\n", ed64_pro_get_error_message());
+        terminal();
+    }
+    printf("RELEASED: %s\n", ed64_pro_get_error_message());
+    printf("Power off console before host verification.\n");
+    terminal();
+}
+#endif
+
 /**
- * @brief Run Pro identification, MCU handoff, and read-only stress without mounting storage.
+ * @brief Run the selected Pro qualification without starting USB polling or game services.
  *
  * Initialize the clock before deadlines, bypass iQue, and stop permanently on
  * startup failure rather than retrying or selecting another cartridge backend.
@@ -252,6 +495,21 @@ int main (void) {
         printf("iQue: Pro probe intentionally bypassed.\n");
         terminal();
     }
+#ifdef ED64_PRO_TEST_INFO
+    screen_init();
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    flashcart_err_t result = adapter->init();
+    print_identity();
+    print_init_metrics();
+    flashcart_firmware_version_t firmware = adapter->get_firmware_version();
+    printf("\nH1: %s\n", adapter->get_name());
+    printf("Firmware: %u.%u.%" PRIu32 " (minimum 26.1014)\n", firmware.major, firmware.minor, firmware.revision);
+    printf("Init result: %u\n%s\n", (unsigned)result, ed64_pro_get_error_message());
+    terminal();
+#elif defined(ED64_PRO_TEST_STORAGE)
+    screen_init();
+    run_storage();
+#else
     ed64_pro_ll_error_t error = ed64_pro_init_transport();
     screen_init();
     print_identity();
@@ -268,4 +526,5 @@ int main (void) {
     printf("\nStarting 100,000 status/EDID operations...\n");
     console_render();
     run_stress();
+#endif
 }

@@ -25,6 +25,9 @@ static struct {
     uint8_t status;
     bool nresp_valid;
     uint8_t nresp;
+#ifdef ED64_PRO_TEST_FAIL_WRITE_N
+    unsigned raw_writes;
+#endif
     ed64_pro_ll_metrics_t metrics;
     uint32_t pi_started;
     bool pi_active;
@@ -869,4 +872,88 @@ static inline ed64_pro_ll_error_t pro_fifo_write_ack (
         offset += block;
     }
     return ED64_PRO_LL_OK;
+}
+
+static ed64_pro_ll_error_t
+pro_sd_xfer (ed64_pro_ll_transaction_t *transaction, uint32_t lba, uint32_t count, bool write, uint32_t deadline) {
+    uint8_t payload[17] = {0};
+    pro_put_u32(&payload[write ? 4 : 0], lba);
+    pro_put_u32(&payload[8], count * 512);
+    payload[12] = write ? 0x11 : 0x19;
+    payload[13] = write ? 0x19 : 0x11;
+    return pro_send_frame(transaction, PRO_CMD_EPO, 0x10, payload, sizeof(payload), deadline);
+}
+
+static ed64_pro_ll_error_t pro_sd_transfer (
+    ed64_pro_ll_transaction_t *transaction,
+    void *buffer,
+    uint32_t lba,
+    uint32_t count,
+    bool write,
+    uint32_t deadline
+) {
+    if (!buffer || !count || count > 64 || count - 1 > UINT32_MAX - lba) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_IO_TIMEOUT_MS);
+    pro_ll.status_valid = false;
+    pro_ll.nresp_valid = false;
+    error = pro_assert_idle(transaction, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    if (write) {
+        const uint8_t key[] = {0xDE, 0xAD, 0xBE, 0xEF};
+        error = pro_send_frame(transaction, PRO_CMD_EPO, 0x11, key, sizeof(key), deadline);
+        if (error != ED64_PRO_LL_OK) {
+            return error;
+        }
+        error = pro_assert_idle(transaction, deadline);
+        if (error != ED64_PRO_LL_OK) {
+            return error;
+        }
+    }
+    error = pro_sd_xfer(transaction, lba, count, write, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+#ifdef ED64_PRO_TEST_FAIL_WRITE_N
+    bool fail_write = write && ++pro_ll.raw_writes == ED64_PRO_TEST_FAIL_WRITE_N;
+#endif
+    bool fail_after_block = false;
+#ifdef ED64_PRO_TEST_FAIL_WRITE_N
+    fail_after_block = fail_write;
+#endif
+    error = write ? pro_fifo_write_ack(transaction, buffer, count * 512, fail_after_block, deadline)
+                  : pro_fifo_read_ack(transaction, buffer, count * 512, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    ed64_pro_status_t status;
+    return ed64_pro_ll_check_status(transaction, &status, deadline);
+}
+
+ed64_pro_ll_error_t ed64_pro_ll_sd_read (
+    ed64_pro_ll_transaction_t *transaction,
+    void *output,
+    uint32_t lba,
+    uint32_t count,
+    uint32_t deadline
+) {
+    return pro_sd_transfer(transaction, output, lba, count, false, deadline);
+}
+
+ed64_pro_ll_error_t ed64_pro_ll_sd_write (
+    ed64_pro_ll_transaction_t *transaction,
+    const void *input,
+    uint32_t lba,
+    uint32_t count,
+    uint32_t deadline
+) {
+    /* Once WRE has been sent, any failure leaves the write ambiguous. Never retry. */
+    return pro_sd_transfer(transaction, (void *)input, lba, count, true, deadline);
 }

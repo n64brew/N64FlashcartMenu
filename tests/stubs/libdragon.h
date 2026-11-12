@@ -22,6 +22,19 @@ typedef enum {
 #define TICKS_READ() mock_ticks_read()
 #define MEMORY_BARRIER() mock_memory_barrier()
 
+#define PhysicalAddr(addr) ((uintptr_t)(addr) > UINT32_MAX ? 0u : ((uintptr_t)(addr) & 0x1FFFFFFFu))
+
+typedef struct {
+    int (*disk_initialize)(void);
+    int (*disk_status)(void);
+    int (*disk_read)(uint8_t *buffer, int64_t sector, int count);
+    int (*disk_write)(const uint8_t *buffer, int64_t sector, int count);
+    int (*disk_ioctl)(uint8_t command, void *buffer);
+} fat_disk_t;
+
+int fat_mount (const char *prefix, const fat_disk_t *disk, int flags);
+int fat_unmount (int volume_id);
+
 #define PI_STATUS_DMA_BUSY 1u
 #define PI_STATUS_IO_BUSY 2u
 #define PI_STATUS_ERROR 4u

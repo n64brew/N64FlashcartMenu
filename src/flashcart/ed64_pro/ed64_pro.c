@@ -10,6 +10,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include <fatfs/ff.h>
+
+#include <fatfs/diskio.h>
 #include <libdragon.h>
 
 #include "ed64_pro.h"
@@ -225,7 +228,44 @@ static const char *pro_error_name (ed64_pro_ll_error_t error) {
 char *ed64_pro_get_error_message (void) {
     ed64_pro_ll_error_t error = pro_diagnostics.failure.code != ED64_PRO_LL_OK ? pro_diagnostics.failure.code
                                                                            : pro_diagnostics.probe.error;
-    if (pro_diagnostics.info_queried && pro_diagnostics.info_result == FLASHCART_ERR_OUTDATED) {
+    if (pro_diagnostics.storage_detail) {
+        if (pro_diagnostics.storage_operation) {
+            char mcu_detail[48] = "";
+            if (pro_diagnostics.storage_failure.status_valid) {
+                if (pro_diagnostics.storage_failure.nresp_valid) {
+                    snprintf(
+                        mcu_detail,
+                        sizeof(mcu_detail),
+                        " MCU status 0x%02X, NRESP 0x%02X.",
+                        (unsigned)pro_diagnostics.storage_failure.status,
+                        (unsigned)pro_diagnostics.storage_failure.nresp
+                    );
+                } else {
+                    snprintf(
+                        mcu_detail,
+                        sizeof(mcu_detail),
+                        " MCU status 0x%02X.",
+                        (unsigned)pro_diagnostics.storage_failure.status
+                    );
+                }
+            }
+            snprintf(
+                pro_error_message,
+                sizeof(pro_error_message),
+                "EverDrive-64 Pro: %s.\n%s: LBA %" PRIu32 ", sectors %" PRIu32 ".\n%s.%s Power-cycle console and USB.",
+                pro_diagnostics.storage_detail,
+                pro_diagnostics.storage_operation,
+                pro_diagnostics.storage_lba,
+                pro_diagnostics.storage_count,
+                pro_error_name(pro_diagnostics.storage_failure.code),
+                mcu_detail
+            );
+        } else {
+            snprintf(
+                pro_error_message, sizeof(pro_error_message), "EverDrive-64 Pro: %s.", pro_diagnostics.storage_detail
+            );
+        }
+    } else if (pro_diagnostics.info_queried && pro_diagnostics.info_result == FLASHCART_ERR_OUTDATED) {
         snprintf(pro_error_message, sizeof(pro_error_message), "EverDrive-64 Pro requires firmware 26.1014 or newer.");
     } else if (
         pro_diagnostics.info_queried && pro_diagnostics.info_result == FLASHCART_ERR_INT &&
@@ -305,7 +345,7 @@ static flashcart_err_t pro_init (void) {
     if (!pro_diagnostics.info_queried) {
         const uint32_t ids[] = {ED64_PRO_INFS_TS_FW, ED64_PRO_INFS_MAX_ROM_SIZE};
         uint32_t values[2];
-        uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_SD_TIMEOUT_MS);
+        uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
         ed64_pro_ll_transaction_t transaction;
         pro_set_phase(ED64_PRO_PHASE_FIRMWARE_INFO);
         ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
@@ -330,6 +370,10 @@ static flashcart_err_t pro_init (void) {
         flashcart_firmware_version_t version = pro_diagnostics.firmware_version;
         pro_diagnostics.info_result =
             version.major < 26 || (version.major == 26 && version.minor < 1014) ? FLASHCART_ERR_OUTDATED : FLASHCART_OK;
+        if (pro_diagnostics.info_result == FLASHCART_OK) {
+            pro_diagnostics.storage_state = ED64_PRO_STORAGE_MCU_OWNED;
+            pro_diagnostics.volume_id = -1;
+        }
         pro_set_phase(ED64_PRO_PHASE_READY);
     }
     return pro_diagnostics.info_result == FLASHCART_OK ? FLASHCART_ERR_FUNCTION_NOT_SUPPORTED
@@ -349,6 +393,167 @@ static bool pro_has_feature (flashcart_features_t feature) {
 /** @brief Return cached information without MCU traffic. */
 static flashcart_firmware_version_t pro_get_firmware_version (void) {
     return pro_diagnostics.firmware_version;
+}
+
+static int pro_disk_status (void) {
+    bool owned = pro_diagnostics.storage_state == ED64_PRO_STORAGE_MOUNTING ||
+                 pro_diagnostics.storage_state == ED64_PRO_STORAGE_FATFS_OWNED;
+    return owned && pro_diagnostics.state == ED64_PRO_READY && !pro_diagnostics.storage_failed ? 0 : STA_NOINIT;
+}
+
+static void
+pro_storage_fail (const char *detail, const char *operation, uint32_t lba, uint32_t count, ed64_pro_ll_error_t error) {
+    if (pro_diagnostics.storage_failed) {
+        return;
+    }
+    pro_diagnostics.storage_failed = true;
+    pro_diagnostics.storage_state = ED64_PRO_STORAGE_FAILED;
+    pro_diagnostics.storage_detail = detail;
+    pro_diagnostics.storage_operation = operation;
+    pro_diagnostics.storage_lba = lba;
+    pro_diagnostics.storage_count = count;
+    pro_diagnostics.storage_failure = *ed64_pro_ll_get_failure();
+    pro_diagnostics.storage_failure.code = error;
+}
+
+static bool pro_disk_arguments (const void *buffer, int64_t sector, int count) {
+    if (!buffer || sector < 0 || count <= 0 || (uint64_t)sector + (unsigned)count > UINT64_C(0x100000000)) {
+        return false;
+    }
+    uintptr_t physical = PhysicalAddr(buffer);
+    uint64_t bytes = (uint64_t)(unsigned)count * 512;
+    return physical < 0x00800000u && bytes <= 0x00800000u - physical;
+}
+
+static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool write) {
+    if (!pro_disk_arguments(buffer, sector, count)) {
+        return RES_PARERR;
+    }
+    if (pro_disk_status() != 0) {
+        return RES_NOTRDY;
+    }
+    uint8_t *cursor = buffer;
+    while (count > 0) {
+        uint32_t chunk = count > 64 ? 64 : count;
+        uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
+        ed64_pro_ll_transaction_t transaction;
+        ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+        if (error == ED64_PRO_LL_OK) {
+            error = write ? ed64_pro_ll_sd_write(&transaction, cursor, sector, chunk, deadline)
+                          : ed64_pro_ll_sd_read(&transaction, cursor, sector, chunk, deadline);
+            ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
+            if (error == ED64_PRO_LL_OK) {
+                error = end_error;
+            }
+        }
+        if (error == ED64_PRO_LL_CONTEXT) {
+            return RES_NOTRDY;
+        }
+        if (error == ED64_PRO_LL_ARGUMENT) {
+            return RES_PARERR;
+        }
+        if (error != ED64_PRO_LL_OK) {
+            /* Once WRE is sent, a failed write is ambiguous. Never retry it. */
+            pro_storage_fail("SD I/O failed", write ? "Write" : "Read", sector, chunk, error);
+            return RES_ERROR;
+        }
+        if (write) {
+            pro_diagnostics.unsynced = true;
+        }
+        cursor += chunk * 512;
+        sector += chunk;
+        count -= chunk;
+    }
+    return RES_OK;
+}
+
+static int pro_disk_read (uint8_t *buffer, int64_t sector, int count) {
+    return pro_disk_transfer(buffer, sector, count, false);
+}
+
+static int pro_disk_write (const uint8_t *buffer, int64_t sector, int count) {
+    return pro_disk_transfer((void *)buffer, sector, count, true);
+}
+
+static int pro_disk_ioctl (uint8_t command, void *buffer) {
+    (void)buffer;
+    if (command != CTRL_SYNC) {
+        return RES_PARERR;
+    }
+    if (pro_disk_status() != 0) {
+        return RES_NOTRDY;
+    }
+    /* Every raw write has already completed its MCU STATUS exchange. */
+    pro_diagnostics.unsynced = false;
+    return RES_OK;
+}
+
+static const fat_disk_t pro_disk = {
+    .disk_initialize = pro_disk_status,
+    .disk_status = pro_disk_status,
+    .disk_read = pro_disk_read,
+    .disk_write = pro_disk_write,
+    .disk_ioctl = pro_disk_ioctl,
+};
+
+bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
+    (void)max_files;
+    if (!prefix || pro_diagnostics.storage_state != ED64_PRO_STORAGE_MCU_OWNED ||
+        pro_diagnostics.state != ED64_PRO_READY || pro_diagnostics.storage_failed) {
+        return false;
+    }
+    pro_diagnostics.storage_state = ED64_PRO_STORAGE_MOUNTING;
+    int volume_id = fat_mount(prefix, &pro_disk, 0);
+    if (volume_id != 0 || pro_diagnostics.storage_failed) {
+        if (volume_id >= 0) {
+            fat_unmount(volume_id);
+        }
+        pro_storage_fail(volume_id > 0 ? "SD must use FatFs volume 0" : "SD mount failed", NULL, 0, 0, ED64_PRO_LL_OK);
+        return false;
+    }
+    pro_diagnostics.volume_id = volume_id;
+    pro_diagnostics.storage_state = ED64_PRO_STORAGE_FATFS_OWNED;
+    return true;
+}
+
+static flashcart_err_t pro_release_storage (void) {
+    if (pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_diagnostics.storage_failed ||
+        pro_diagnostics.unsynced) {
+        pro_storage_fail("unclosed write or unavailable storage", NULL, 0, 0, ED64_PRO_LL_OK);
+        return FLASHCART_ERR_SD_CARD;
+    }
+    if (fat_unmount(pro_diagnostics.volume_id) != 0) {
+        pro_storage_fail("unmount failed", NULL, 0, 0, ED64_PRO_LL_OK);
+        return FLASHCART_ERR_SD_CARD;
+    }
+    pro_diagnostics.volume_id = -1;
+    pro_diagnostics.storage_state = ED64_PRO_STORAGE_RELEASING;
+    uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
+    ed64_pro_ll_transaction_t transaction;
+    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+    if (error == ED64_PRO_LL_OK) {
+        error = ed64_pro_ll_init_sd(&transaction, &pro_diagnostics.status, deadline);
+        pro_diagnostics.status_valid = error == ED64_PRO_LL_OK || error == ED64_PRO_LL_MCU_ERROR;
+        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
+        if (error == ED64_PRO_LL_OK) {
+            error = end_error;
+        }
+    }
+    if (error != ED64_PRO_LL_OK) {
+        pro_storage_fail("MCU filesystem reinitialization failed", "FS INIT", 0, 0, error);
+        return FLASHCART_ERR_INT;
+    }
+    pro_diagnostics.storage_state = ED64_PRO_STORAGE_MCU_OWNED;
+    return FLASHCART_OK;
+}
+
+static flashcart_err_t pro_deinit (void) {
+    flashcart_err_t error = pro_release_storage();
+    if (error != FLASHCART_OK) {
+        return error;
+    }
+    pro_diagnostics.storage_detail = "Game launch not implemented; storage released. Power-cycle console and USB";
+    return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
 }
 
 static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback_t *progress) {
@@ -377,7 +582,7 @@ static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
 /** @brief Supply retained startup details for the errors this adapter returns. */
 static char *pro_get_error_message (flashcart_err_t error) {
     if (error != FLASHCART_ERR_INT && error != FLASHCART_ERR_FUNCTION_NOT_SUPPORTED &&
-        error != FLASHCART_ERR_OUTDATED) {
+        error != FLASHCART_ERR_OUTDATED && error != FLASHCART_ERR_SD_CARD) {
         return NULL;
     }
     return ed64_pro_get_error_message();
@@ -386,7 +591,7 @@ static char *pro_get_error_message (flashcart_err_t error) {
 /** @brief Pro callbacks retain the shared flashcart interface while storage is unavailable. */
 static flashcart_t flashcart_ed64_pro = {
     .init = pro_init,
-    .deinit = NULL,
+    .deinit = pro_deinit,
     .has_feature = pro_has_feature,
     .get_firmware_version = pro_get_firmware_version,
     .get_name = pro_get_name,

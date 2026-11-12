@@ -44,6 +44,7 @@ enum {
     ED64_PRO_STATUS_TIMEOUT_MS = 1000,
     ED64_PRO_STOP_TIMEOUT_MS = 5000,
     ED64_PRO_SD_TIMEOUT_MS = 5000,
+    ED64_PRO_IO_TIMEOUT_MS = 5000,
     ED64_PRO_FRAME_MAX = 1536,
     ED64_PRO_ACK_BLOCK = 1024,
     ED64_PRO_INFS_TS_FW = 6,
@@ -151,6 +152,20 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     const uint32_t *ids,
     uint32_t *values,
     size_t count,
+    uint32_t deadline
+);
+ed64_pro_ll_error_t ed64_pro_ll_sd_read (
+    ed64_pro_ll_transaction_t *transaction,
+    void *output,
+    uint32_t lba,
+    uint32_t count,
+    uint32_t deadline
+);
+ed64_pro_ll_error_t ed64_pro_ll_sd_write (
+    ed64_pro_ll_transaction_t *transaction,
+    const void *input,
+    uint32_t lba,
+    uint32_t count,
     uint32_t deadline
 );
 

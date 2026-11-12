@@ -1827,7 +1827,7 @@ static void test_adapter_initialization (void) {
         TEST_CHECK(
             strstr(adapter->get_error_message(expected), failed ? "startup failed" : "not implemented") != NULL
         );
-        TEST_CHECK(adapter->get_error_message(FLASHCART_ERR_SD_CARD) == NULL);
+        TEST_CHECK(adapter->get_error_message(FLASHCART_ERR_SD_CARD) != NULL);
         TEST_CHECK(adapter->get_error_message(FLASHCART_OK) == NULL);
         TEST_CHECK(adapter->init() == expected && mock.enqueues == enqueues);
     }
@@ -1855,11 +1855,25 @@ static void test_adapter_unavailable_operations (void) {
         TEST_CHECK(adapter->load_file("sd:/test.bin", 0, 0) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
         TEST_CHECK(adapter->load_save("sd:/test.sra") == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
         TEST_CHECK(adapter->set_save_type(FLASHCART_SAVE_TYPE_SRAM_256KBIT) == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED);
-        TEST_CHECK(adapter->deinit == NULL && adapter->load_64dd_ipl == NULL && adapter->load_64dd_disk == NULL);
+        TEST_CHECK(adapter->deinit != NULL && adapter->load_64dd_ipl == NULL && adapter->load_64dd_disk == NULL);
         TEST_CHECK(adapter->load_64dd_disks == NULL && adapter->get_button_state == NULL);
         TEST_CHECK(adapter->get_voltage_temperature == NULL && adapter->set_save_writeback == NULL);
         TEST_CHECK(adapter->set_next_boot_mode == NULL && mock.enqueues == enqueues);
     }
+}
+
+int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
+    (void)prefix;
+    (void)disk;
+    (void)flags;
+    TEST_CHECK(false);
+    return -1;
+}
+
+int fat_unmount (int volume_id) {
+    (void)volume_id;
+    TEST_CHECK(false);
+    return -1;
 }
 
 static void test_frame_limits (void) {
@@ -2015,13 +2029,168 @@ static void test_ack_helpers (void) {
     }
 }
 
+static void test_sd_read_write (void) {
+    const uint32_t counts[] = {1, 2, 3, 8, 64};
+    uint8_t buffer[64 * 512];
+    for (unsigned write = 0; write < 2; write++) {
+        for (size_t i = 0; i < sizeof(counts) / sizeof(counts[0]); i++) {
+            power_on();
+            identify();
+            ed64_pro_ll_transaction_t transaction;
+            begin(&transaction);
+            uint32_t count = counts[i];
+            size_t length = count * 512;
+            memset(buffer, 0xA5, sizeof(buffer));
+            ed64_pro_ll_error_t error = write ? ed64_pro_ll_sd_write(&transaction, buffer, 3, count, deadline_ms(5000))
+                                              : ed64_pro_ll_sd_read(&transaction, buffer, 3, count, deadline_ms(5000));
+            TEST_CHECK(error == ED64_PRO_LL_OK);
+            TEST_CHECK(memcmp(buffer, mock.sectors + 3 * 512, length) == 0);
+            TEST_CHECK(mock.sectors[3 * 512 - 1] == (uint8_t)((3 * 512 - 1) * 37 + 2));
+            TEST_CHECK(mock.sectors[(3 + count) * 512] == (uint8_t)((3 + count) * 512 * 37 + 3 + count));
+            TEST_CHECK(mock.status_requests == 1 && mock.wre_commands == write);
+            TEST_CHECK((write ? mock.write_acks : mock.read_acks) == (length + 1023) / 1024);
+            size_t frame_offset = write ? 9 : 0;
+            const uint8_t read_frame[] = {0x2B, 0xD4, 0x81, 0x7E, 0x10, 0, 0, 0, 3, 0, 0, 0, 0};
+            const uint8_t write_frame[] = {0x2B, 0xD4, 0x81, 0x7E, 0x10, 0, 0, 0, 0, 0, 0, 0, 3};
+            TEST_CHECK(memcmp(mock.tx_bytes + frame_offset, write ? write_frame : read_frame, 13) == 0);
+            TEST_CHECK(mock.tx_bytes[frame_offset + 13] == (uint8_t)(length >> 24));
+            TEST_CHECK(mock.tx_bytes[frame_offset + 14] == (uint8_t)(length >> 16));
+            TEST_CHECK(mock.tx_bytes[frame_offset + 15] == (uint8_t)(length >> 8));
+            TEST_CHECK(mock.tx_bytes[frame_offset + 16] == (uint8_t)length);
+            TEST_CHECK(mock.tx_bytes[frame_offset + 17] == (write ? 0x11 : 0x19));
+            TEST_CHECK(mock.tx_bytes[frame_offset + 18] == (write ? 0x19 : 0x11));
+            TEST_CHECK(
+                mock.tx_bytes[frame_offset + 19] == 0 && mock.tx_bytes[frame_offset + 20] == 0 &&
+                mock.tx_bytes[frame_offset + 21] == 0
+            );
+            TEST_CHECK(mock.rx_count == 0 && !mock.transfer_active);
+            end(&transaction);
+        }
+    }
+}
+
+static void test_sd_invalid (void) {
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    uint8_t byte;
+    for (unsigned write = 0; write < 2; write++) {
+        const struct {
+            void *buffer;
+            uint32_t lba;
+            uint32_t count;
+        } cases[] = {{NULL, 0, 1}, {&byte, 0, 0}, {&byte, 0, 65}, {&byte, UINT32_MAX, 2}, {&byte, UINT32_MAX - 62, 64}};
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+            ed64_pro_ll_error_t error =
+                write ? ed64_pro_ll_sd_write(
+                            &transaction, cases[i].buffer, cases[i].lba, cases[i].count, deadline_ms(5000)
+                        )
+                      : ed64_pro_ll_sd_read(
+                            &transaction, cases[i].buffer, cases[i].lba, cases[i].count, deadline_ms(5000)
+                        );
+            TEST_CHECK(error == ED64_PRO_LL_ARGUMENT);
+        }
+    }
+    TEST_CHECK(mock.enqueues == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
+    end(&transaction);
+}
+
+static void test_sd_ack_timeouts (void) {
+    uint8_t buffer[4096];
+    for (unsigned write = 0; write < 2; write++) {
+        for (unsigned block = 1; block <= 4; block++) {
+            power_on();
+            identify();
+            ed64_pro_ll_transaction_t transaction;
+            begin(&transaction);
+            mock.stall_read_ack = write ? 0 : block;
+            mock.stall_write_ack = write ? block : 0;
+            mock.tick_step = TICKS_FROM_MS(1) / 64;
+            uint32_t deadline = deadline_ms(1000);
+            ed64_pro_ll_error_t error = write ? ed64_pro_ll_sd_write(&transaction, buffer, 0, 8, deadline)
+                                              : ed64_pro_ll_sd_read(&transaction, buffer, 0, 8, deadline);
+            TEST_CHECK(is_deadline_error(error));
+            TEST_CHECK((int32_t)(mock.now - deadline) >= 0 && mock.now - deadline < TICKS_FROM_MS(2));
+            TEST_CHECK((write ? mock.write_acks : mock.read_acks) == block);
+            TEST_CHECK(mock.status_requests == 0);
+            unsigned enqueues = mock.enqueues;
+            TEST_CHECK(ed64_pro_ll_sd_read(&transaction, buffer, 0, 1, deadline_ms(5000)) == error);
+            TEST_CHECK(mock.enqueues == enqueues);
+            end(&transaction);
+        }
+    }
+}
+
+static void test_sd_faults (void) {
+    uint8_t buffer[1536] = {0};
+    for (unsigned fault = 0; fault < 5; fault++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        mock.wre_reply = fault == 0;
+        mock.data_trailing = fault == 1;
+        mock.replies[0].bytes[0] = fault == 2 ? 0xEE : 0x5A;
+        mock.replies[0].bytes[3] = fault == 3 ? 0xB0 : 0;
+        mock.replies[0].length = fault == 4 ? 3 : 4;
+        mock.tick_step = TICKS_FROM_MS(1) / 64;
+        ed64_pro_ll_error_t error = ed64_pro_ll_sd_write(&transaction, buffer, 0, 3, deadline_ms(1000));
+        TEST_CHECK(
+            fault <= 1   ? error == ED64_PRO_LL_TRAILING_DATA
+            : fault == 2 ? error == ED64_PRO_LL_FRAME
+            : fault == 3 ? error == ED64_PRO_LL_MCU_ERROR
+                         : is_deadline_error(error)
+        );
+        TEST_CHECK(mock.status_requests == (fault <= 1 ? 0 : 1));
+        TEST_CHECK(mock.nresp_requests == (fault == 3 ? 1 : 0));
+        TEST_CHECK(mock.transfer_done == (fault == 0 ? 0 : sizeof(buffer)));
+        unsigned enqueues = mock.enqueues;
+        TEST_CHECK(ed64_pro_ll_sd_write(&transaction, buffer, 0, 3, deadline_ms(5000)) == error);
+        TEST_CHECK(mock.enqueues == enqueues);
+        end(&transaction);
+    }
+}
+
+#ifdef ED64_PRO_TEST_FAIL_WRITE_N
+static void test_sd_injected_write_failure (void) {
+    power_on();
+    identify();
+    uint8_t buffer[1536];
+    memset(buffer, 0x69, sizeof(buffer));
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    for (unsigned i = 1; i < ED64_PRO_TEST_FAIL_WRITE_N; i++) {
+        TEST_ASSERT(ed64_pro_ll_sd_write(&transaction, buffer, 0, 3, deadline_ms(5000)) == ED64_PRO_LL_OK);
+    }
+    uint8_t original[512];
+    memcpy(original, mock.sectors + 1024, sizeof(original));
+    memset(buffer, 0xA6, sizeof(buffer));
+    TEST_CHECK(ed64_pro_ll_sd_write(&transaction, buffer, 0, 3, deadline_ms(5000)) == ED64_PRO_LL_TIMEOUT);
+    TEST_CHECK(memcmp(mock.sectors, buffer, 1024) == 0);
+    TEST_CHECK(memcmp(mock.sectors + 1024, original, sizeof(original)) == 0);
+    TEST_CHECK(mock.transfer_done == 1024 && mock.status_requests == ED64_PRO_TEST_FAIL_WRITE_N - 1);
+    unsigned enqueues = mock.enqueues;
+    TEST_CHECK(ed64_pro_ll_sd_read(&transaction, buffer, 0, 1, deadline_ms(5000)) == ED64_PRO_LL_TIMEOUT);
+    TEST_CHECK(mock.enqueues == enqueues);
+    end(&transaction);
+}
+#endif
+
 TEST_LIST = {
+#ifdef ED64_PRO_TEST_FAIL_WRITE_N
+    {"injected nth write fails after first ACK block", test_sd_injected_write_failure},
+#endif
     {"bounded frame chunks and zero-I/O rejection", test_frame_limits},
     {"byte-exact whitelisted system info", test_sys_info},
     {"system info and NRESP invalid arguments", test_sys_info_invalid},
     {"system info partial and trailing replies latch", test_sys_info_faults},
     {"NRESP only follows well-formed nonzero status", test_nresp},
     {"ACK helper read and write block boundaries", test_ack_helpers},
+    {"raw sectors and ACK boundary transcripts", test_sd_read_write},
+    {"raw-sector arguments never submit DMA", test_sd_invalid},
+    {"each read/write ACK uses the original deadline", test_sd_ack_timeouts},
+    {"ambiguous write faults never retry", test_sd_faults},
     {"exact register read and cache order", test_register_read},
     {"exact mailbox write and cache order", test_register_write},
     {"invalid input never submits DMA", test_invalid_input},

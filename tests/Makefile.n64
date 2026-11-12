@@ -3,6 +3,8 @@
 PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 BUILD_DIR ?= $(PROJECT_ROOT)/build/ed64-pro-test
 OUTPUT_DIR ?= $(PROJECT_ROOT)/output/ed64-pro-test
+# Modes: -DED64_PRO_TEST_INFO, or -DED64_PRO_TEST_STORAGE with the host fixture CRC.
+# Raw-write gate additionally requires -DED64_PRO_TEST_RAW_WRITE and a 64 KiB A5 scratch file.
 TEST_FLAGS ?=
 
 ifneq ($(ED64_PRO_HARDWARE_INNER),1)
@@ -23,13 +25,14 @@ endif
 include $(N64_INST)/include/n64.mk
 
 ROMNAME := ed64_pro_hardware
-N64_ROM_TITLE := "ED64 Pro transport"
+N64_ROM_TITLE := "ED64 Pro test"
 N64_ROM_SAVETYPE := none
 N64_ROM_REGIONFREE := 1
 N64_ROM_EXPANSIONPAK := unused
 N64_CFLAGS += -I$(PROJECT_ROOT)/src -Wall -Wextra -Werror $(TEST_FLAGS)
 
-SOURCES := tests/ed64_pro_hardware.c src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro_ll.c
+SOURCES := tests/ed64_pro_hardware.c src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro_ll.c \
+	src/utils/fs.c src/flashcart/flashcart_utils.c
 OBJS := $(addprefix $(BUILD_DIR)/,$(SOURCES:.c=.o))
 BUILD_ID := $(shell git -C "$(PROJECT_ROOT)" describe --always --dirty)
 
@@ -37,6 +40,7 @@ BUILD_ID := $(shell git -C "$(PROJECT_ROOT)" describe --always --dirty)
 all: $(ROMNAME).z64
 
 $(BUILD_DIR)/$(ROMNAME).elf: $(OBJS)
+$(BUILD_DIR)/src/utils/fs.o: N64_CFLAGS+=-Wno-error=sign-compare
 $(BUILD_DIR)/tests/ed64_pro_hardware.o: FORCE
 $(BUILD_DIR)/tests/ed64_pro_hardware.o: N64_CFLAGS+=-DED64_PRO_TEST_BUILD_ID=\"$(BUILD_ID)\"
 
