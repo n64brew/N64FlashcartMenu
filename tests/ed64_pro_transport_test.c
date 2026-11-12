@@ -14,7 +14,7 @@ typedef struct {
     uint32_t address;
     size_t length;
     bool write;
-    uint32_t words[5];
+    uint32_t words[ED64_PRO_FIFO_CHUNK];
 } bus_record_t;
 
 static struct {
@@ -82,6 +82,31 @@ static struct {
     size_t mailbox_sample_count;
     uint32_t stop_delay;
     uint32_t ready_tick;
+    bool raw_frames;
+    uint8_t tx_bytes[131072];
+    size_t tx_count;
+    uint32_t info_values[2];
+    size_t info_reply_limit;
+    bool info_trailing;
+    unsigned info_requests;
+    unsigned nresp_requests;
+    uint8_t nresp_detail;
+    bool nresp_missing;
+    bool nresp_trailing;
+    uint8_t sectors[128 * 512];
+    bool wre;
+    bool wre_reply;
+    unsigned wre_commands;
+    bool transfer_active;
+    bool transfer_write;
+    uint32_t transfer_lba;
+    size_t transfer_length;
+    size_t transfer_done;
+    unsigned read_acks;
+    unsigned write_acks;
+    unsigned stall_read_ack;
+    unsigned stall_write_ack;
+    bool data_trailing;
     size_t post_stop_junk;
     bool post_stop_refill;
 } mock;
@@ -182,7 +207,7 @@ static uint64_t submit (const void *ram, pi_addr_t pi, unsigned long length, boo
     record->address = pi;
     record->length = length;
     record->write = write;
-    for (size_t i = 0; i < 5 && i < length / 4; i++) {
+    for (size_t i = 0; i < ED64_PRO_FIFO_CHUNK && i < length / 4; i++) {
         record->words[i] = mock.ram[i];
     }
     if (write) {
@@ -234,36 +259,149 @@ static void release_reply (void) {
 static void finish_pending (void) {
     TEST_ASSERT(mock.active);
     if (mock.write && mock.pi == 0x1F800000u) {
-        TEST_ASSERT(mock.ram[0] == 0x2B && mock.ram[1] == 0xD4);
-        TEST_ASSERT(mock.ram[3] == (mock.ram[2] ^ 0xFF));
-        switch (mock.ram[2]) {
-        case 0x10: {
-            TEST_ASSERT(mock.length == 16);
-            size_t index = mock.status_requests < 8 ? mock.status_requests : 7;
-            mock.status_requests++;
-            memcpy(mock.pending_reply, mock.replies[index].bytes, sizeof(mock.pending_reply));
-            mock.pending_length = mock.replies[index].length;
-            mock.pending_offset = 0;
-            mock.active_reply_interval =
-                mock.reply_intervals[index] ? mock.reply_intervals[index] : mock.reply_interval;
-            mock.next_reply_tick = mock.now + mock.active_reply_interval;
-            release_reply();
-            break;
+        size_t bytes = mock.length / 4;
+        TEST_ASSERT(mock.tx_count + bytes <= sizeof(mock.tx_bytes));
+        for (size_t i = 0; i < bytes; i++) {
+            mock.tx_bytes[mock.tx_count++] = mock.ram[i];
         }
-        case 0x85:
-            TEST_ASSERT(mock.length == 20 && mock.ram[4] == 0x10);
-            mock.stop_commands++;
-            mock.ready_tick = mock.now + mock.stop_delay;
-            for (size_t i = 0; i < mock.post_stop_junk; i++) {
-                rx_push((uint8_t)(0x80 + i));
+        if (mock.raw_frames) {
+            /* Framing-only fixtures deliberately bypass the simulated MCU. */
+        } else if (mock.transfer_active && mock.transfer_write) {
+            TEST_ASSERT(bytes <= mock.transfer_length - mock.transfer_done);
+            TEST_ASSERT(mock.transfer_lba * 512 + mock.transfer_done + bytes <= sizeof(mock.sectors));
+            for (size_t i = 0; i < bytes; i++) {
+                mock.sectors[mock.transfer_lba * 512 + mock.transfer_done++] = mock.ram[i];
             }
-            mock.refill = mock.post_stop_refill;
-            break;
-        case 0x80:
-            TEST_ASSERT(mock.length == 20 && mock.ram[4] == 0x10);
-            mock.sd_commands++;
-            break;
-        default: TEST_ASSERT(false);
+            if (mock.transfer_done == mock.transfer_length) {
+                mock.transfer_active = false;
+                if (mock.data_trailing) {
+                    rx_push(0xEF);
+                }
+            } else if (mock.transfer_done % ED64_PRO_ACK_BLOCK == 0) {
+                mock.write_acks++;
+                if (mock.write_acks != mock.stall_write_ack) {
+                    rx_push(0x00);
+                }
+            }
+        } else if (mock.transfer_active) {
+            TEST_ASSERT(bytes == 1 && mock.ram[0] == 0);
+            mock.read_acks++;
+            size_t block = mock.transfer_length - mock.transfer_done;
+            if (block > ED64_PRO_ACK_BLOCK) {
+                block = ED64_PRO_ACK_BLOCK;
+            }
+            TEST_ASSERT(mock.transfer_lba * 512 + mock.transfer_done + block <= sizeof(mock.sectors));
+            if (mock.read_acks != mock.stall_read_ack) {
+                for (size_t i = 0; i < block; i++) {
+                    rx_push(mock.sectors[mock.transfer_lba * 512 + mock.transfer_done + i]);
+                }
+            }
+            mock.transfer_done += block;
+            if (mock.transfer_done == mock.transfer_length) {
+                mock.transfer_active = false;
+                if (mock.data_trailing) {
+                    rx_push(0xEF);
+                }
+            }
+        } else {
+            TEST_ASSERT(mock.ram[0] == 0x2B && mock.ram[1] == 0xD4);
+            TEST_ASSERT(mock.ram[3] == (mock.ram[2] ^ 0xFF));
+            switch (mock.ram[2]) {
+            case 0x10: {
+                TEST_ASSERT(mock.length == 16);
+                size_t index = mock.status_requests < 8 ? mock.status_requests : 7;
+                mock.status_requests++;
+                memcpy(mock.pending_reply, mock.replies[index].bytes, sizeof(mock.pending_reply));
+                mock.pending_length = mock.replies[index].length;
+                mock.pending_offset = 0;
+                mock.active_reply_interval =
+                    mock.reply_intervals[index] ? mock.reply_intervals[index] : mock.reply_interval;
+                mock.next_reply_tick = mock.now + mock.active_reply_interval;
+                release_reply();
+                break;
+            }
+            case 0x13:
+                TEST_ASSERT(bytes == 5 && mock.ram[4] != 0);
+                mock.nresp_requests++;
+                if (!mock.nresp_missing) {
+                    rx_push(mock.nresp_detail);
+                }
+                if (mock.nresp_trailing) {
+                    rx_push(0xEE);
+                }
+                break;
+            case 0x84: {
+                TEST_ASSERT(mock.ram[4] == 0x10 && mock.ram[5] >= 1 && mock.ram[5] <= 2);
+                size_t count = mock.ram[5];
+                TEST_ASSERT(bytes == 6 + count * 4);
+                mock.info_requests++;
+                for (size_t i = 0; i < count; i++) {
+                    uint32_t id = mock.ram[6 + i * 4] << 24 | mock.ram[7 + i * 4] << 16 | mock.ram[8 + i * 4] << 8 |
+                                  mock.ram[9 + i * 4];
+                    TEST_ASSERT(id == ED64_PRO_INFS_TS_FW || id == ED64_PRO_INFS_MAX_ROM_SIZE);
+                    uint32_t value = mock.info_values[id == ED64_PRO_INFS_TS_FW ? 0 : 1];
+                    for (size_t j = 0; j < 4 && i * 4 + j < mock.info_reply_limit; j++) {
+                        rx_push(value >> (24 - j * 8));
+                    }
+                }
+                if (mock.info_trailing) {
+                    rx_push(0xEE);
+                }
+                break;
+            }
+            case 0x81:
+                if (mock.ram[4] == 0x11) {
+                    TEST_ASSERT(
+                        bytes == 9 && mock.ram[5] == 0xDE && mock.ram[6] == 0xAD && mock.ram[7] == 0xBE &&
+                        mock.ram[8] == 0xEF
+                    );
+                    mock.wre_commands++;
+                    mock.wre = true;
+                    if (mock.wre_reply) {
+                        rx_push(0xDE);
+                        rx_push(0xAD);
+                        rx_push(0xBE);
+                        rx_push(0xEF);
+                    }
+                } else {
+                    TEST_ASSERT(
+                        bytes == 22 && mock.ram[4] == 0x10 && mock.ram[19] == 0 && mock.ram[20] == 0 &&
+                        mock.ram[21] == 0
+                    );
+                    mock.transfer_write = mock.ram[17] == 0x11;
+                    TEST_ASSERT(mock.ram[17] == (mock.transfer_write ? 0x11 : 0x19));
+                    TEST_ASSERT(mock.ram[18] == (mock.transfer_write ? 0x19 : 0x11));
+                    size_t address_offset = mock.transfer_write ? 9 : 5;
+                    mock.transfer_lba = mock.ram[address_offset] << 24 | mock.ram[address_offset + 1] << 16 |
+                                        mock.ram[address_offset + 2] << 8 | mock.ram[address_offset + 3];
+                    mock.transfer_length = mock.ram[13] << 24 | mock.ram[14] << 16 | mock.ram[15] << 8 | mock.ram[16];
+                    mock.transfer_done = 0;
+                    mock.transfer_active = true;
+                    if (mock.transfer_write) {
+                        TEST_ASSERT(mock.wre);
+                        mock.wre = false;
+                        mock.write_acks++;
+                        if (mock.write_acks != mock.stall_write_ack) {
+                            rx_push(0x00);
+                        }
+                    }
+                }
+                break;
+            case 0x85:
+                TEST_ASSERT(mock.length == 20 && mock.ram[4] == 0x10);
+                mock.stop_commands++;
+                mock.ready_tick = mock.now + mock.stop_delay;
+                for (size_t i = 0; i < mock.post_stop_junk; i++) {
+                    rx_push((uint8_t)(0x80 + i));
+                }
+                mock.refill = mock.post_stop_refill;
+                break;
+            case 0x80:
+                TEST_ASSERT(mock.length == 20 && mock.ram[4] == 0x10);
+                mock.sd_commands++;
+                break;
+            default: TEST_ASSERT(false);
+            }
         }
     } else if (mock.write) {
         TEST_ASSERT(mock.pi == 0x1F800010u && mock.length == 4 && mock.ram[0] == 0);
@@ -378,6 +516,13 @@ static void power_on (void) {
     mock.tick_step = 1;
     mock.register_value = 0xED640127u;
     mock.fifo_upper = 0xF00D0000u;
+    mock.info_values[0] = 0x90555D4Eu;
+    mock.info_values[1] = 0x04000000u;
+    mock.info_reply_limit = 8;
+    mock.nresp_detail = 0xA3;
+    for (size_t i = 0; i < sizeof(mock.sectors); i++) {
+        mock.sectors[i] = (uint8_t)(i * 37 + i / 512);
+    }
     for (size_t i = 0; i < 8; i++) {
         mock.replies[i].length = 4;
         mock.replies[i].bytes[0] = 0x5A;
@@ -1717,7 +1862,166 @@ static void test_adapter_unavailable_operations (void) {
     }
 }
 
+static void test_frame_limits (void) {
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    mock.raw_frames = true;
+    uint8_t payload[ED64_PRO_FRAME_MAX];
+    for (size_t i = 0; i < sizeof(payload); i++) {
+        payload[i] = (uint8_t)(i * 19);
+    }
+    TEST_CHECK(
+        pro_send_frame(&transaction, PRO_CMD_SYS, 0x10, payload, ED64_PRO_FRAME_MAX - 4, deadline_ms(1000)) ==
+        ED64_PRO_LL_ARGUMENT
+    );
+    TEST_CHECK(pro_send_frame(&transaction, PRO_CMD_SYS, 0x11, payload, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(pro_send_frame(&transaction, PRO_CMD_SYS, 0x10, NULL, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(mock.enqueues == 0);
+    TEST_CHECK(
+        pro_send_frame(&transaction, PRO_CMD_SYS, 0x10, payload, ED64_PRO_FRAME_MAX - 5, deadline_ms(1000)) ==
+        ED64_PRO_LL_OK
+    );
+    TEST_CHECK(mock.tx_count == ED64_PRO_FRAME_MAX && mock.bus_count == ED64_PRO_FRAME_MAX / ED64_PRO_FIFO_CHUNK);
+    const uint8_t header[] = {0x2B, 0xD4, 0x84, 0x7B, 0x10};
+    TEST_CHECK(memcmp(mock.tx_bytes, header, sizeof(header)) == 0);
+    TEST_CHECK(memcmp(mock.tx_bytes + sizeof(header), payload, ED64_PRO_FRAME_MAX - sizeof(header)) == 0);
+    for (size_t i = 0; i < mock.bus_count; i++) {
+        TEST_CHECK(mock.bus[i].length == ED64_PRO_FIFO_CHUNK * 4 && mock.bus[i].write);
+    }
+    end(&transaction);
+}
+
+static void test_sys_info (void) {
+    for (size_t count = 1; count <= 2; count++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        const uint32_t ids[] = {ED64_PRO_INFS_TS_FW, ED64_PRO_INFS_MAX_ROM_SIZE};
+        uint32_t values[2] = {0, 0xDEADBEEF};
+        TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, count, deadline_ms(1000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(values[0] == 0x90555D4E);
+        TEST_CHECK(values[1] == (count == 2 ? 0x04000000 : 0xDEADBEEF));
+        const uint8_t frame[] = {0x2B, 0xD4, 0x84, 0x7B, 0x10, count, 0, 0, 0, 6, 0, 0, 0, 9};
+        TEST_CHECK(mock.tx_count == 6 + count * 4 && memcmp(mock.tx_bytes, frame, mock.tx_count) == 0);
+        TEST_CHECK(mock.info_requests == 1 && mock.rx_count == 0 && mock.status_requests == 0);
+        end(&transaction);
+    }
+}
+
+static void test_sys_info_invalid (void) {
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    uint32_t ids[] = {ED64_PRO_INFS_TS_FW, 8};
+    uint32_t values[2] = {0};
+    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, NULL, values, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, NULL, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, 3, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, 2, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    uint8_t detail;
+    TEST_CHECK(ed64_pro_ll_read_nresp(&transaction, 0xB0, &detail, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(mock.enqueues == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
+    end(&transaction);
+}
+
+static void test_sys_info_faults (void) {
+    for (unsigned trailing = 0; trailing < 2; trailing++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        const uint32_t ids[] = {ED64_PRO_INFS_TS_FW, ED64_PRO_INFS_MAX_ROM_SIZE};
+        uint32_t values[] = {0xDEADBEEF, 0xDEADBEEF};
+        mock.info_reply_limit = trailing ? 8 : 7;
+        mock.info_trailing = trailing;
+        mock.tick_step = TICKS_FROM_MS(1) / 8;
+        ed64_pro_ll_error_t error = ed64_pro_ll_get_sys_info(&transaction, ids, values, 2, deadline_ms(1000));
+        TEST_CHECK(trailing ? error == ED64_PRO_LL_TRAILING_DATA : is_deadline_error(error));
+        TEST_CHECK(values[0] == 0xDEADBEEF && values[1] == 0xDEADBEEF);
+        TEST_CHECK(mock.info_requests == 1 && mock.nresp_requests == 0);
+        unsigned enqueues = mock.enqueues;
+        TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, 2, deadline_ms(1000)) == error);
+        TEST_CHECK(mock.enqueues == enqueues);
+        end(&transaction);
+    }
+}
+
+static void test_nresp (void) {
+    for (unsigned fault = 0; fault < 4; fault++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        mock.replies[0].bytes[3] = 0xB0;
+        mock.replies[0].bytes[0] = fault == 1 ? 0xEE : 0x5A;
+        mock.nresp_missing = fault == 2;
+        mock.nresp_trailing = fault == 3;
+        mock.tick_step = TICKS_FROM_MS(1) / 8;
+        ed64_pro_status_t status;
+        ed64_pro_ll_error_t error = ed64_pro_ll_check_status(&transaction, &status, deadline_ms(1000));
+        TEST_CHECK(
+            fault == 0   ? error == ED64_PRO_LL_MCU_ERROR
+            : fault == 1 ? error == ED64_PRO_LL_FRAME
+            : fault == 2 ? is_deadline_error(error)
+                         : error == ED64_PRO_LL_TRAILING_DATA
+        );
+        TEST_CHECK(mock.nresp_requests == (fault == 1 ? 0 : 1));
+        const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
+        TEST_CHECK(failure->nresp_valid == (fault == 0));
+        if (fault == 0) {
+            TEST_CHECK(failure->status_valid && failure->status == 0xB0 && failure->nresp == 0xA3);
+            const uint8_t wire[] = {0x2B, 0xD4, 0x10, 0xEF, 0x2B, 0xD4, 0x13, 0xEC, 0xB0};
+            TEST_CHECK(mock.tx_count == sizeof(wire) && memcmp(mock.tx_bytes, wire, sizeof(wire)) == 0);
+        }
+        unsigned enqueues = mock.enqueues;
+        TEST_CHECK(ed64_pro_ll_check_status(&transaction, &status, deadline_ms(1000)) == error);
+        TEST_CHECK(mock.enqueues == enqueues);
+        end(&transaction);
+    }
+}
+
+static void test_ack_helpers (void) {
+    const size_t lengths[] = {512, 1024, 1536, 4096};
+    uint8_t buffer[4096];
+    for (unsigned write = 0; write < 2; write++) {
+        for (size_t i = 0; i < sizeof(lengths) / sizeof(lengths[0]); i++) {
+            power_on();
+            identify();
+            ed64_pro_ll_transaction_t transaction;
+            begin(&transaction);
+            mock.transfer_active = true;
+            mock.transfer_write = write;
+            mock.transfer_lba = 3;
+            mock.transfer_length = lengths[i];
+            if (write) {
+                mock.write_acks = 1;
+                rx_push(0);
+            }
+            memset(buffer, 0xC6, sizeof(buffer));
+            ed64_pro_ll_error_t error =
+                write ? pro_fifo_write_ack(&transaction, buffer, lengths[i], false, deadline_ms(5000))
+                      : pro_fifo_read_ack(&transaction, buffer, lengths[i], deadline_ms(5000));
+            TEST_CHECK(error == ED64_PRO_LL_OK);
+            TEST_CHECK(memcmp(buffer, mock.sectors + 3 * 512, lengths[i]) == 0);
+            TEST_CHECK((write ? mock.write_acks : mock.read_acks) == (lengths[i] + 1023) / 1024);
+            TEST_CHECK(!mock.transfer_active && mock.rx_count == 0 && mock.status_requests == 0);
+            end(&transaction);
+        }
+    }
+}
+
 TEST_LIST = {
+    {"bounded frame chunks and zero-I/O rejection", test_frame_limits},
+    {"byte-exact whitelisted system info", test_sys_info},
+    {"system info and NRESP invalid arguments", test_sys_info_invalid},
+    {"system info partial and trailing replies latch", test_sys_info_faults},
+    {"NRESP only follows well-formed nonzero status", test_nresp},
+    {"ACK helper read and write block boundaries", test_ack_helpers},
     {"exact register read and cache order", test_register_read},
     {"exact mailbox write and cache order", test_register_write},
     {"invalid input never submits DMA", test_invalid_input},

@@ -44,6 +44,10 @@ enum {
     ED64_PRO_STATUS_TIMEOUT_MS = 1000,
     ED64_PRO_STOP_TIMEOUT_MS = 5000,
     ED64_PRO_SD_TIMEOUT_MS = 5000,
+    ED64_PRO_FRAME_MAX = 1536,
+    ED64_PRO_ACK_BLOCK = 1024,
+    ED64_PRO_INFS_TS_FW = 6,
+    ED64_PRO_INFS_MAX_ROM_SIZE = 9,
     ED64_PRO_ATTEMPT_TIMEOUT_MS = 15000,
     ED64_PRO_FIFO_CHUNK = 128,
     ED64_PRO_FIFO_LIMIT = 2048,
@@ -78,6 +82,10 @@ typedef struct {
     size_t transferred;
     uint64_t ticket;
     bool poisoned;
+    bool status_valid;
+    uint8_t status;
+    bool nresp_valid;
+    uint8_t nresp;
     /* Valid only for an attempted PI operation active when this fault latched.
      * Protocol-only faults do not identify the last completed PI access as failed.
      * Length is bus bytes (FIFO payload bytes use one 32-bit word each).
@@ -135,5 +143,15 @@ ed64_pro_ll_error_t
 ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline);
 ed64_pro_ll_error_t
 ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline);
+
+ed64_pro_ll_error_t
+ed64_pro_ll_read_nresp (ed64_pro_ll_transaction_t *transaction, uint8_t category, uint8_t *detail, uint32_t deadline);
+ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
+    ed64_pro_ll_transaction_t *transaction,
+    const uint32_t *ids,
+    uint32_t *values,
+    size_t count,
+    uint32_t deadline
+);
 
 #endif
