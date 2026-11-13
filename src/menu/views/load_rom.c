@@ -785,7 +785,7 @@ static void draw (menu_t *menu, surface_t *d) {
         ui_components_actions_bar_text_draw(
             STL_DEFAULT,
             ALIGN_LEFT, VALIGN_TOP,
-            "A: Load and run ROM\n"
+            "A: Launch ROM\n"
             "B: Back\n"
         );
 
