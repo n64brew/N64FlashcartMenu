@@ -22,14 +22,15 @@ The current state of support is:
 * SummerCart64
 * 64Drive
 
-### Work in Progress
+### Help wanted (Work in Progress)
 * EverDrive-64 (X and V series)
+* DaisyDrive
+* EverDrive-64 Pro series
 * ED64P (clones)
 
 ### Not yet planned
 * Doctor V64
 * PicoCart
-* DaisyDrive
 
 
 ## Current (notable) menu features
@@ -38,12 +39,12 @@ The current state of support is:
 * Fully emulates the 64DD and loads 64DD disks (SummerCart64 only).
 * Emulator support (NES, SNES, GB, GBC, SMS, GG, CHF) ROMs.
 * N64 ROM box art image support.
-* Background image (PNG) support.
+* Background image (PNG & JPEG) support.
 * Comprehensive ROM save database (including homebrew headers).
 * Comprehensive ROM information display.
 * Real Time Clock support.
-* Music playback (MP3).
-* Menu sound effects.
+* Music player for MP3 & FLAC, with id metadata support.
+* Menu background music & sound effects.
 * N64 ROM fast reboot option (on reset).
 * ROM history and favorites.  
 * ROM Datel code editor.
