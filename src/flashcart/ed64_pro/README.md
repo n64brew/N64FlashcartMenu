@@ -17,20 +17,19 @@ It uses fixed-width types, bounded libdragon ticket submission/completion,
 exclusive cache-line staging, and sticky failures instead of upstream's
 unbounded PI and protocol waits.
 
-The combined N64FlashcartMenu project retains its existing AGPL license.
-The upstream copyright and MIT license notice is retained [below](#upstream-license).
+N64FlashcartMenu retains its AGPL license; the upstream copyright and MIT
+license notice appear [below](#upstream-license).
 
 ### Storage ownership
 
 The driver requires firmware 26.1014 or newer. It stops MCU services and mounts
-volume 0 as `sd:/` through libdragon FatFs. Before returning storage to the MCU,
-consumers stop, writes must be synchronized, FatFs unmounts, and FS INIT runs.
-A failed I/O or release is terminal; never retry an ambiguous write. Power-cycle
-the console and USB after a fault, then check the files on a computer.
+volume 0 as `sd:/` through libdragon FatFs. MCU handoff requires stopping consumers,
+syncing writes, unmounting FatFs, and running FS INIT. I/O or release failures are
+terminal; never retry an ambiguous write. Power-cycle the console and USB after
+a fault, then check the files on a computer.
 
-Use edlink or other active USB tools only with the console off or while the
-stock Pro menu runs. Keep them idle while this menu or a launched game runs.
-There is no in-menu USB transfer mode.
+Only use `edlink` or other active USB tools with the console powered off or in
+the stock Pro menu. This menu has no USB transfer mode.
 
 WRE transmits `DE AD BE EF`, matching edlink rather than the upstream N64
 sample's read operation. Transfers calculate their own LBA stepping rather
@@ -40,17 +39,13 @@ ROM and emulator loads use FatFs with capacity checks and staged paths. Save
 configuration remains local until the storage handoff; START loads the BRM file
 and enables MCU game services. The existing boot and cheat engine then runs.
 
-Measured on one setup: 601 KiB/s for a 1 MiB raw read; 8/32/64 MiB ROM loads
-took 0.97/3.79/7.53 s.
-
 Automatic CIC and MCU save writeback are enabled. 64DD, fast reboot, USB
-debugging, menu RTC and automatic region detection are unavailable.
+debugging, menu RTC and automatic region detection are not yet implemented.
 
-FatFs paths remain UTF-8. Only staged GPAK/BRM paths are converted to OEM
-CP437 using FatFs's conversion table. Components outside CP437 use their actual
-FatFs 8.3 aliases. Missing or unusable aliases, including on exFAT, cause refusal
-before storage handoff; no lossy replacement is used. The 1023-byte limit applies
-to the input path without `sd:` and to its MCU encoding.
+FatFs paths remain UTF-8. Only staged GPAK/BRM paths use FatFs's CP437 table
+and actual 8.3 aliases for unrepresentable components. Missing or unusable aliases,
+including on exFAT, are rejected before storage handoff without lossy replacement.
+The input path without `sd:` and its MCU encoding are each limited to 1023 bytes.
 
 `.v64` loading and a game launch are verified. On FAT32, a game booted and its
 fresh save was written under the correct Unicode name on paths over 300 bytes.

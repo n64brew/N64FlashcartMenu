@@ -19,27 +19,16 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 
 #### Preparations for EverDrive-64 Pro
 
-- Use firmware 26.1014 or newer.
-- Copy the `menu.n64` artifact to the SD card, for example as `/N64FlashcartMenu.n64`.
-- Launch it from the stock Pro menu. Keep the stock `/ed64/menu.n64`; this menu is launched as an ordinary ROM.
-- Keep edlink and other active USB tools idle while this menu or a launched game runs.
-  Use them only with the console off or in the stock Pro menu.
-- After an SD or transport fault, power-cycle both the console and USB before continuing,
-  then check the files on a computer.
+- Use firmware `26.1014` or newer.
+- Copy `menu.n64` to the SD card.
+- Launch `menu.n64` from the stock Pro menu, or move it to `/ed64/menu.n64` to automatically launch it on startup.
 
-Automatic CIC and MCU save writeback are enabled. RESET returns to the stock
-menu on the tested firmware. 64DD, fast reboot, USB debugging and menu RTC are
-unavailable on the Pro. Autoload and history paths inherit the shared 255-byte
-INI value limit. Emulator boot/save tests are deferred to external testers.
+> [!IMPORTANT]
+> USB tools such as `edlink` should only be used with the console powered off or in the stock Pro menu.
 
-ROM and save paths use the cartridge's CP437 encoding, with existing 8.3 aliases
-for characters it cannot represent. A path without a usable alias is rejected
-before game startup. FAT32 Unicode game launch and save writeback are verified
-on paths over 300 bytes.
+Automatic CIC and save writeback are enabled. 64DD, fast reboot, USB debugging, and menu RTC are not yet implemented.
 
-With Jumper Pak (4 MiB), a ROM booted and restored saved settings; cheat actions
-were correctly refused. Earlier intermittent navigation, boxart and ROM-open
-failures remain unresolved.
+ROM and save paths use [CP437](https://en.wikipedia.org/wiki/Code_page_437), with existing [8.3 aliases](https://en.wikipedia.org/wiki/8.3_filename) for unsupported characters. Paths without usable aliases are rejected before launch.
 
 ### Advanced Steps
 Advanced steps are optional, which adds additional capabilities.
