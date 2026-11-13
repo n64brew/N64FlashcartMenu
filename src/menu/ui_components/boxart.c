@@ -204,6 +204,9 @@ void ui_components_boxart_free(component_boxart_t *b) {
             png_decoder_abort();
         }
         if (b->image) {
+            // Wait for any queued RDP draw commands referencing this surface (e.g. from
+            // ui_components_boxart_draw()) to finish before freeing it, since the pending
+            // double-buffering swap can free the previously-displayed image.
             rspq_wait();
             surface_free(b->image);
             free(b->image);
