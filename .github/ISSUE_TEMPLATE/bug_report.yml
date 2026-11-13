@@ -15,32 +15,232 @@ body:
         Failing to do so will most likely end up on the issue being closed without discussion. Don't take offense at this, 
         whenever an issue is raised without following the template and/or adding the required information, too much time has to be spent going back and forth to obtain the details that are outlined below.
 
+  - type: markdown
+    attributes:
+      value: "### Console"
+
+  - type: dropdown
+    id: n64_region
+    attributes:
+      label: N64 console region
+      options:
+        - NTSC-U
+        - NTSC-J
+        - PAL
+        - MPAL
+        - Other
+        - Unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: expansion_pak
+    attributes:
+      label: Expansion Pak
+      options:
+        - Yes
+        - No
+        - Unknown
+    validations:
+      required: false
+
+  - type: dropdown
+    id: works_with_original_carts
+    attributes:
+      label: Does the console work with original cartridges?
+      options:
+        - Yes
+        - No
+        - Not checked
+    validations:
+      required: false
+
+  - type: input
+    id: hardware_mods
+    attributes:
+      label: Hardware modifications
+      description: List any console modifications, or say "None" or "Unknown".
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: "### Flashcart"
+
+  - type: dropdown
+    id: flashcart_type
+    attributes:
+      label: Flashcart type
+      options:
+        - SummerCart64
+        - 64drive
+        - EverDrive 64 Pro
+        - EverDrive 64 V3
+        - EverDrive 64 X7
+        - Other
+        - Unknown
+    validations:
+      required: false
+
+  - type: input
+    id: flashcart_supplier
+    attributes:
+      label: Flashcart supplier
+      description: For example, Phenom mod, Krikzz store.
+    validations:
+      required: false
+
   - type: input
     id: flashcart_firmware_version
     attributes:
-      label: Firmware version of the flashcart
-      description: Press (Start) button on the menu, then (Check Flashcart Information).
-      placeholder: V2.20.2, N/A
+      label: Flashcart OS/firmware version
+      description: Press (Start) on the menu, then (Check Flashcart Information), if available.
+      placeholder: e.g. 0.2.0, N/A
     validations:
       required: true
+
+  - type: dropdown
+    id: flashcart_tests
+    attributes:
+      label: Do the flashcart's inbuilt tests pass?
+      options:
+        - Yes
+        - No
+        - Not run
+        - Not available
+    validations:
+      required: false
+
+  - type: dropdown
+    id: flashcart_test_method
+    attributes:
+      label: How were the inbuilt tests run?
+      options:
+        - Flashcart button
+        - SCDeployer over USB
+        - Both
+        - Not run
+        - Not applicable
+    validations:
+      required: false
+
+  - type: dropdown
+    id: usb_connected
+    attributes:
+      label: Was USB connected to the flashcart when the issue occurred?
+      options:
+        - Yes
+        - No
+        - Unknown
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: "### Menu"
 
   - type: input
     id: menu_version
     attributes:
-      label: N64 Flashcart Menu revision used
-      description: Press (Start) button on the menu, then (Check Menu Information), or specify github download URL.
-      placeholder: e.g 1.2.3.456, N/A
+      label: N64 Flashcart Menu version
+      description: Press (Start), then (Check Menu Information), or include the release/build URL.
+      placeholder: e.g. 0.3.7
     validations:
       required: true
 
-  - type: input
-    id: n64_region
+  - type: dropdown
+    id: menu_source
     attributes:
-      label: N64 console region
-      description: PAL, NTSC-U, NTSC-J, MPAL, etc.
-      placeholder: NTSC
+      label: Where did this menu build come from?
+      options:
+        - Downloaded release
+        - Built it myself
+        - Other
+        - Unknown
     validations:
-      required: true
+      required: false
+
+  - type: input
+    id: last_working_menu_version
+    attributes:
+      label: Last menu version that worked
+      placeholder: e.g. 0.3.0, Unknown
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: "### Filesystem"
+
+  - type: input
+    id: sd_card
+    attributes:
+      label: SD card make, model, and capacity
+      placeholder: e.g. SanDisk Ultra, 32 GB
+    validations:
+      required: false
+
+  - type: dropdown
+    id: sd_card_filesystem
+    attributes:
+      label: SD card filesystem
+      options:
+        - FAT32
+        - exFAT
+        - Other
+        - Unknown
+    validations:
+      required: false
+
+  - type: input
+    id: sd_card_format_options
+    attributes:
+      label: SD card format options
+      description: Include any non-default options used when formatting, if known.
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: "### Last loaded ROM"
+
+  - type: input
+    id: last_loaded_rom
+    attributes:
+      label: Last loaded ROM
+      description: Include the game name or filename, if known.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: unofficial_rom
+    attributes:
+      label: Was the last loaded ROM an unofficial release?
+      options:
+        - Yes
+        - No
+        - Unknown
+    validations:
+      required: false
+
+  - type: dropdown
+    id: custom_rom_override
+    attributes:
+      label: Is there a custom override setting for this ROM?
+      options:
+        - Yes
+        - No
+        - Unknown
+    validations:
+      required: false
+
+  - type: input
+    id: custom_rom_override_details
+    attributes:
+      label: Custom override details
+      description: If applicable, describe the setting or where it is configured.
+    validations:
+      required: false
 
   - type: textarea
     id: description
