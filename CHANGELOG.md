@@ -46,6 +46,7 @@ Files are made available:
 - **Bug Fixes**
 	- Preserve alpha transparency in decoded boxart.
 	- Fix music player track queue UI overflow.
+	- Close the current track's SD file handle before reconfiguring audio
 
 - **Documentation**
 	- Menu credits were updated to n64brew.
