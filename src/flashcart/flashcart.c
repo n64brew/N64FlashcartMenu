@@ -189,7 +189,7 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         }
         return FLASHCART_OK;
     }
-    
+
     if (daisydrive_detected()) {
         *storage_prefix = "sd:/";
         daisydrive_init_sdfs(*storage_prefix, -1);

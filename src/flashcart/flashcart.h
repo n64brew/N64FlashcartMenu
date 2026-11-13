@@ -112,7 +112,7 @@ typedef struct {
     /** @brief The flashcart set boot mode function */
     flashcart_err_t (*set_next_boot_mode) (flashcart_reboot_mode_t boot_mode);
     /** @brief Optional error detail from retained state; NULL uses the generic message. Must not perform I/O. */
-    char *(*get_error_message) (flashcart_err_t err);
+    char *(*get_error_message)(flashcart_err_t err);
 } flashcart_t;
 
 /**

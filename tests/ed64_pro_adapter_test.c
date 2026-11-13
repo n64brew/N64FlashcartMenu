@@ -20,70 +20,85 @@ bool sys_bbplayer (void) {
     TEST_CHECK(false);
     return false;
 }
+
 int bbfs_init (void) {
     TEST_CHECK(false);
     return -1;
 }
+
 bool daisydrive_detected (void) {
     TEST_CHECK(false);
     return false;
 }
+
 bool daisydrive_init_sdfs (const char *prefix, int max_files) {
     (void)prefix;
     (void)max_files;
     TEST_CHECK(false);
     return false;
 }
+
 bool debug_init_sdfs (const char *prefix, int npart) {
     (void)prefix;
     (void)npart;
     TEST_CHECK(false);
     return false;
 }
+
 bool debug_init_isviewer (void) {
     TEST_CHECK(false);
     return false;
 }
+
 bool debug_init_usblog (void) {
     TEST_CHECK(false);
     return false;
 }
+
 flashcart_t *d64_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
+
 flashcart_t *ed64_xseries_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
+
 flashcart_t *ed64_vseries_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
+
 flashcart_t *sc64_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
+
 flashcart_t *daisydrive_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
+
 bool file_exists (char *path) {
     (void)path;
     TEST_CHECK(false);
     return false;
 }
+
 int64_t file_get_size (char *path) {
     (void)path;
     TEST_CHECK(false);
     return -1;
 }
+
 bool file_allocate (char *path, size_t size) {
     (void)path;
     (void)size;
     TEST_CHECK(false);
     return true;
 }
+
 bool file_fill (char *path, uint8_t value) {
     (void)path;
     (void)value;
@@ -295,6 +310,7 @@ FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
     file->fptr = 0;
     return mock.open_result;
 }
+
 FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
     TEST_ASSERT(mock.file_reads < 8);
     mock.destinations[mock.file_reads] = (uintptr_t)buffer;
@@ -310,19 +326,23 @@ FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
     file->fptr += *read;
     return FR_OK;
 }
+
 FRESULT f_lseek (FIL *file, FSIZE_t offset) {
     mock.seeks++;
     file->fptr = offset;
     return mock.seek_result;
 }
+
 FRESULT f_close (FIL *file) {
     (void)file;
     mock.closes++;
     return mock.close_result;
 }
+
 void fatfs_fix_file_size (FIL *file) {
     file->obj.objsize = (file->obj.objsize + 511) & ~UINT64_C(511);
 }
+
 char *strip_fs_prefix (char *path) {
     char *prefix = strstr(path, ":/");
     return prefix ? prefix + 1 : path;
@@ -383,6 +403,7 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     snprintf(mock.launch_paths[index], sizeof(mock.launch_paths[index]), "%s", path);
     return launch_command(index == 0 ? 'P' : 'B');
 }
+
 ed64_pro_ll_error_t
 ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
     (void)transaction;
@@ -390,6 +411,7 @@ ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_
     mock.config = *config;
     return launch_command('G');
 }
+
 ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     (void)transaction;
     (void)deadline;

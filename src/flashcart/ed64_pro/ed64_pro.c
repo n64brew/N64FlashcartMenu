@@ -234,8 +234,8 @@ static const char *pro_error_name (ed64_pro_ll_error_t error) {
  * The shared output buffer is overwritten on each call.
  */
 char *ed64_pro_get_error_message (void) {
-    ed64_pro_ll_error_t error = pro_diagnostics.failure.code != ED64_PRO_LL_OK ? pro_diagnostics.failure.code
-                                                                           : pro_diagnostics.probe.error;
+    ed64_pro_ll_error_t error =
+        pro_diagnostics.failure.code != ED64_PRO_LL_OK ? pro_diagnostics.failure.code : pro_diagnostics.probe.error;
     if (pro_diagnostics.storage_detail) {
         if (pro_diagnostics.storage_operation) {
             char mcu_detail[48] = "";

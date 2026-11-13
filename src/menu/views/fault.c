@@ -2,7 +2,6 @@
 
 #include "views.h"
 
-
 void view_fault_init (menu_t *menu) {
     console_init();
     console_set_debug(false);
@@ -26,7 +25,6 @@ void view_fault_init (menu_t *menu) {
 
     printf("\nPower-cycle the console before trying again.\n");
 }
-
 
 void view_fault_display (menu_t *menu, surface_t *display) {
     console_render();

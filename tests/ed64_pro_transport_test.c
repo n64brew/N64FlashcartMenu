@@ -1827,8 +1827,10 @@ static void test_pi_attempt_context (void) {
     ed64_pro_ll_transaction_t transaction;
     begin(&transaction);
     uint32_t value = 42;
-    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000)) ==
-               ED64_PRO_LL_PI_ACQUIRE_TIMEOUT);
+    TEST_CHECK(
+        ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000)) ==
+        ED64_PRO_LL_PI_ACQUIRE_TIMEOUT
+    );
     const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
     TEST_CHECK(failure->pi_context_valid && !failure->pi_submitted && !failure->poisoned && failure->ticket == 0);
     TEST_CHECK(failure->pi_address == ED64_PRO_REG_FIFOSTAT && failure->pi_length == 4 && !failure->pi_write);
@@ -1870,10 +1872,14 @@ static void test_pi_full_budget_timing (void) {
         ed64_pro_ll_transaction_t transaction;
         begin(&transaction);
         uint32_t value = 42;
-        TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(phase_ms[i])) ==
-                   ED64_PRO_LL_PI_TIMEOUT);
+        TEST_CHECK(
+            ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(phase_ms[i])) ==
+            ED64_PRO_LL_PI_TIMEOUT
+        );
         const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
-        TEST_CHECK(failure->pi_context_valid && failure->pi_submitted && failure->poisoned && !failure->pi_phase_limited);
+        TEST_CHECK(
+            failure->pi_context_valid && failure->pi_submitted && failure->poisoned && !failure->pi_phase_limited
+        );
         TEST_CHECK(failure->pi_budget_ticks == TICKS_FROM_MS(ED64_PRO_PI_TIMEOUT_MS));
         TEST_CHECK(failure->pi_elapsed_ticks >= failure->pi_budget_ticks);
         TEST_CHECK(failure->pi_elapsed_ticks <= failure->pi_budget_ticks + TICKS_FROM_MS(2));
@@ -1895,8 +1901,9 @@ static void test_pi_final_poll_timing (void) {
     finish_deadline = TICKS_FROM_MS(5000);
     mock.poll_hook = expire_on_completion;
     uint32_t value = 42;
-    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000)) ==
-               ED64_PRO_LL_PI_TIMEOUT);
+    TEST_CHECK(
+        ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000)) == ED64_PRO_LL_PI_TIMEOUT
+    );
     const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
     TEST_CHECK(failure->pi_context_valid && failure->pi_submitted && failure->poisoned && failure->pi_phase_limited);
     TEST_CHECK(failure->pi_address == ED64_PRO_REG_FIFOSTAT && failure->pi_length == 4 && !failure->pi_write);
@@ -1904,8 +1911,9 @@ static void test_pi_final_poll_timing (void) {
     TEST_CHECK(!mock.active && failure->ticket == mock.ticket && value == 42 && mock.enqueues == 1);
     ed64_pro_ll_failure_t first;
     memcpy(&first, failure, sizeof(first));
-    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000)) ==
-               ED64_PRO_LL_PI_TIMEOUT);
+    TEST_CHECK(
+        ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline_ms(1000)) == ED64_PRO_LL_PI_TIMEOUT
+    );
     TEST_CHECK(memcmp(&first, ed64_pro_ll_get_failure(), sizeof(first)) == 0 && mock.enqueues == 1);
     end(&transaction);
     TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == ED64_PRO_LL_PI_TIMEOUT);
@@ -1975,12 +1983,14 @@ FRESULT f_stat (const char *path, FILINFO *info) {
     TEST_CHECK(false);
     return FR_NO_FILE;
 }
+
 FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
     (void)file;
     (void)path;
     (void)mode;
     return FR_NO_FILE;
 }
+
 FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
     (void)file;
     (void)buffer;
@@ -1988,18 +1998,22 @@ FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
     *read = 0;
     return FR_DISK_ERR;
 }
+
 FRESULT f_lseek (FIL *file, FSIZE_t offset) {
     (void)file;
     (void)offset;
     return FR_DISK_ERR;
 }
+
 FRESULT f_close (FIL *file) {
     (void)file;
     return FR_OK;
 }
+
 void fatfs_fix_file_size (FIL *file) {
     file->obj.objsize = (file->obj.objsize + 511) & ~UINT64_C(511);
 }
+
 char *strip_fs_prefix (char *path) {
     char *prefix = strstr(path, ":/");
     return prefix ? prefix + 1 : path;
