@@ -39,8 +39,12 @@ ROM and emulator loads use FatFs with capacity checks and staged paths. Save
 configuration remains local until the storage handoff; START loads the BRM file
 and enables MCU game services. The existing boot and cheat engine then runs.
 
-Automatic CIC and MCU save writeback are enabled. 64DD, fast reboot, USB
-debugging, menu RTC and automatic region detection are not yet implemented.
+Automatic CIC, automatic region detection, and MCU save writeback are enabled.
+CIC detection uses the shared IPL3 checksum path. ROM TV type comes from the
+shared destination-code metadata mapping; manual CIC/TV overrides take priority,
+and an unknown destination passes through the console TV type.
+
+64DD, fast reboot, USB debugging, and menu RTC are not yet implemented.
 
 FatFs paths remain UTF-8. Only staged GPAK/BRM paths use FatFs's CP437 table
 and actual 8.3 aliases for unrepresentable components. Missing or unusable aliases,

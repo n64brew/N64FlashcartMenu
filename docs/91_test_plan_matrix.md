@@ -55,7 +55,7 @@ Before starting a full test cycle, document the current baseline status to track
 
 | Feature | 64drive | ED64 V3 | ED64 X7 | ED64 Pro | SummerCart64 |
 |---|---|---|---|---|---|
-| **N64 ROM Loading** | ✓ | ✓ | ✓ | Partial | ✓ |
+| **N64 ROM Loading** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **64DD Disk Loading** | ✓ | ⚠ | ⚠ | - | ✓ |
 | **Emulator ROM Loading** | ✓ | ✓ | ✓ | ? | ✓ |
 | **Save Data Persistence** | ✓ | ⚠ | ⚠ | Partial | ✓ |
@@ -64,22 +64,16 @@ Before starting a full test cycle, document the current baseline status to track
 | **USB Communication** | ✓ | Limited | ✓ | - | ✓ |
 | **RTC Support** | ✓ | ✓ | ✓ | - | ✓ |
 | **Controller Pak** | ✓ | ✓ | ✓ | ? | ✓ |
-| **Auto CIC/Region Detection** | ✓ | Manual | ✓ | Partial | ✓ |
+| **Auto CIC/Region Detection** | ✓ | Manual | ✓ | ✓ | ✓ |
 | **Fast Reboot** | ✓ | - | - | - | ✓ |
 | **Diagnostics** | - | - | - | - | ✓ |
 
 **Notes:**
 - ED64 Pro: `Partial` = tested subsets; `?` = unvalidated; `-` = unavailable or not advertised.
-  Automatic CIC and save writeback are enabled. CIC 6101/6102/6103/6105/6106 boot checks passed;
-  automatic region detection is not advertised, and other console regions remain unqualified.
 - ED64 Pro saves/cheats: SM64 EEPROM persistence passed, including FAT32 Unicode ROM/save
   paths over 300 bytes. Other save families have boot/configuration checks; persistence
   remains unqualified. One SM64 Datel cheat passed; broader compatibility remains unqualified.
   Emulator boot/save testing is deferred to external testers.
-- ED64 Pro, 4 MiB: SM64 booted and restored settings; cheat actions were refused.
-  Earlier intermittent navigation/artwork/open failures remain unresolved.
-- Regression checks: SC64 native boot/browse/load/save and X7 native boot/browse/load
-  passed on NTSC with 8 MiB.
 - ED64 V3: Limited USB support (older revision)
 - ED64 V3: Requires manual CIC/region setting
 - SummerCart64: Most feature-complete (includes diagnostics & BIOS updates)

@@ -402,9 +402,10 @@ static const char *pro_get_name (void) {
     return "EverDrive-64 Pro";
 }
 
-/** @brief Report the hardware-qualified Pro features. */
+/** @brief Report the supported Pro features, including shared boot detection. */
 static bool pro_has_feature (flashcart_features_t feature) {
-    return feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_SAVE_WRITEBACK;
+    return feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_AUTO_REGION
+        || feature == FLASHCART_FEATURE_SAVE_WRITEBACK;
 }
 
 /** @brief Return cached information without MCU traffic. */

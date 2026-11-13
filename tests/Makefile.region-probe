@@ -1,0 +1,39 @@
+# Standalone test ROM; no production menu or input wrapper is linked.
+.DEFAULT_GOAL := all
+
+PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+BUILD_DIR ?= $(PROJECT_ROOT)/build/ed64-pro-region-probe
+OUTPUT_DIR ?= $(PROJECT_ROOT)/output/ed64-pro-region/probe
+
+ifneq ($(ED64_PRO_REGION_PROBE_INNER),1)
+
+.PHONY: all
+all:
+	@mkdir -p "$(OUTPUT_DIR)"
+	$(MAKE) --no-print-directory -C "$(OUTPUT_DIR)" -f "$(PROJECT_ROOT)/tests/Makefile.region-probe" \
+		ED64_PRO_REGION_PROBE_INNER=1 BUILD_DIR="$(abspath $(BUILD_DIR))"
+
+else
+
+SOURCE_DIR := $(PROJECT_ROOT)
+ifeq ($(N64_INST),)
+  $(error N64_INST is not set)
+endif
+include $(N64_INST)/include/n64.mk
+
+ROMNAME := ed64_pro_region_probe
+N64_ROM_TITLE := "ED64 TV probe"
+N64_ROM_SAVETYPE := none
+N64_ROM_RTC :=
+N64_ROM_EXPANSIONPAK := unused
+N64_ROM_REGIONFREE := 1
+# n64tool's unset-region default is destination 0x00; verify the built header.
+N64_ROM_REGION :=
+N64_CFLAGS += -Wall -Wextra -Werror -DED64_PRO_REGION_PROBE_TEST
+
+.PHONY: all
+all: $(ROMNAME).z64
+$(BUILD_DIR)/$(ROMNAME).elf: $(BUILD_DIR)/tests/ed64_pro_region_probe.o
+-include $(BUILD_DIR)/tests/ed64_pro_region_probe.d
+
+endif

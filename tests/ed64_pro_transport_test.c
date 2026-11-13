@@ -2010,7 +2010,8 @@ static void test_adapter_unavailable_operations (void) {
         unsigned enqueues = mock.enqueues;
         for (flashcart_features_t feature = FLASHCART_FEATURE_64DD; feature <= FLASHCART_FEATURE_ROM_REBOOT_FAST;
              feature++) {
-            bool supported = feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_SAVE_WRITEBACK;
+            bool supported = feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_AUTO_REGION
+                || feature == FLASHCART_FEATURE_SAVE_WRITEBACK;
             TEST_CHECK(adapter->has_feature(feature) == supported);
         }
         flashcart_firmware_version_t version = adapter->get_firmware_version();
