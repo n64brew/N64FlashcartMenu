@@ -284,6 +284,11 @@ cart_load_err_t cart_load_emulator (menu_t *menu, cart_load_emu_type_t emu_type,
             default_rom_filename = "msx.z64";
             save_type = FLASHCART_SAVE_TYPE_NONE;
             break;
+        case CART_LOAD_EMU_TYPE_SNK_NEO_GEO:
+            emu_section = "neogeo";
+            default_rom_filename = "mvs64.z64";
+            save_type = FLASHCART_SAVE_TYPE_NONE;
+            break;
         case CART_LOAD_EMU_TYPE_DEV:
             emu_section = "dev";
             default_rom_filename = "dev_emu.z64";

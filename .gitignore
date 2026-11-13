@@ -1,5 +1,7 @@
 # Ignore editor specific config folders/files
-/.vscode
+/.vscode/*
+# But keep .vscode/c_cpp_properties.json used for intellisense
+!/.vscode/c_cpp_properties.json
 
 # Ignore compilation result directories
 /build

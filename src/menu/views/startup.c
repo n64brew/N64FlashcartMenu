@@ -12,6 +12,10 @@ static void draw (menu_t *menu, surface_t *d) {
 
 
 void view_startup_init (menu_t *menu) {
+    path_t *metadata = path_init(menu->storage_prefix, "menu/metadata");
+    menu->grid_enabled = directory_exists(path_get(metadata));
+    path_free(metadata);
+
     if (flashcart_has_voltage_temperature()) {
         uint16_t voltage_mv;
         int16_t temperature_deci_c;
@@ -60,7 +64,7 @@ void view_startup_init (menu_t *menu) {
         menu->next_mode = MENU_MODE_CREDITS;
     }
     else {
-        menu->next_mode = MENU_MODE_BROWSER;
+        menu->next_mode = menu->settings.boot_into_grid && menu->grid_enabled ? MENU_MODE_GRID : MENU_MODE_BROWSER;
     }
 }
 

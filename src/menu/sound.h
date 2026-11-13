@@ -60,10 +60,22 @@ void sound_init_sfx(void);
 void sound_use_sfx(bool enable);
 
 /**
+ * @brief Configure the custom background music path.
+ *
+ * Call this once (e.g. during menu init) before sound_init_bgm(). If the
+ * path doesn't exist, sound_init_bgm() falls back to the built-in track.
+ *
+ * @param custom_bgm_path Path to the custom bgm file, or NULL to clear it.
+ */
+void sound_set_bgm_path(const char *custom_bgm_path);
+
+/**
  * @brief Initialize the background music system.
  * 
  * This function initializes the background music system, setting up
  * necessary resources and configurations for playing background music.
+ * Opens the custom BGM configured via sound_set_bgm_path(), or the
+ * built-in default track if none was configured or found.
  */
 void sound_init_bgm(void);
 
