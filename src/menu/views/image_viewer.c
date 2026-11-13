@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <libdragon.h>
 #include "../sound.h"
@@ -139,7 +140,11 @@ static void deinit (menu_t *menu) {
 
     if (image) {
         if (image_set_as_background) {
+            theme_select_custom_image();
+            free(menu->settings.theme);
+            menu->settings.theme = strdup(theme_get()->name);
             ui_components_background_replace_image(image);
+            settings_save(&menu->settings);
         } else {
             surface_free(image);
             free(image);

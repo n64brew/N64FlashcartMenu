@@ -67,6 +67,12 @@ jobs:
           name: ED64P
           path: ./output/OS64P.v64
 
+      - name: Upload artifact (ED64-Pro version)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ED64-Pro
+          path: ./output/menu.n64
+
       - name: Upload artifact (SC64 version)
         uses: actions/upload-artifact@v7
         with:
@@ -88,6 +94,7 @@ jobs:
             ./output/menu.bin
             # ./output/OS64.v64
             # ./output/OS64P.v64
+            # ./output/menu.n64
             ./output/sc64menu.n64
         continue-on-error: true
 

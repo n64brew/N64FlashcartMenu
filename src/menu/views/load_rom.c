@@ -187,8 +187,7 @@ static const char *format_rom_media_type (rom_category_type_t media_type) {
 }
 
 static const char *format_rom_destination_market (rom_destination_type_t market_type) {
-    // TODO: These are all assumptions and should be corrected if required.
-    // From http://n64devkit.square7.ch/info/submission/pal/01-01.html
+    // From https://ultra64.ca/files/documentation/online-manuals/man-v5-2/allman52/
     switch (market_type) {
         case MARKET_JAPANESE_MULTI: return "Japanese & English"; // 1080 Snowboarding JPN
         case MARKET_BRAZILIAN: return "Brazilian (Portuguese)";
@@ -207,9 +206,9 @@ static const char *format_rom_destination_market (rom_destination_type_t market_
         case MARKET_GATEWAY64_NTSC: return "LodgeNet/Gateway (NTSC)";
         case MARKET_GATEWAY64_PAL: return "LodgeNet/Gateway (PAL)";
         case MARKET_EUROPEAN_BASIC: return "PAL (includes English)"; // Mostly EU but is used on some Australian ROMs
-        case MARKET_OTHER_X: return "Regional (non specific)"; // FIXME: AUS HSV Racing ROM's and Asia Top Gear Rally use this so not only EUR
-        case MARKET_OTHER_Y: return "European (non specific)";
-        case MARKET_OTHER_Z: return "Regional (unknown)";
+        case MARKET_OTHER_X: return "PAL (Regional)"; // AUS HSV Racing ROM's and Asia Top Gear Rally but it's PAL specific
+        case MARKET_OTHER_Y: return "European (Regional)"; //Used on language variations of european ROMs
+        case MARKET_OTHER_Z: return "PAL (Miscellaneous)"; //Some australian ROMs use this, but also some European ROMs.
         default: return "Unknown";
     }
 }
@@ -404,6 +403,7 @@ static void add_favorite (menu_t *menu, void *arg) {
 }
 
 static void iterate_metadata_image(menu_t *menu, int direction) {
+    if (pending_boxart) return;
     scan_metadata_images(menu);
     if (metadata_image_count == 0) return;
     bool low_memory_mode = !is_memory_expanded();
@@ -412,12 +412,8 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
     // (unlike low-memory mode, where freeing it also aborts its decode via
     // ui_components_boxart_free()). If it's still loading, the single-instance PNG decoder
     // is busy, so any new extraction attempt here would just waste a ZIP extraction and
-    // fail with PNG_ERR_BUSY. Skip it and let the current decode finish first. Also skip
-    // while a pending_boxart swap is outstanding (even once its decode has finished but
-    // before view_load_rom_display() promotes it), otherwise a new swap here would
-    // overwrite pending_boxart and leak its component and decoded surface.
-    if (!low_memory_mode && (pending_boxart != NULL ||
-                             (boxart != NULL && boxart->loading))) {
+    // fail with PNG_ERR_BUSY. Skip it and let the current decode finish first.
+    if (!low_memory_mode && boxart != NULL && boxart->loading) {
         return;
     }
 
@@ -701,11 +697,17 @@ static void process (menu_t *menu) {
         }
     } else if (menu->actions.back) {
         sound_play_effect(SFX_EXIT);
-        menu->next_mode = MENU_MODE_BROWSER;
+        if (show_advanced_info_message) {
+            show_advanced_info_message = false;
+        } else if (show_extra_info_message) {
+            show_extra_info_message = false;
+        } else {
+            menu->next_mode = menu->load.from_grid ? MENU_MODE_GRID : MENU_MODE_BROWSER;
+        }
     } else if (menu->actions.options) {
         ui_components_context_menu_show(&options_context_menu);
         sound_play_effect(SFX_SETTING);
-    } else if (menu->actions.lz_context) {
+    } else if (menu->actions.context) {
         if (show_extra_info_message) {
             show_extra_info_message = false;
         } else {
@@ -785,7 +787,7 @@ static void draw (menu_t *menu, surface_t *d) {
         ui_components_actions_bar_text_draw(
             STL_DEFAULT,
             ALIGN_LEFT, VALIGN_TOP,
-            "A: Load and run ROM\n"
+            "A: Launch ROM\n"
             "B: Back\n"
         );
 
@@ -799,7 +801,7 @@ static void draw (menu_t *menu, surface_t *d) {
         ui_components_actions_bar_text_draw(
             STL_DEFAULT,
             ALIGN_RIGHT, VALIGN_TOP,
-            "L|Z: Extra Info\n"
+            "Z: Extra Info\n"
             "R: Adv. Options\n"
         );
 
@@ -823,7 +825,7 @@ static void draw (menu_t *menu, surface_t *d) {
                 "Variant: %s\n"
                 "Version: %hhu\n"
                 "CIC: %s\n\n\n"
-                "Press L|Z to return.\n",
+                "Press B or Z to return.\n",
                 menu->load.rom_info.title,
                 format_age_rating(menu->load.rom_info.meta.age_rating),
                 menu->load.rom_info.meta.num_players,
@@ -848,7 +850,7 @@ static void draw (menu_t *menu, surface_t *d) {
                 "Clock Rate: %.2fMHz\n"
                 "Check code: 0x%016llX\n"
                 "Endianness: %s\n\n\n"
-                "Press START to return.\n",
+                "Press B or START to return.\n",
                 menu->load.rom_info.boot_address,
                 (menu->load.rom_info.libultra.version / 10.0f), menu->load.rom_info.libultra.revision,
                 menu->load.rom_info.clock_rate,
@@ -1001,12 +1003,13 @@ void view_load_rom_init (menu_t *menu) {
     // freed/replaced (e.g. on the Datel code editor return path, which skips deinit()).
     reset_metadata_image_cache();
 
-#ifdef FEATURE_AUTOLOAD_ROM_ENABLED
-    if (!menu->settings.rom_autoload_enabled) {
-#endif
+    /* Startup autoload and Grid supply rom_path, which also survives the
+     * cheat editor; otherwise resolve the current selection. */
+    if (!menu->load_pending.rom_file && !menu->load.from_grid) {
         if (menu->load.rom_path) {
             rom_info_free_meta(&menu->load.rom_info);
             path_free(menu->load.rom_path);
+            menu->load.rom_path = NULL;
         }
 
         if(menu->load.load_history_id != -1) {
@@ -1017,10 +1020,8 @@ void view_load_rom_init (menu_t *menu) {
             menu->load.rom_path = path_clone_push(menu->browser.directory, menu->browser.entry->name);
         }
 
-        rom_filename = path_last_get(menu->load.rom_path);
-#ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     }
-#endif 
+    rom_filename = path_last_get(menu->load.rom_path);
 
     if (show_extra_info_message) {
         show_extra_info_message = false;
@@ -1033,6 +1034,7 @@ void view_load_rom_init (menu_t *menu) {
     debugf("Load ROM: loading ROM info from %s\n", path_get(menu->load.rom_path));
     rom_err_t err = rom_config_load(menu->load.rom_path, &menu->load.rom_info);
     if (err != ROM_OK) {
+        menu->load_pending.rom_file = false;
         rom_info_free_meta(&menu->load.rom_info);
         path_free(menu->load.rom_path);
         menu->load.rom_path = NULL;
@@ -1048,12 +1050,20 @@ void view_load_rom_init (menu_t *menu) {
         menu->load.rom_info.settings.cheats_enabled = false;
     }
 
+    /* Launching from Grid must not skip the confirmation that Details shows. */
+    if (menu->load_pending.rom_file && menu->load.from_grid && rom_requires_missing_expansion_pak(menu)) {
+        menu->load_pending.rom_file = false;
+        show_expansion_pak_warning = true;
+        sound_play_effect(SFX_ERROR);
+    }
+
     if (menu->load.rom_info.meta.size_limit_exceeded) {
+        menu->load_pending.rom_file = false;
         menu_show_error(menu, "ROM metadata was skipped\nmetadata.ini exceeds size limit");
     }
 
 #ifdef FEATURE_AUTOLOAD_ROM_ENABLED
-    if (!menu->settings.rom_autoload_enabled) {
+    if (!menu->load_pending.rom_file) {
 #endif
         current_metadata_image_index = 0;
         scan_metadata_images(menu);
@@ -1063,6 +1073,12 @@ void view_load_rom_init (menu_t *menu) {
             if (!is_memory_expanded()) {
                 ui_components_background_image_free_only();
             }
+            // This setup block can re-run for the same ROM (e.g. returning from the Datel
+            // code editor, which deliberately skips deinit()); free any existing boxart
+            // before it's overwritten below, otherwise its component and decoded surface
+            // leak.
+            ui_components_boxart_free(boxart);
+            boxart = NULL;
             if (rom_info_extract_metadata_image(&menu->load.rom_info, metadata_image_names[0], &data, &size)) {
                 boxart = ui_components_boxart_init_mem(
                     metadata_image_names[0], data, size,
@@ -1081,6 +1097,8 @@ void view_load_rom_init (menu_t *menu) {
                 );
             }
         } else {
+            ui_components_boxart_free(boxart);
+            boxart = NULL;
             boxart_sd_fallback_attempted = true;
             boxart = ui_components_boxart_init(
                 menu->storage_prefix, menu->load.rom_info.game_code,
@@ -1139,5 +1157,9 @@ void view_load_rom_display (menu_t *menu, surface_t *display) {
         menu->load.load_history_id = -1;
         menu->load.load_favorite_id = -1;
         deinit();
+        /* The error view returns to Grid and clears the flag itself. */
+        if (menu->next_mode != MENU_MODE_ERROR) {
+            menu->load.from_grid = false;
+        }
     }
 }

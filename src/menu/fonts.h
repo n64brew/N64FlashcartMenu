@@ -15,6 +15,7 @@
  */
 typedef enum {
     FNT_DEFAULT = 1, /**< Default font type */
+    FNT_LARGE_NUMBERS = 2, /**< Large digits for Grid group counts */
 } menu_font_type_t;
 
 /**
@@ -42,5 +43,8 @@ typedef enum {
  * @param custom_font_path Path to the custom font file.
  */
 void fonts_init(char *custom_font_path);
+
+/** Reapply font colors after changing the active theme. */
+void fonts_apply_theme(void);
 
 #endif /* FONTS_H__ */

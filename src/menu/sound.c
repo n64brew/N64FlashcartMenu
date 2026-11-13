@@ -5,7 +5,9 @@
  */
 
 #include <stdbool.h>
+#include <string.h>
 #include <libdragon.h>
+#include "utils/fs.h"
 #include "audio_player.h"
 #include "sound.h"
 
@@ -20,6 +22,8 @@ static bool sfx_enabled = false;
 static bool bgm_enabled = false;
 static bool sfx_opened = false;
 static bool bgm_opened = false;
+static char bgm_path[256] = "";
+static bool bgm_path_valid = false;
 
 /**
  * @brief Reconfigure the sound system with the specified frequency.
@@ -90,10 +94,33 @@ void sound_init_sfx (void) {
 }
 
 /**
+ * @brief Configure the custom background music path.
+ *
+ * Resolves and caches whether a custom BGM file exists at the given path so
+ * sound_init_bgm() can reuse it across audio reconfigurations without
+ * re-checking the SD card each time. Call this once before sound_init_bgm().
+ */
+void sound_set_bgm_path (const char *custom_bgm_path) {
+    bgm_path[0] = '\0';
+    bgm_path_valid = false;
+
+    if (custom_bgm_path != NULL
+        && strlen(custom_bgm_path) < sizeof(bgm_path)
+        && file_exists((char *) custom_bgm_path)) {
+        strncpy(bgm_path, custom_bgm_path, sizeof(bgm_path) - 1);
+        bgm_path[sizeof(bgm_path) - 1] = '\0';
+        bgm_path_valid = true;
+    }
+}
+
+/**
  * @brief Initialize the background music.
+ *
+ * Opens the custom BGM configured via sound_set_bgm_path(), or the built-in
+ * default track if none was configured or found.
  */
 void sound_init_bgm (void) {
-    wav64_open(&bgm, "rom:/menu/sounds/bgm.wav64");
+    wav64_open(&bgm, bgm_path_valid ? bgm_path : "rom:/menu/sounds/bgm.wav64");
     wav64_set_loop(&bgm, true);
     mixer_ch_set_vol(SOUND_BGM_CHANNEL, 0.1f, 0.1f);
     bgm_opened = true;

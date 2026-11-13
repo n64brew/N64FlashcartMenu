@@ -22,6 +22,10 @@ N64_ROM_REGIONFREE = 1
 N64_ROM_REGION = E
 N64_ROM_EXPANSIONPAK = recommended
 
+# Fast rebooting has proved to be unreliable for the moment, so it is disabled in favour of the menu autoload.
+# If you want to enable fast rebooting, comment out the following line.
+FLAGS ?= -DFEATURE_AUTOLOAD_ROM_ENABLED
+
 N64_CFLAGS += -iquote $(SOURCE_DIR) -iquote $(ASSETS_DIR) -I $(SOURCE_DIR)/libs -isystem $(SOURCE_DIR)/libs/miniz -flto=auto $(FLAGS)
 
 SRCS = \
@@ -32,8 +36,9 @@ SRCS = \
 	boot/reboot.S \
 	flashcart/64drive/64drive_ll.c \
 	flashcart/64drive/64drive.c \
+	flashcart/daisydrive/daisydrive.c \
 	flashcart/flashcart_utils.c \
-	flashcart/ed64/ed64_proseries.c \
+	flashcart/ed64_pro/ed64_pro.c \
 	flashcart/ed64/ed64_vseries.c \
 	flashcart/ed64/ed64_vseries_ll.c \
 	flashcart/ed64/ed64_xseries.c \
@@ -43,11 +48,11 @@ SRCS = \
 	flashcart/sc64/sc64_ll.c \
 	flashcart/sc64/sc64.c \
 	libs/libspng/spng/spng.c \
+	libs/tjpgd/tjpgd.c \
 	libs/miniz/miniz_tdef.c \
 	libs/miniz/miniz_tinfl.c \
 	libs/miniz/miniz_zip.c \
 	libs/miniz/miniz.c \
-	libs/tjpgd/tjpgd.c \
 	menu/ini_parser.c \
 	menu/actions.c \
 	menu/audio_player.c \
@@ -64,7 +69,9 @@ SRCS = \
 	menu/png_decoder.c \
 	menu/rom_info.c \
 	menu/settings.c \
+	menu/theme.c \
 	menu/sound.c \
+	menu/sprites.c \
 	menu/zip_entry_count.c \
 	menu/ui_components/background.c \
 	menu/ui_components/boxart.c \
@@ -81,6 +88,7 @@ SRCS = \
 	menu/views/extract_file.c \
 	menu/views/fault.c \
 	menu/views/file_info.c \
+	menu/views/grid.c \
 	menu/views/history_favorites.c \
 	menu/views/image_viewer.c \
 	menu/views/text_viewer.c \
@@ -91,6 +99,8 @@ SRCS = \
 	menu/views/startup.c \
 	menu/views/system_info.c \
 	menu/views/settings_editor.c \
+	menu/views/settings_theme.c \
+	menu/views/settings_tab.c \
 	menu/views/rtc.c \
 	menu/views/flashcart_info.c \
 	menu/views/cpakfs_manager.c \
@@ -107,11 +117,23 @@ SOUNDS_WAV = \
 	cursorsound.wav \
 	back.wav \
 	bgm.wav \
+	bgm_alt.wav \
 	enter.wav \
 	error.wav \
 	settings.wav
 
 SOUNDS_XM ?=
+
+IMAGES = \
+	filetype_compressed.png \
+	filetype_folder.png \
+	filetype_n64cart.png \
+	filetype_n64disk.png \
+	filetype_music.png \
+	filetype_text.png \
+	filetype_image.png \
+	filetype_save.png \
+	filetype_unknown.png
 
 OBJS = $(addprefix $(BUILD_DIR)/, $(addsuffix .o,$(basename $(SRCS))))
 MINIZ_OBJS = $(filter $(BUILD_DIR)/libs/miniz/%.o,$(OBJS))
@@ -120,6 +142,7 @@ DEPS = $(OBJS:.o=.d)
 
 FILESYSTEM = \
 	$(addprefix $(FILESYSTEM_DIR)/menu/fonts/, $(notdir $(FONTS:%.ttf=%.font64))) \
+	$(FILESYSTEM_DIR)/menu/fonts/digits/Firple-Bold.font64 \
 	$(addprefix $(FILESYSTEM_DIR)/menu/sounds/, $(notdir $(SOUNDS_WAV:%.wav=%.wav64))) \
 	$(addprefix $(FILESYSTEM_DIR)/menu/sounds/, $(notdir $(SOUNDS_XM:%.xm=%.xm64))) \
 	$(addprefix $(FILESYSTEM_DIR)/menu/sprites/, $(notdir $(IMAGES:%.png=%.sprite)))
@@ -128,6 +151,12 @@ $(MINIZ_OBJS): N64_CFLAGS+=-Wno-unused-function -fcompare-debug-second
 $(SPNG_OBJS): N64_CFLAGS+=-DSPNG_USE_MINIZ -fcompare-debug-second
 $(FILESYSTEM_DIR)/menu/fonts/Firple-Bold.font64: MKFONT_FLAGS+=--compress 1 --outline 1 --size 15 --charset $(ASSETS_DIR)/fonts/charset.txt --ellipsis 2026,1
 $(FILESYSTEM_DIR)/menu/sounds/%.wav64: AUDIOCONV_FLAGS=--wav-compress 1
+# Large digits for Grid group counts. mkfont names its output after the source,
+# and needs the ellipsis glyph (.) even though the counts never truncate.
+$(FILESYSTEM_DIR)/menu/fonts/digits/Firple-Bold.font64: $(ASSETS_DIR)/fonts/Firple-Bold.ttf
+	@echo " [FONT] $@"
+	@mkdir -p $(dir $@)
+	@$(N64_MKFONT) --compress 1 --outline 3 --size 24 --range 2E-2E --range 30-39 -o $(dir $@) "$<"
 
 $(@info $(shell mkdir -p ./$(FILESYSTEM_DIR) &> /dev/null))
 
@@ -187,7 +216,15 @@ sc64: $(OUTPUT_DIR)/$(PROJECT_NAME).n64
 	@cp $< $(OUTPUT_DIR)/sc64menu.n64
 .PHONY: sc64
 
-all: $(OUTPUT_DIR)/$(PROJECT_NAME).n64 64drive ed64 ed64-clone sc64
+ed64-pro: $(OUTPUT_DIR)/$(PROJECT_NAME).n64
+	@cp $< $(OUTPUT_DIR)/menu.n64
+.PHONY: ed64-pro
+
+daisydrive: $(OUTPUT_DIR)/$(PROJECT_NAME).n64
+	@cp $< $(OUTPUT_DIR)/daisymenu.bin
+.PHONY: daisydrive
+
+all: $(OUTPUT_DIR)/$(PROJECT_NAME).n64 64drive ed64 ed64-clone sc64 ed64-pro daisydrive
 .PHONY: all
 
 clean:

@@ -9,33 +9,40 @@ Files are made available:
 ## Release Notes 202x-vNext
 
 - **New Features**
-	- None.
+	- ~~Browser now allows hiding files and folders with hidden attributes set (thanks [Xeroxxx](https://github.com/Xeroxxx)).~~ Awaiting performance enhancement.
+	- Added Custom background music support.
+	- File browser filetype images.
+	- Menu colour themes.
 
 - **Bug Fixes**
 	- Preserve alpha transparency in decoded boxart.
 
 - **Documentation**
 	- Menu credits were updated to n64brew.
+	- Improve documents with new features.
 
 - **Refactor**
-	- None.
+	- Settings is now a tab.
+
 - **Other**
-	- None.
+	- Change the default BGM to a different (more subtle) tune. The original is still included in the ROM image.
+	- Fast Reboot support has been disabled in favour of ROM autoload due to too many issues being reported.
+	- Added ED64 OS3.06 firmware files.
 
 ### Breaking changes
 - None.
 
 ### Notes
 - dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
+- A new version of the SMSPlus64 emulator is available: https://github.com/fhoedemakers/smsplus64/releases/tag/v0.9
 
 ### Current known Issues
-- Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
 - PixelFX HDMI mods may need to be updated to latest FW to support display.
 - Setting Background Images (for consoles with a Jumper Pak) is more restrictive due to other features taking priority.
 
 ### Deprecation notices
 - None.
-
 
 ## Release Notes 2026-11-01 - Tagged 0.3.7
 
