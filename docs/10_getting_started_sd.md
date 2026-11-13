@@ -17,6 +17,19 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 - Place your ROM files on the Micro SD card, **in any folder except the root directory `menu` folder**.
 - Remove the Micro SD Card from your computer and insert it into the SC64. 
 
+#### Preparations for EverDrive-64 Pro
+
+- Use firmware `26.1014` or newer.
+- Copy `menu.n64` to the SD card.
+- Launch `menu.n64` from the stock Pro menu, or move it to `/ed64/menu.n64` to automatically launch it on startup.
+
+> [!IMPORTANT]
+> USB tools such as `edlink` should only be used with the console powered off or in the stock Pro menu.
+
+Automatic CIC and save writeback are enabled. 64DD, fast reboot, USB debugging, and menu RTC are not yet implemented.
+
+ROM and save paths use [CP437](https://en.wikipedia.org/wiki/Code_page_437), with existing [8.3 aliases](https://en.wikipedia.org/wiki/8.3_filename) for unsupported characters. Paths without usable aliases are rejected before launch.
+
 ### Advanced Steps
 Advanced steps are optional, which adds additional capabilities.
 

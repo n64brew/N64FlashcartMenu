@@ -15,7 +15,7 @@
  */
 static inline uint32_t _get (uint8_t *p, int index) {
     int i = index * 4;
-    return (p[i] << 24 | p[i + 1] << 16 | p[i + 2] << 8 | p[i + 3]);
+    return ((uint32_t)p[i] << 24 | (uint32_t)p[i + 1] << 16 | (uint32_t)p[i + 2] << 8 | p[i + 3]);
 }
 
 /**

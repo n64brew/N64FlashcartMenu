@@ -39,6 +39,7 @@ SRCS = \
 	flashcart/daisydrive/daisydrive.c \
 	flashcart/flashcart_utils.c \
 	flashcart/ed64_pro/ed64_pro.c \
+	flashcart/ed64_pro/ed64_pro_ll.c \
 	flashcart/ed64/ed64_vseries.c \
 	flashcart/ed64/ed64_vseries_ll.c \
 	flashcart/ed64/ed64_xseries.c \
@@ -229,7 +230,9 @@ all: $(OUTPUT_DIR)/$(PROJECT_NAME).n64 64drive ed64 ed64-clone sc64 ed64-pro dai
 
 clean:
 	@rm -f ./$(FILESYSTEM)
-	@find ./$(FILESYSTEM_DIR)/menu/ -type d -empty
+	@if [ -d "./$(FILESYSTEM_DIR)/menu/" ]; then \
+		find ./$(FILESYSTEM_DIR)/menu/ -type d -empty -delete; \
+	fi
 	@rm -rf ./$(BUILD_DIR) ./$(OUTPUT_DIR)
 .PHONY: clean
 

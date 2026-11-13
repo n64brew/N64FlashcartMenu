@@ -59,6 +59,8 @@ static void menu_init (boot_params_t *boot_params) {
     menu->flashcart_err = flashcart_init(&menu->storage_prefix);
     if (menu->flashcart_err != FLASHCART_OK) {
         menu->next_mode = MENU_MODE_FAULT;
+        // Storage is unavailable and PI may still be busy after a failed DMA.
+        return;
     }
 
     // The menu runs with or without an Expansion Pak, checking is_memory_expanded()
@@ -180,7 +182,6 @@ static void menu_deinit (menu_t *menu) {
     free(menu->browser.list);
     path_free(menu->browser.directory);
     view_grid_shutdown();
-    free(menu);
 
     display_close();
 
@@ -191,7 +192,7 @@ static void menu_deinit (menu_t *menu) {
     timer_close();
     joypad_close();
 
-    flashcart_deinit();
+    menu->flashcart_err = flashcart_deinit();
 }
 
 /**
@@ -249,6 +250,14 @@ static view_t *menu_get_view (menu_mode_t id) {
 void menu_run (boot_params_t *boot_params) {
     menu_init(boot_params);
 
+    if (menu->next_mode == MENU_MODE_FAULT) {
+        menu->mode = MENU_MODE_FAULT;
+        view_fault_init(menu);
+        for (;;) {
+            view_fault_display(menu, NULL);
+        }
+    }
+
     while (true) {
         surface_t *display = display_try_get();
 
@@ -296,6 +305,14 @@ void menu_run (boot_params_t *boot_params) {
     }
 
     menu_deinit(menu);
+    if (menu->flashcart_err != FLASHCART_OK) {
+        menu->mode = MENU_MODE_FAULT;
+        view_fault_init(menu);
+        for (;;) {
+            view_fault_display(menu, NULL);
+        }
+    }
+    free(menu);
 
     // This should now return to main.c which now boots the game.
 }

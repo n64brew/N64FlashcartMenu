@@ -1,0 +1,39 @@
+# Test-only input wrapper. Ordinary Makefile builds never include this helper.
+# REGION_TEST_CONFIG optionally names a C header defining
+# ED64_PRO_REGION_TEST_ROM (basename) and ED64_PRO_REGION_TEST_HOLD_MS.
+.DEFAULT_GOAL := all
+
+BUILD_DIR ?= build/ed64-pro-region-input
+OUTPUT_DIR ?= output/ed64-pro-region/input
+REGION_TEST_CONFIG ?=
+
+ifneq ($(ED64_PRO_REGION_INNER),1)
+
+.PHONY: all
+all:
+	$(MAKE) --no-print-directory -f tests/Makefile.region ED64_PRO_REGION_INNER=1 \
+		BUILD_DIR="$(BUILD_DIR)" OUTPUT_DIR="$(OUTPUT_DIR)" "$(OUTPUT_DIR)/N64FlashcartMenu.n64"
+
+else
+
+include Makefile
+
+N64_LDFLAGS += --wrap=actions_update
+# Keep the wrapped call and real implementation visible to the linker.
+$(BUILD_DIR)/menu/menu.o $(BUILD_DIR)/menu/actions.o $(BUILD_DIR)/ed64_pro_region_input.o: N64_CFLAGS+=-fno-lto
+$(BUILD_DIR)/ed64_pro_region_input.o: N64_CFLAGS+=-DED64_PRO_REGION_INPUT_TEST
+
+ifneq ($(REGION_TEST_CONFIG),)
+$(BUILD_DIR)/ed64_pro_region_input.o: N64_CFLAGS+=-include $(abspath $(REGION_TEST_CONFIG))
+$(BUILD_DIR)/ed64_pro_region_input.o: $(REGION_TEST_CONFIG)
+endif
+
+$(BUILD_DIR)/$(PROJECT_NAME).elf: $(BUILD_DIR)/ed64_pro_region_input.o
+$(BUILD_DIR)/ed64_pro_region_input.o: tests/ed64_pro_region_input.c tests/Makefile.region
+	@mkdir -p $(dir $@)
+	@echo "    [CC] $<"
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+-include $(BUILD_DIR)/ed64_pro_region_input.d
+
+endif

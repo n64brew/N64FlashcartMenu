@@ -25,7 +25,7 @@ The current state of support is:
 ### Help wanted (Work in Progress)
 * EverDrive-64 (X and V series)
 * DaisyDrive
-* EverDrive-64 Pro series
+* EverDrive-64 Pro
 * ED64P (clones)
 
 ### Not yet planned
@@ -94,6 +94,7 @@ Other compatible or commercial license options may be available upon request wit
 * [TJpgDec](https://elm-chan.org/fsw/tjpgd/) - [ChaN permissive license](https://elm-chan.org/fsw/tjpgd/en/appnote.html)
 * [dr_libs](https://github.com/mackron/dr_libs) (dr_mp3, dr_flac) - [Public domain or MIT-0](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 * [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
+* [Krikzz EverDrive-64 Pro API](https://github.com/krikzz/ed64-pro-pub) - [MIT License](https://github.com/krikzz/ed64-pro-pub/blob/43014e290f85140d4c5ca84fbf5ae48ac755a23d/LICENSE)
 
 ## Sounds
 See [License](https://pixabay.com/en/service/license-summary/) for the following sounds:

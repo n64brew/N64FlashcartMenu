@@ -82,6 +82,11 @@ typedef struct {
     flashcart_err_t (*deinit) (void);
     /** @brief The flashcart feature function */
     bool (*has_feature) (flashcart_features_t feature);
+    /**
+     * @brief Optional cartridge display name; NULL keeps the legacy libcart name.
+     * ED64-Pro detection bypasses libcart, which has no Pro cartridge type.
+     */
+    const char *(*get_name)(void);
     /** @brief The flashcart firmware version function */
     flashcart_firmware_version_t (*get_firmware_version) (void);
     /** @brief The flashcart ROM load function */
@@ -106,6 +111,8 @@ typedef struct {
     flashcart_err_t (*set_save_writeback) (char *save_path);
     /** @brief The flashcart set boot mode function */
     flashcart_err_t (*set_next_boot_mode) (flashcart_reboot_mode_t boot_mode);
+    /** @brief Optional error detail from retained state; NULL uses the generic message. Must not perform I/O. */
+    char *(*get_error_message)(flashcart_err_t err);
 } flashcart_t;
 
 /**
@@ -145,6 +152,14 @@ bool flashcart_has_feature (flashcart_features_t feature);
  * @return flashcart_firmware_version_t The firmware version.
  */
 flashcart_firmware_version_t flashcart_get_firmware_version (void);
+
+/**
+ * @brief Return the optional cartridge display name, or NULL for legacy backends.
+ *
+ * The bundled libcart has no EverDrive-64 Pro cartridge type. Pro is detected
+ * separately, so the "Settings" screen uses this name to identify it correctly.
+ */
+const char *flashcart_get_name (void);
 
 /**
  * @brief Load a ROM onto the flashcart.
