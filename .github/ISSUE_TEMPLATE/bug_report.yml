@@ -38,8 +38,8 @@ body:
     attributes:
       label: Expansion Pak
       options:
-        - Yes
-        - No
+        - "Yes"
+        - "No"
         - Unknown
     validations:
       required: false
@@ -49,8 +49,8 @@ body:
     attributes:
       label: Does the console work with original cartridges?
       options:
-        - Yes
-        - No
+        - "Yes"
+        - "No"
         - Not checked
     validations:
       required: false
@@ -104,8 +104,8 @@ body:
     attributes:
       label: Do the flashcart's inbuilt tests pass?
       options:
-        - Yes
-        - No
+        - "Yes"
+        - "No"
         - Not run
         - Not available
     validations:
@@ -129,8 +129,8 @@ body:
     attributes:
       label: Was USB connected to the flashcart when the issue occurred?
       options:
-        - Yes
-        - No
+        - "Yes"
+        - "No"
         - Unknown
     validations:
       required: false
@@ -217,8 +217,8 @@ body:
     attributes:
       label: Was the last loaded ROM an unofficial release?
       options:
-        - Yes
-        - No
+        - "Yes"
+        - "No"
         - Unknown
     validations:
       required: false
@@ -228,8 +228,8 @@ body:
     attributes:
       label: Is there a custom override setting for this ROM?
       options:
-        - Yes
-        - No
+        - "Yes"
+        - "No"
         - Unknown
     validations:
       required: false
