@@ -130,6 +130,9 @@ static struct {
     bool post_stop_refill;
 } mock;
 
+/**
+ * @brief Append an event marker to the mock bus trace.
+ */
 static void event (char value) {
     TEST_ASSERT(mock.event_count + 1 < sizeof(mock.events));
     mock.events[mock.event_count++] = value;
@@ -143,12 +146,18 @@ uint32_t mock_cp0_status (void) {
     return mock.irq_depth ? mock.cp0 & ~C0_STATUS_IE : mock.cp0;
 }
 
+/**
+ * @brief Return the mock clock and advance it by the configured tick step.
+ */
 uint32_t mock_ticks_read (void) {
     uint32_t now = mock.now;
     mock.now += mock.tick_step;
     return now;
 }
 
+/**
+ * @brief Count memory barriers issued by the transport.
+ */
 void mock_memory_barrier (void) {
     mock.barriers++;
 }
@@ -164,6 +173,9 @@ void disable_interrupts (void) {
     mock.irq_depth++;
 }
 
+/**
+ * @brief Release one level of mock interrupt exclusion.
+ */
 void enable_interrupts (void) {
     TEST_ASSERT(mock.irq_depth > 0);
     mock.irq_depth--;
@@ -245,14 +257,23 @@ static uint64_t submit (const void *ram, pi_addr_t pi, unsigned long length, boo
     return mock.ticket;
 }
 
+/**
+ * @brief Submit a modeled cartridge-to-RAM DMA read.
+ */
 uint64_t dma_read_raw_async (void *ram, pi_addr_t pi, unsigned long length) {
     return submit(ram, pi, length, false);
 }
 
+/**
+ * @brief Submit a modeled RAM-to-cartridge DMA write.
+ */
 uint64_t dma_write_raw_async (const void *ram, pi_addr_t pi, unsigned long length) {
     return submit(ram, pi, length, true);
 }
 
+/**
+ * @brief Append one byte to the modeled MCU receive FIFO.
+ */
 static void rx_push (uint8_t byte) {
     TEST_ASSERT(mock.rx_count < sizeof(mock.rx));
     mock.rx[(mock.rx_head + mock.rx_count) % sizeof(mock.rx)] = byte;
@@ -269,6 +290,9 @@ static void release_reply (void) {
     }
 }
 
+/**
+ * @brief Validate and record a device path frame and its launch-order marker.
+ */
 static void record_dev_path (const uint8_t *frame, size_t length) {
     TEST_ASSERT(
         length >= 9 && frame[0] == 0x2B && frame[1] == 0xD4 && frame[2] == 0x85 && frame[3] == 0x7A &&
@@ -582,6 +606,9 @@ static void check_cache (const volatile void *ram, unsigned long length) {
     );
 }
 
+/**
+ * @brief Write back mock staging and invalidate its CPU copy before a DMA read.
+ */
 void data_cache_hit_writeback_invalidate (volatile void *ram, unsigned long length) {
     check_cache(ram, length);
     memcpy(mock.ram, (const void *)ram, length);
@@ -590,12 +617,18 @@ void data_cache_hit_writeback_invalidate (volatile void *ram, unsigned long leng
     event('B');
 }
 
+/**
+ * @brief Copy CPU staging into modeled RDRAM before a DMA write.
+ */
 void data_cache_hit_writeback (const volatile void *ram, unsigned long length) {
     check_cache(ram, length);
     memcpy(mock.ram, (const void *)ram, length);
     event('C');
 }
 
+/**
+ * @brief Publish modeled RDRAM into CPU staging after a DMA read.
+ */
 void data_cache_hit_invalidate (volatile void *ram, unsigned long length) {
     check_cache(ram, length);
     memcpy((void *)ram, mock.ram, length);
@@ -634,10 +667,16 @@ static void power_on (void) {
     }
 }
 
+/**
+ * @brief Compute an absolute deadline from the mock clock.
+ */
 static uint32_t deadline_ms (uint32_t ms) {
     return mock.now + TICKS_FROM_MS(ms);
 }
 
+/**
+ * @brief Acquire a transport transaction with a 15-second test deadline.
+ */
 static void begin (ed64_pro_ll_transaction_t *transaction) {
     TEST_ASSERT(ed64_pro_ll_begin(transaction, deadline_ms(15000)) == ED64_PRO_LL_OK);
 }
@@ -656,6 +695,9 @@ static void identify (void) {
     mock.barriers = 0;
 }
 
+/**
+ * @brief Release a transaction and verify ownership and interrupt state are restored.
+ */
 static void end (ed64_pro_ll_transaction_t *transaction) {
     TEST_CHECK(ed64_pro_ll_end(transaction) == ED64_PRO_LL_OK);
     TEST_CHECK(mock.irq_depth == 0);
@@ -840,6 +882,9 @@ static void test_pi_errors (void) {
 
 static uint32_t finish_deadline;
 
+/**
+ * @brief Advance the mock clock to the configured completion deadline.
+ */
 static void expire_on_completion (void) {
     mock.now = finish_deadline;
 }
@@ -866,6 +911,9 @@ static void test_completion_at_deadline (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Inject a PI error while DMA is pending.
+ */
 static void error_during_dma (void) {
     mock_pi_status |= PI_STATUS_ERROR;
 }
@@ -1427,6 +1475,9 @@ static const struct {
     {0x1F800004u, 4, false, ED64_PRO_PHASE_SD_INIT},
 };
 
+/**
+ * @brief Prepare inherited FIFO data, status, and mailbox state for startup tests.
+ */
 static void handoff_fixture (void) {
     power_on();
     rx_push(0x12);
@@ -1977,6 +2028,9 @@ static void test_adapter_unavailable_operations (void) {
 
 char cart_card_byteswap;
 
+/**
+ * @brief Fail the test if transport code attempts a filesystem stat.
+ */
 FRESULT f_stat (const char *path, FILINFO *info) {
     (void)path;
     (void)info;
@@ -1984,6 +2038,9 @@ FRESULT f_stat (const char *path, FILINFO *info) {
     return FR_NO_FILE;
 }
 
+/**
+ * @brief Stub file opens with a missing-file result.
+ */
 FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
     (void)file;
     (void)path;
@@ -1991,6 +2048,9 @@ FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
     return FR_NO_FILE;
 }
 
+/**
+ * @brief Stub file reads with no data and a disk error.
+ */
 FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
     (void)file;
     (void)buffer;
@@ -1999,26 +2059,41 @@ FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
     return FR_DISK_ERR;
 }
 
+/**
+ * @brief Stub file seeks with a disk error.
+ */
 FRESULT f_lseek (FIL *file, FSIZE_t offset) {
     (void)file;
     (void)offset;
     return FR_DISK_ERR;
 }
 
+/**
+ * @brief Stub file closes with a successful result.
+ */
 FRESULT f_close (FIL *file) {
     (void)file;
     return FR_OK;
 }
 
+/**
+ * @brief Round the mocked file size up to a whole sector.
+ */
 void fatfs_fix_file_size (FIL *file) {
     file->obj.objsize = (file->obj.objsize + 511) & ~UINT64_C(511);
 }
 
+/**
+ * @brief Remove a filesystem prefix while retaining the leading slash.
+ */
 char *strip_fs_prefix (char *path) {
     char *prefix = strstr(path, ":/");
     return prefix ? prefix + 1 : path;
 }
 
+/**
+ * @brief Fail the test if transport code attempts to mount a filesystem.
+ */
 int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
     (void)prefix;
     (void)disk;
@@ -2027,12 +2102,18 @@ int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
     return -1;
 }
 
+/**
+ * @brief Fail the test if transport code attempts to unmount a filesystem.
+ */
 int fat_unmount (int volume_id) {
     (void)volume_id;
     TEST_CHECK(false);
     return -1;
 }
 
+/**
+ * @brief Verify frame bounds, chunked encoding, and rejection before DMA.
+ */
 static void test_frame_limits (void) {
     power_on();
     identify();
@@ -2064,6 +2145,9 @@ static void test_frame_limits (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Verify byte-exact system-info requests and decoded values.
+ */
 static void test_sys_info (void) {
     for (size_t count = 1; count <= 2; count++) {
         power_on();
@@ -2082,6 +2166,9 @@ static void test_sys_info (void) {
     }
 }
 
+/**
+ * @brief Reject invalid system-info and NRESP arguments before DMA.
+ */
 static void test_sys_info_invalid (void) {
     power_on();
     identify();
@@ -2100,6 +2187,9 @@ static void test_sys_info_invalid (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Keep outputs unchanged and latch truncated or trailing system-info replies.
+ */
 static void test_sys_info_faults (void) {
     for (unsigned trailing = 0; trailing < 2; trailing++) {
         power_on();
@@ -2122,6 +2212,9 @@ static void test_sys_info_faults (void) {
     }
 }
 
+/**
+ * @brief Verify MCU error details and sticky malformed, missing, or trailing replies.
+ */
 static void test_nresp (void) {
     for (unsigned fault = 0; fault < 4; fault++) {
         power_on();
@@ -2156,6 +2249,9 @@ static void test_nresp (void) {
     }
 }
 
+/**
+ * @brief Verify exact FIFO payloads and ACK counts across transfer lengths.
+ */
 static void test_ack_helpers (void) {
     const size_t lengths[] = {512, 1024, 1536, 4096};
     uint8_t buffer[4096];
@@ -2186,6 +2282,9 @@ static void test_ack_helpers (void) {
     }
 }
 
+/**
+ * @brief Verify SD read/write frames, payloads, and block acknowledgements.
+ */
 static void test_sd_read_write (void) {
     const uint32_t counts[] = {1, 2, 3, 8, 64};
     uint8_t buffer[64 * 512];
@@ -2226,6 +2325,9 @@ static void test_sd_read_write (void) {
     }
 }
 
+/**
+ * @brief Reject invalid SD buffers, sector counts, and LBA ranges before DMA.
+ */
 static void test_sd_invalid (void) {
     power_on();
     identify();
@@ -2253,6 +2355,9 @@ static void test_sd_invalid (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Bound each SD block ACK wait and retain the timeout without further DMA.
+ */
 static void test_sd_ack_timeouts (void) {
     uint8_t buffer[4096];
     for (unsigned write = 0; write < 2; write++) {
@@ -2279,6 +2384,9 @@ static void test_sd_ack_timeouts (void) {
     }
 }
 
+/**
+ * @brief Latch SD write framing and status faults without retrying.
+ */
 static void test_sd_faults (void) {
     uint8_t buffer[1536] = {0};
     for (unsigned fault = 0; fault < 5; fault++) {
@@ -2309,6 +2417,9 @@ static void test_sd_faults (void) {
     }
 }
 
+/**
+ * @brief Verify direct SD-to-FCI frames, payloads, and byte-swap flag bracketing.
+ */
 static void test_fci_transfers (void) {
     const uint32_t counts[] = {1, 3, 256};
     for (size_t i = 0; i < sizeof(counts) / sizeof(counts[0]); i++) {
@@ -2349,6 +2460,9 @@ static void test_fci_transfers (void) {
     }
 }
 
+/**
+ * @brief Reject invalid FCI ranges and flag arguments before DMA.
+ */
 static void test_fci_invalid (void) {
     power_on();
     identify();
@@ -2380,6 +2494,9 @@ static void test_fci_invalid (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Verify flag frames, stable completion, and sticky wait or trailing-data faults.
+ */
 static void test_flag_frames_and_faults (void) {
     for (unsigned fault = 0; fault < 4; fault++) {
         power_on();
@@ -2408,6 +2525,9 @@ static void test_flag_frames_and_faults (void) {
     }
 }
 
+/**
+ * @brief Latch malformed and MCU-error status replies after FCI transfers.
+ */
 static void test_fci_status_failure (void) {
     for (unsigned malformed = 0; malformed < 2; malformed++) {
         power_on();
@@ -2426,6 +2546,9 @@ static void test_fci_status_failure (void) {
     }
 }
 
+/**
+ * @brief Return a valid ROM, EEPROM, and RTC launch configuration.
+ */
 static ed64_pro_dev_cfg_t launch_config (void) {
     return (ed64_pro_dev_cfg_t){
         .brom_type = ED64_PRO_ROM_GPAK,
@@ -2436,6 +2559,9 @@ static ed64_pro_dev_cfg_t launch_config (void) {
     };
 }
 
+/**
+ * @brief Verify device path encoding for UTF-8 bytes and maximum-length paths.
+ */
 static void test_dev_path_frames (void) {
     const char *paths[] = {"/game.z64", "/saves/caf\xC3\xA9.sav"};
     for (unsigned type = 0; type < 2; type++) {
@@ -2479,6 +2605,9 @@ static void test_dev_path_frames (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Reject invalid device paths and launch configurations before DMA.
+ */
 static void test_dev_invalid_arguments (void) {
     power_on();
     identify();
@@ -2530,6 +2659,9 @@ static void test_dev_invalid_arguments (void) {
     end(&transaction);
 }
 
+/**
+ * @brief Verify the device configuration frame for every supported save type.
+ */
 static void test_dev_config_frame (void) {
     const uint32_t sizes[] = {0, 512, 2048, 32768, 98304, 131072, 131072};
     for (unsigned type = 0; type < sizeof(sizes) / sizeof(sizes[0]); type++) {
@@ -2563,6 +2695,9 @@ static void test_dev_config_frame (void) {
     }
 }
 
+/**
+ * @brief Verify launch command order and stop at the first failed step.
+ */
 static void test_dev_order_and_faults (void) {
     for (unsigned failed_step = 0; failed_step <= 4; failed_step++) {
         power_on();
@@ -2604,6 +2739,9 @@ static void test_dev_order_and_faults (void) {
 }
 
 #ifdef ED64_PRO_TEST_FAIL_WRITE_N
+/**
+ * @brief Verify the injected write timeout preserves partial data and blocks further DMA.
+ */
 static void test_sd_injected_write_failure (void) {
     power_on();
     identify();

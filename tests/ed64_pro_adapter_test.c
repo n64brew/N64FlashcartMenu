@@ -16,21 +16,33 @@
 int cart_type;
 
 /* These legacy dispatch paths must stay unused by the Pro adapter tests. */
+/**
+ * @brief Fail if the Pro adapter attempts iQue detection.
+ */
 bool sys_bbplayer (void) {
     TEST_CHECK(false);
     return false;
 }
 
+/**
+ * @brief Fail if the Pro adapter initializes iQue storage.
+ */
 int bbfs_init (void) {
     TEST_CHECK(false);
     return -1;
 }
 
+/**
+ * @brief Fail if the Pro adapter probes DaisyDrive.
+ */
 bool daisydrive_detected (void) {
     TEST_CHECK(false);
     return false;
 }
 
+/**
+ * @brief Fail if the Pro adapter mounts DaisyDrive storage.
+ */
 bool daisydrive_init_sdfs (const char *prefix, int max_files) {
     (void)prefix;
     (void)max_files;
@@ -38,6 +50,9 @@ bool daisydrive_init_sdfs (const char *prefix, int max_files) {
     return false;
 }
 
+/**
+ * @brief Fail if the Pro adapter initializes legacy SD storage.
+ */
 bool debug_init_sdfs (const char *prefix, int npart) {
     (void)prefix;
     (void)npart;
@@ -45,53 +60,83 @@ bool debug_init_sdfs (const char *prefix, int npart) {
     return false;
 }
 
+/**
+ * @brief Fail if the Pro adapter initializes ISViewer logging.
+ */
 bool debug_init_isviewer (void) {
     TEST_CHECK(false);
     return false;
 }
 
+/**
+ * @brief Fail if the Pro adapter initializes legacy USB logging.
+ */
 bool debug_init_usblog (void) {
     TEST_CHECK(false);
     return false;
 }
 
+/**
+ * @brief Fail if the Pro adapter selects the 64drive backend.
+ */
 flashcart_t *d64_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
 
+/**
+ * @brief Fail if the Pro adapter selects an EverDrive X-series backend.
+ */
 flashcart_t *ed64_xseries_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
 
+/**
+ * @brief Fail if the Pro adapter selects an EverDrive V-series backend.
+ */
 flashcart_t *ed64_vseries_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
 
+/**
+ * @brief Fail if the Pro adapter selects the SummerCart64 backend.
+ */
 flashcart_t *sc64_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
 
+/**
+ * @brief Fail if the Pro adapter selects the DaisyDrive backend.
+ */
 flashcart_t *daisydrive_get_flashcart (void) {
     TEST_CHECK(false);
     return NULL;
 }
 
+/**
+ * @brief Fail if the Pro adapter invokes the shared file-existence helper.
+ */
 bool file_exists (char *path) {
     (void)path;
     TEST_CHECK(false);
     return false;
 }
 
+/**
+ * @brief Fail if the Pro adapter invokes the shared file-size helper.
+ */
 int64_t file_get_size (char *path) {
     (void)path;
     TEST_CHECK(false);
     return -1;
 }
 
+/**
+ * @brief Fail if the Pro adapter invokes shared file allocation.
+ */
 bool file_allocate (char *path, size_t size) {
     (void)path;
     (void)size;
@@ -99,6 +144,9 @@ bool file_allocate (char *path, size_t size) {
     return true;
 }
 
+/**
+ * @brief Fail if the Pro adapter invokes shared file filling.
+ */
 bool file_fill (char *path, uint8_t value) {
     (void)path;
     (void)value;
@@ -160,36 +208,57 @@ static struct {
     unsigned events_count;
 } mock;
 
+/**
+ * @brief Return and advance the simulated clock.
+ */
 uint32_t mock_ticks_read (void) {
     return mock.now++;
 }
 
+/**
+ * @brief Return the supplied deadline without applying a mock time limit.
+ */
 uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t milliseconds) {
     (void)milliseconds;
     return deadline;
 }
 
+/**
+ * @brief Simulate successful Pro identification.
+ */
 ed64_pro_probe_t ed64_pro_ll_probe (uint32_t deadline) {
     (void)deadline;
     return (ed64_pro_probe_t){.outcome = ED64_PRO_PROBE_IDENTIFIED, .id = 0xED640027u, .id_valid = true};
 }
 
+/**
+ * @brief Return the configured transport failure details.
+ */
 const ed64_pro_ll_failure_t *ed64_pro_ll_get_failure (void) {
     return &mock.failure;
 }
 
+/**
+ * @brief Record transaction acquisition and return the configured result.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     transaction->deadline = deadline;
     mock.begin_calls++;
     return mock.begin_error;
 }
 
+/**
+ * @brief Record transaction release and report success.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
     (void)transaction;
     mock.end_calls++;
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Simulate an empty receive FIFO.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, size_t *drained, uint32_t deadline) {
     (void)transaction;
     (void)deadline;
@@ -197,6 +266,9 @@ ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, s
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Return a valid mock MCU status key.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
     (void)transaction;
@@ -205,17 +277,26 @@ ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Delegate status validation to the mock status reader.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
     return ed64_pro_ll_read_status(transaction, status, deadline);
 }
 
+/**
+ * @brief Simulate a successful stop command.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     (void)transaction;
     (void)deadline;
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Record MCU filesystem initialization and return its configured result.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
     (void)transaction;
@@ -226,6 +307,9 @@ ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *
     return mock.init_error;
 }
 
+/**
+ * @brief Check the requested information IDs and return mock firmware data.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     ed64_pro_ll_transaction_t *transaction,
     const uint32_t *ids,
@@ -241,6 +325,9 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     return mock.info_error;
 }
 
+/**
+ * @brief Record sector ranges and inject the configured transfer failure.
+ */
 static ed64_pro_ll_error_t sector_transfer (uint32_t lba, uint32_t count, bool write) {
     TEST_ASSERT(mock.operations < 8);
     mock.lbas[mock.operations] = lba;
@@ -253,6 +340,9 @@ static ed64_pro_ll_error_t sector_transfer (uint32_t lba, uint32_t count, bool w
     return mock.operations == mock.fail_operation ? mock.io_error : ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Record a sector read and fill successful reads with test data.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_sd_read (
     ed64_pro_ll_transaction_t *transaction,
     void *buffer,
@@ -269,6 +359,9 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read (
     return result;
 }
 
+/**
+ * @brief Record a sector write and return the configured transfer result.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_sd_write (
     ed64_pro_ll_transaction_t *transaction,
     const void *buffer,
@@ -284,6 +377,9 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_write (
 
 char cart_card_byteswap;
 
+/**
+ * @brief Record metadata lookups and return configured short aliases or errors.
+ */
 FRESULT f_stat (const char *path, FILINFO *info) {
     TEST_ASSERT(mock.stats < 8);
     snprintf(mock.stat_paths[mock.stats++], sizeof(mock.stat_paths[0]), "%s", path);
@@ -301,6 +397,9 @@ FRESULT f_stat (const char *path, FILINFO *info) {
     return FR_NO_FILE;
 }
 
+/**
+ * @brief Record the read-only path and initialize the mock file.
+ */
 FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
     TEST_CHECK(mode == FA_READ);
     mock.opens++;
@@ -311,6 +410,9 @@ FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
     return mock.open_result;
 }
 
+/**
+ * @brief Read through the adapter disk callback and simulate short reads or errors.
+ */
 FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
     TEST_ASSERT(mock.file_reads < 8);
     mock.destinations[mock.file_reads] = (uintptr_t)buffer;
@@ -327,27 +429,42 @@ FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
     return FR_OK;
 }
 
+/**
+ * @brief Record the file offset and return the configured seek result.
+ */
 FRESULT f_lseek (FIL *file, FSIZE_t offset) {
     mock.seeks++;
     file->fptr = offset;
     return mock.seek_result;
 }
 
+/**
+ * @brief Record file closure and return the configured result.
+ */
 FRESULT f_close (FIL *file) {
     (void)file;
     mock.closes++;
     return mock.close_result;
 }
 
+/**
+ * @brief Round the mock file size up to a sector boundary.
+ */
 void fatfs_fix_file_size (FIL *file) {
     file->obj.objsize = (file->obj.objsize + 511) & ~UINT64_C(511);
 }
 
+/**
+ * @brief Skip a filesystem prefix while retaining the leading slash.
+ */
 char *strip_fs_prefix (char *path) {
     char *prefix = strstr(path, ":/");
     return prefix ? prefix + 1 : path;
 }
 
+/**
+ * @brief Record byte-swap flag changes and inject the configured failure.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline) {
     (void)transaction;
@@ -362,6 +479,9 @@ ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, ui
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Check byte-swap state and record a transfer to cartridge memory.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     ed64_pro_ll_transaction_t *transaction,
     uint32_t fci,
@@ -377,6 +497,9 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     return sector_transfer(lba, count, false);
 }
 
+/**
+ * @brief Record launch command order and inject the configured MCU failure.
+ */
 static ed64_pro_ll_error_t launch_command (char event) {
     mock.events[mock.events_count++] = event;
     mock.command_calls++;
@@ -391,6 +514,9 @@ static ed64_pro_ll_error_t launch_command (char event) {
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Capture a launch path and record its command result.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     ed64_pro_ll_transaction_t *transaction,
     ed64_pro_path_t type,
@@ -404,6 +530,9 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     return launch_command(index == 0 ? 'P' : 'B');
 }
 
+/**
+ * @brief Capture the launch configuration and record its command result.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
     (void)transaction;
@@ -412,17 +541,26 @@ ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_
     return launch_command('G');
 }
 
+/**
+ * @brief Record the game-start command and return its configured result.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     (void)transaction;
     (void)deadline;
     return launch_command('S');
 }
 
+/**
+ * @brief Capture ROM-loading progress values.
+ */
 static void progress_callback (float progress) {
     TEST_ASSERT(mock.progress_calls < 8);
     mock.progress[mock.progress_calls++] = progress;
 }
 
+/**
+ * @brief Check mount state and exercise the supplied disk callbacks.
+ */
 int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
     TEST_CHECK(strcmp(prefix, "sd:/") == 0 && flags == 0);
     TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_MOUNTING);
@@ -437,6 +575,9 @@ int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
     return mock.mount_result;
 }
 
+/**
+ * @brief Check the volume and record the unmount attempt.
+ */
 int fat_unmount (int volume_id) {
     TEST_CHECK(volume_id == mock.mount_result);
     mock.unmounts++;
@@ -444,10 +585,16 @@ int fat_unmount (int volume_id) {
     return mock.unmount_result;
 }
 
+/**
+ * @brief Encode a date in FAT timestamp format.
+ */
 static uint32_t fat_date (unsigned year, unsigned month, unsigned day) {
     return ((year - 1980) << 9) | (month << 5) | day;
 }
 
+/**
+ * @brief Reset adapter state and configure successful mock defaults.
+ */
 static void fixture (void) {
     memset(&mock, 0, sizeof(mock));
     memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
@@ -459,6 +606,9 @@ static void fixture (void) {
     cart_card_byteswap = 0;
 }
 
+/**
+ * @brief Initialize and mount the adapter, then reset transfer counters.
+ */
 static void mounted_fixture (void) {
     fixture();
     TEST_ASSERT(pro_init() == FLASHCART_OK);
@@ -468,6 +618,9 @@ static void mounted_fixture (void) {
     mock.begin_calls = 0;
 }
 
+/**
+ * @brief Verify cached firmware version, ROM capacity, and cartridge name.
+ */
 static void test_firmware_info (void) {
     fixture();
     TEST_CHECK(pro_init() == FLASHCART_OK);
@@ -479,6 +632,9 @@ static void test_firmware_info (void) {
     TEST_CHECK(pro_init() == FLASHCART_OK && mock.info_calls == 1);
 }
 
+/**
+ * @brief Verify minimum firmware dates and reject invalid dates or capacity.
+ */
 static void test_firmware_boundaries (void) {
     static const struct {
         unsigned year, month, day;
@@ -508,6 +664,9 @@ static void test_firmware_boundaries (void) {
     TEST_CHECK(pro_init() == FLASHCART_ERR_INT);
 }
 
+/**
+ * @brief Verify firmware query failures retain diagnostics and prevent retries.
+ */
 static void test_firmware_query_failure (void) {
     fixture();
     mock.info_error = ED64_PRO_LL_TIMEOUT;
@@ -517,6 +676,9 @@ static void test_firmware_query_failure (void) {
     TEST_CHECK(pro_init() == FLASHCART_ERR_INT && mock.info_calls == 1);
 }
 
+/**
+ * @brief Verify disk callback mounting and reject a second mount.
+ */
 static void test_mount (void) {
     mounted_fixture();
     TEST_CHECK(mock.mounts == 1 && mock.disk == &pro_disk);
@@ -525,6 +687,9 @@ static void test_mount (void) {
     TEST_CHECK(pro_disk.disk_status() == 0);
 }
 
+/**
+ * @brief Verify failed or unexpected-volume mounts disable further storage use.
+ */
 static void test_mount_failure (void) {
     for (int volume = -1; volume <= 1; volume += 2) {
         fixture();
@@ -538,6 +703,9 @@ static void test_mount_failure (void) {
     }
 }
 
+/**
+ * @brief Verify mount failures retain the underlying sector error.
+ */
 static void test_mount_io_failure (void) {
     fixture();
     TEST_ASSERT(pro_init() == FLASHCART_OK);
@@ -548,6 +716,9 @@ static void test_mount_io_failure (void) {
     TEST_CHECK(mock.fs_inits == 0);
 }
 
+/**
+ * @brief Verify sector chunking, byte contents, and write synchronization.
+ */
 static void test_sector_chunks (void) {
     mounted_fixture();
     uint8_t data[129 * 512];
@@ -563,6 +734,9 @@ static void test_sector_chunks (void) {
     TEST_CHECK(pro_disk.disk_ioctl(GET_SECTOR_COUNT, NULL) == RES_PARERR);
 }
 
+/**
+ * @brief Verify invalid sector requests fail before acquiring transport.
+ */
 static void test_sector_arguments (void) {
     mounted_fixture();
     uint8_t data[512];
@@ -576,6 +750,9 @@ static void test_sector_arguments (void) {
     TEST_CHECK(pro_disk.disk_read(data, UINT32_MAX, 1) == RES_OK);
 }
 
+/**
+ * @brief Verify transfer failures retain diagnostics and block further storage operations.
+ */
 static void test_storage_latch (void) {
     mounted_fixture();
     uint8_t data[65 * 512];
@@ -600,6 +777,9 @@ static void test_storage_latch (void) {
     TEST_CHECK(strstr(ed64_pro_get_error_message(), "MCU status 0x31, NRESP 0xA3") != NULL);
 }
 
+/**
+ * @brief Verify unsupported contexts reject I/O without disabling storage.
+ */
 static void test_unsupported_context (void) {
     mounted_fixture();
     uint8_t data[512];
@@ -608,6 +788,9 @@ static void test_unsupported_context (void) {
     TEST_CHECK(mock.operations == 0 && !pro_diagnostics.storage_failed && pro_disk.disk_status() == 0);
 }
 
+/**
+ * @brief Verify storage unmounts before MCU filesystem ownership resumes.
+ */
 static void test_release (void) {
     mounted_fixture();
     TEST_CHECK(pro_release_storage() == FLASHCART_OK);
@@ -617,6 +800,9 @@ static void test_release (void) {
     TEST_CHECK(pro_disk.disk_status() == STA_NOINIT);
 }
 
+/**
+ * @brief Verify pending writes and release failures block storage handoff.
+ */
 static void test_release_refusals (void) {
     mounted_fixture();
     uint8_t data[512] = {0};
@@ -638,6 +824,9 @@ static void test_release_refusals (void) {
     TEST_CHECK(pro_release_storage() == FLASHCART_ERR_SD_CARD && mock.fs_inits == 1);
 }
 
+/**
+ * @brief Verify ROM chunking, byte swapping, progress, and launch staging.
+ */
 static void test_rom_loading (void) {
     mounted_fixture();
     mock.file_size = 300 * 1024;
@@ -656,6 +845,9 @@ static void test_rom_loading (void) {
     TEST_CHECK(!pro_diagnostics.load_byte_swap);
 }
 
+/**
+ * @brief Verify ROM size, dirty cache, read, close, and flag failures block launch.
+ */
 static void test_rom_load_refusals (void) {
     mounted_fixture();
     mock.file_size = (uint64_t)pro_diagnostics.rom_capacity + 1;
@@ -681,6 +873,9 @@ static void test_rom_load_refusals (void) {
     TEST_CHECK(pro_diagnostics.storage_failed && mock.flag_calls == 2 && mock.operations == 1);
 }
 
+/**
+ * @brief Verify auxiliary-file offsets extend the staged ROM extent.
+ */
 static void test_auxiliary_loading (void) {
     mounted_fixture();
     TEST_ASSERT(pro_load_rom("sd:/emulator.z64", NULL) == FLASHCART_OK);
@@ -693,6 +888,9 @@ static void test_auxiliary_loading (void) {
     TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/emulator.z64") == 0);
 }
 
+/**
+ * @brief Verify invalid paths, offsets, and cartridge ranges reject loading safely.
+ */
 static void test_load_arguments (void) {
     mounted_fixture();
     TEST_CHECK(pro_load_rom(NULL, NULL) == FLASHCART_ERR_ARGS);
@@ -717,6 +915,9 @@ static void test_load_arguments (void) {
     TEST_CHECK(pro_disk_write((void *)0x10000000u, 0, 1) == RES_PARERR);
 }
 
+/**
+ * @brief Verify save types and paths stage without MCU commands.
+ */
 static void test_save_mapping (void) {
     static const uint32_t types[] = {
         ED64_PRO_BRM_OFF,
@@ -747,6 +948,9 @@ static void test_save_mapping (void) {
     TEST_CHECK(!pro_diagnostics.save_ready);
 }
 
+/**
+ * @brief Verify save and ROM changes clear stale staged save state.
+ */
 static void test_save_staging_reset (void) {
     mounted_fixture();
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_SRAM_1MBIT) == FLASHCART_OK);
@@ -762,6 +966,9 @@ static void test_save_staging_reset (void) {
     TEST_CHECK(pro_diagnostics.save_path[0] == '\0');
 }
 
+/**
+ * @brief Stage a ROM and optional save, then reset launch command tracking.
+ */
 static void staged_game_fixture (bool save) {
     mounted_fixture();
     TEST_ASSERT(pro_load_rom("sd:/game.z64", NULL) == FLASHCART_OK);
@@ -774,6 +981,9 @@ static void staged_game_fixture (bool save) {
     mock.begin_calls = 0;
 }
 
+/**
+ * @brief Verify launch command order and configuration with and without saves.
+ */
 static void test_game_handoff (void) {
     for (unsigned save = 0; save < 2; save++) {
         staged_game_fixture(save);
@@ -795,6 +1005,9 @@ static void test_game_handoff (void) {
     }
 }
 
+/**
+ * @brief Verify each launch command failure blocks retries and retains diagnostics.
+ */
 static void test_game_handoff_failures (void) {
     static const char *steps[] = {"GPAK path", "Save path", "Game configuration", "Game start"};
     for (unsigned failure = 1; failure <= 4; failure++) {
@@ -809,6 +1022,9 @@ static void test_game_handoff_failures (void) {
     }
 }
 
+/**
+ * @brief Verify incomplete staging and pending writes block launch before handoff.
+ */
 static void test_launch_preflight (void) {
     mounted_fixture();
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD);
@@ -823,6 +1039,9 @@ static void test_launch_preflight (void) {
     TEST_CHECK(mock.unmounts == 0 && mock.fs_inits == 0 && mock.command_calls == 0);
 }
 
+/**
+ * @brief Verify MCU paths use CP437 while FatFs paths retain UTF-8.
+ */
 static void test_cp437_paths (void) {
     mounted_fixture();
     char rom[] = "sd:/Caf\xC3\xA9/\xC3\xA9.z64";
@@ -846,6 +1065,9 @@ static void test_cp437_paths (void) {
     TEST_CHECK(mock.stats == 0);
 }
 
+/**
+ * @brief Verify unmappable path components use validated short aliases.
+ */
 static void test_unicode_short_aliases (void) {
     mounted_fixture();
     mock.aliases[0].path = "/日本語";
@@ -872,6 +1094,9 @@ static void test_unicode_short_aliases (void) {
     TEST_CHECK(strcmp(mock.launch_paths[1], "/NIPPON~1/Caf\x82/\x90T\x90~1.SAV") == 0);
 }
 
+/**
+ * @brief Verify malformed ROM paths clear staging before metadata or data I/O.
+ */
 static void test_invalid_utf8_paths (void) {
     static const char *paths[] = {
         "/\x80.z64",
@@ -900,6 +1125,9 @@ static void test_invalid_utf8_paths (void) {
     }
 }
 
+/**
+ * @brief Verify malformed save paths clear staging without I/O.
+ */
 static void test_invalid_utf8_save_path (void) {
     mounted_fixture();
     TEST_ASSERT(pro_load_rom("/game.z64", NULL) == FLASHCART_OK);
@@ -912,6 +1140,9 @@ static void test_invalid_utf8_save_path (void) {
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
 }
 
+/**
+ * @brief Verify missing or invalid short aliases block launch staging.
+ */
 static void test_missing_or_invalid_alias (void) {
     static const struct {
         const char *alias;
@@ -952,6 +1183,9 @@ static void test_missing_or_invalid_alias (void) {
     TEST_CHECK(pro_diagnostics.rom_path[0] == '\0');
 }
 
+/**
+ * @brief Verify encoded path limits include short-alias expansion.
+ */
 static void test_encoded_path_bounds (void) {
     mounted_fixture();
     char path[ED64_PRO_PATH_MAX + 2];
@@ -982,6 +1216,9 @@ static void test_encoded_path_bounds (void) {
     TEST_CHECK(strlen(pro_diagnostics.rom_path) == ED64_PRO_PATH_MAX - 2);
 }
 
+/**
+ * @brief Verify path lookup and loading require FatFs storage ownership.
+ */
 static void test_path_metadata_requires_ownership (void) {
     mounted_fixture();
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
@@ -995,6 +1232,9 @@ static void test_path_metadata_requires_ownership (void) {
     TEST_CHECK(mock.stats == 0 && mock.opens == 0 && mock.begin_calls == 0 && !pro_diagnostics.launch_ready);
 }
 
+/**
+ * @brief Verify Unicode auxiliary reads use FatFs without changing the staged MCU path.
+ */
 static void test_unicode_auxiliary_uses_fatfs_only (void) {
     mounted_fixture();
     TEST_ASSERT(pro_load_rom("/emulator.z64", NULL) == FLASHCART_OK);

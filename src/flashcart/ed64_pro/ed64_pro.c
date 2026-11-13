@@ -181,6 +181,7 @@ done:;
     return ED64_PRO_LL_OK;
 }
 
+/** @brief Return the retained startup and storage diagnostics. */
 const ed64_pro_diagnostics_t *ed64_pro_get_diagnostics (void) {
     return &pro_diagnostics;
 }
@@ -333,6 +334,7 @@ char *ed64_pro_get_error_message (void) {
     return pro_error_message;
 }
 
+/** @brief Validate the firmware FAT date and convert it to a version. */
 static bool pro_decode_firmware (uint32_t timestamp, flashcart_firmware_version_t *version) {
     unsigned date = timestamp & 0xFFFFu;
     unsigned year = 1980u + (date >> 9);
@@ -395,6 +397,7 @@ static flashcart_err_t pro_init (void) {
     return pro_diagnostics.info_result;
 }
 
+/** @brief Return the cartridge display name. */
 static const char *pro_get_name (void) {
     return "EverDrive-64 Pro";
 }
@@ -409,12 +412,14 @@ static flashcart_firmware_version_t pro_get_firmware_version (void) {
     return pro_diagnostics.firmware_version;
 }
 
+/** @brief Report whether FatFs owns a ready, healthy SD transport. */
 static int pro_disk_status (void) {
     bool owned = pro_diagnostics.storage_state == ED64_PRO_STORAGE_MOUNTING ||
                  pro_diagnostics.storage_state == ED64_PRO_STORAGE_FATFS_OWNED;
     return owned && pro_diagnostics.state == ED64_PRO_READY && !pro_diagnostics.storage_failed ? 0 : STA_NOINIT;
 }
 
+/** @brief Latch the first storage failure and its operation details. */
 static void
 pro_storage_fail (const char *detail, const char *operation, uint32_t lba, uint32_t count, ed64_pro_ll_error_t error) {
     if (pro_diagnostics.storage_failed) {
@@ -430,6 +435,7 @@ pro_storage_fail (const char *detail, const char *operation, uint32_t lba, uint3
     pro_diagnostics.storage_failure.code = error;
 }
 
+/** @brief Validate the sector range and RDRAM or cartridge transfer buffer. */
 static bool pro_disk_arguments (const void *buffer, int64_t sector, int count, bool write) {
     if (!buffer || sector < 0 || count <= 0 || (uint64_t)sector + (unsigned)count > UINT64_C(0x100000000)) {
         return false;
@@ -444,6 +450,7 @@ static bool pro_disk_arguments (const void *buffer, int64_t sector, int count, b
            bytes <= pro_diagnostics.rom_capacity - (physical - 0x10000000u);
 }
 
+/** @brief Transfer SD sectors in bounded chunks and retain any storage failure. */
 static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool write) {
     if (!pro_disk_arguments(buffer, sector, count, write)) {
         return RES_PARERR;
@@ -504,14 +511,17 @@ static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool writ
     return RES_OK;
 }
 
+/** @brief Read SD sectors into RDRAM or cartridge ROM memory. */
 static int pro_disk_read (uint8_t *buffer, int64_t sector, int count) {
     return pro_disk_transfer(buffer, sector, count, false);
 }
 
+/** @brief Write SD sectors from RDRAM. */
 static int pro_disk_write (const uint8_t *buffer, int64_t sector, int count) {
     return pro_disk_transfer((void *)buffer, sector, count, true);
 }
 
+/** @brief Acknowledge CTRL_SYNC for completed writes; reject other controls. */
 static int pro_disk_ioctl (uint8_t command, void *buffer) {
     (void)buffer;
     if (command != CTRL_SYNC) {
@@ -533,6 +543,7 @@ static const fat_disk_t pro_disk = {
     .disk_ioctl = pro_disk_ioctl,
 };
 
+/** @brief Mount the Pro SD card as FatFs volume 0 at the requested prefix. */
 bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
     (void)max_files;
     if (!prefix || pro_diagnostics.storage_state != ED64_PRO_STORAGE_MCU_OWNED ||
@@ -553,6 +564,7 @@ bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
     return true;
 }
 
+/** @brief Unmount synchronized FatFs storage and return SD ownership to the MCU. */
 static flashcart_err_t pro_release_storage (void) {
     if (pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_diagnostics.storage_failed ||
         pro_diagnostics.unsynced) {
@@ -584,6 +596,7 @@ static flashcart_err_t pro_release_storage (void) {
     return FLASHCART_OK;
 }
 
+/** @brief Release storage and configure MCU game services for the prepared launch. */
 static flashcart_err_t pro_deinit (void) {
     if (pro_diagnostics.storage_failed) {
         return FLASHCART_ERR_SD_CARD;
@@ -654,6 +667,7 @@ static flashcart_err_t pro_deinit (void) {
     return FLASHCART_OK;
 }
 
+/** @brief Decode one UTF-8 code point and advance the cursor on success. */
 static bool pro_decode_utf8 (const char **cursor, const char *end, uint32_t *value) {
     const unsigned char *bytes = (const unsigned char *)*cursor;
     uint32_t codepoint = *bytes++;
@@ -696,6 +710,7 @@ static bool pro_decode_utf8 (const char **cursor, const char *end, uint32_t *val
     return true;
 }
 
+/** @brief Strip the filesystem prefix and validate an absolute UTF-8 path. */
 static const char *pro_fatfs_path (char *path) {
     if (!path || strnlen(path, ED64_PRO_PATH_MAX + 4) == ED64_PRO_PATH_MAX + 4) {
         pro_diagnostics.path_error = "Invalid or overlong file path";
@@ -718,6 +733,7 @@ static const char *pro_fatfs_path (char *path) {
     return utf8;
 }
 
+/** @brief Encode UTF-8 as CP437, reporting the length and any unmappable characters. */
 static bool
 pro_encode_oem (const char *utf8, size_t length, char *output, size_t capacity, size_t *written, bool *representable) {
     const char *cursor = utf8;
@@ -739,6 +755,7 @@ pro_encode_oem (const char *utf8, size_t length, char *output, size_t capacity, 
     return true;
 }
 
+/** @brief Build a CP437 MCU path, using FatFs short aliases for unmappable components. */
 static flashcart_err_t pro_stage_mcu_path (const char *utf8, char *output) {
     size_t length = strlen(utf8);
     size_t written;
@@ -815,6 +832,7 @@ failed:
     return result;
 }
 
+/** @brief Load a ROM into cartridge memory and stage its MCU launch path. */
 static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback_t *progress) {
     pro_diagnostics.path_error = NULL;
     pro_diagnostics.launch_ready = false;
@@ -880,6 +898,7 @@ done:
     return result;
 }
 
+/** @brief Load a file from the given offset into cartridge ROM memory. */
 static flashcart_err_t pro_load_file (char *file_path, uint32_t rom_offset, uint32_t file_offset) {
     bool launch_ready = pro_diagnostics.launch_ready;
     pro_diagnostics.launch_ready = false;
@@ -940,6 +959,7 @@ done:
     return result;
 }
 
+/** @brief Stage the save path for MCU loading when game services start. */
 static flashcart_err_t pro_load_save (char *save_path) {
     pro_diagnostics.path_error = NULL;
     const char *utf8_path = pro_fatfs_path(save_path);
@@ -959,6 +979,7 @@ static flashcart_err_t pro_load_save (char *save_path) {
     return FLASHCART_OK;
 }
 
+/** @brief Stage the save memory type and size, clearing the previous save path. */
 static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
     pro_diagnostics.path_error = NULL;
     static const struct {

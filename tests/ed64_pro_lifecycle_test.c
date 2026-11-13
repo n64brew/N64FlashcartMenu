@@ -47,17 +47,23 @@ static struct {
 
 static flashcart_t *fallback;
 
+/**
+ * @brief Return the configured iQue detection result.
+ */
 bool sys_bbplayer (void) {
     return spy.ique;
 }
 
+/**
+ * @brief Record iQue storage initialization and return its configured result.
+ */
 int bbfs_init (void) {
     spy.bbfs++;
     return spy.bbfs_result;
 }
 
 /**
- * @brief Assert Pro probing precedes other cartridge/filesystem/debug work and return the fixture.
+ * @brief Check startup ordering and return the configured Pro probe result.
  */
 ed64_pro_probe_t ed64_pro_probe (void) {
     spy.probes++;
@@ -74,6 +80,9 @@ static flashcart_err_t pro_backend_init (void) {
     return spy.transport_result == ED64_PRO_LL_OK ? spy.backend_result : FLASHCART_ERR_INT;
 }
 
+/**
+ * @brief Check Pro mount arguments and return the configured SD result.
+ */
 bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
     spy.pro_mounts++;
     TEST_CHECK(spy.pro_inits == 1 && spy.transport_result == ED64_PRO_LL_OK);
@@ -82,6 +91,9 @@ bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
     return spy.sdfs_ok;
 }
 
+/**
+ * @brief Count error conversions and return supported Pro error messages.
+ */
 static char *pro_error_message (flashcart_err_t error) {
     spy.messages++;
     return error == FLASHCART_ERR_INT || error == FLASHCART_ERR_FUNCTION_NOT_SUPPORTED || error == FLASHCART_ERR_SD_CARD
@@ -89,6 +101,9 @@ static char *pro_error_message (flashcart_err_t error) {
                : NULL;
 }
 
+/**
+ * @brief Return the mock Pro cartridge name.
+ */
 static const char *pro_backend_name (void) {
     return "EverDrive-64 Pro";
 }
@@ -99,11 +114,17 @@ static flashcart_t pro_backend = {
     .get_error_message = pro_error_message,
 };
 
+/**
+ * @brief Record Pro backend selection and return its callbacks.
+ */
 flashcart_t *ed64_pro_get_flashcart (void) {
     spy.pro_getters++;
     return &pro_backend;
 }
 
+/**
+ * @brief Check probe ordering and return the configured DaisyDrive detection result.
+ */
 bool daisydrive_detected (void) {
     spy.daisy_detects++;
     TEST_CHECK(spy.probes == 1);
@@ -129,37 +150,58 @@ bool debug_init_sdfs (const char *prefix, int npart) {
     return spy.sdfs_ok;
 }
 
+/**
+ * @brief Record successful ISViewer initialization.
+ */
 bool debug_init_isviewer (void) {
     spy.isviewer++;
     return true;
 }
 
+/**
+ * @brief Record successful USB logging initialization.
+ */
 bool debug_init_usblog (void) {
     spy.usb++;
     return true;
 }
 
+/**
+ * @brief Record legacy backend initialization and return its configured result.
+ */
 static flashcart_err_t backend_init (void) {
     spy.callbacks++;
     spy.init_callbacks++;
     return spy.backend_result;
 }
 
+/**
+ * @brief Record legacy backend shutdown and return its configured result.
+ */
 static flashcart_err_t backend_deinit (void) {
     spy.callbacks++;
     return spy.backend_result;
 }
 
+/**
+ * @brief Record feature queries and advertise only USB support.
+ */
 static bool backend_has_feature (flashcart_features_t feature) {
     spy.callbacks++;
     return feature == FLASHCART_FEATURE_USB;
 }
 
+/**
+ * @brief Record version queries and return the mock firmware version.
+ */
 static flashcart_firmware_version_t backend_version (void) {
     spy.callbacks++;
     return (flashcart_firmware_version_t){.major = 1, .minor = 2, .revision = 3};
 }
 
+/**
+ * @brief Check the ROM path and capture byte-swap state during dispatch.
+ */
 static flashcart_err_t backend_load_rom (char *path, flashcart_progress_callback_t *progress) {
     (void)progress;
     TEST_CHECK(strcmp(path, "sd:/test.z64") == 0);
@@ -177,6 +219,9 @@ static flashcart_err_t backend_load_file (char *path, uint32_t rom_offset, uint3
     return spy.backend_result;
 }
 
+/**
+ * @brief Check save-type forwarding and return the configured backend result.
+ */
 static flashcart_err_t backend_set_save_type (flashcart_save_type_t save_type) {
     TEST_CHECK(save_type == FLASHCART_SAVE_TYPE_NONE);
     spy.callbacks++;
@@ -193,44 +238,71 @@ static flashcart_t backend = {
     .set_save_type = backend_set_save_type,
 };
 
+/**
+ * @brief Record the selected cartridge type and return the mock backend.
+ */
 static flashcart_t *select_backend (int type) {
     spy.getters++;
     spy.selected_cart = type;
     return &backend;
 }
 
+/**
+ * @brief Select the mock 64drive backend.
+ */
 flashcart_t *d64_get_flashcart (void) {
     return select_backend(CART_CI);
 }
 
+/**
+ * @brief Select the mock EverDrive X-series backend.
+ */
 flashcart_t *ed64_xseries_get_flashcart (void) {
     return select_backend(CART_EDX);
 }
 
+/**
+ * @brief Select the mock EverDrive V-series backend.
+ */
 flashcart_t *ed64_vseries_get_flashcart (void) {
     return select_backend(CART_ED);
 }
 
+/**
+ * @brief Select the mock SummerCart64 backend.
+ */
 flashcart_t *sc64_get_flashcart (void) {
     return select_backend(CART_SC);
 }
 
+/**
+ * @brief Select the mock DaisyDrive backend.
+ */
 flashcart_t *daisydrive_get_flashcart (void) {
     return select_backend(100);
 }
 
+/**
+ * @brief Record a file-existence query and report the file present.
+ */
 bool file_exists (char *path) {
     (void)path;
     spy.file_calls++;
     return true;
 }
 
+/**
+ * @brief Record a file-size query and return an empty file.
+ */
 int64_t file_get_size (char *path) {
     (void)path;
     spy.file_calls++;
     return 0;
 }
 
+/**
+ * @brief Record shared file allocation and report success.
+ */
 bool file_allocate (char *path, size_t size) {
     (void)path;
     (void)size;
@@ -238,6 +310,9 @@ bool file_allocate (char *path, size_t size) {
     return false;
 }
 
+/**
+ * @brief Record shared file filling and report success.
+ */
 bool file_fill (char *path, uint8_t value) {
     (void)path;
     (void)value;
@@ -264,9 +339,7 @@ static void power_on (void) {
 }
 
 /**
- * @brief Select the Pro handler without mounting storage or invoking a previous backend.
- *
- * An indeterminate probe retains diagnostics without initializing transport.
+ * @brief Verify terminal Pro errors block storage initialization and legacy fallback.
  */
 static void require_terminal_result (bool identified) {
     flashcart = &backend;
@@ -284,6 +357,9 @@ static void require_terminal_result (bool identified) {
     TEST_CHECK(spy.messages == 1);
 }
 
+/**
+ * @brief Verify Pro storage mounts after initialization and propagates startup errors.
+ */
 static void test_pro_storage_mount (void) {
     for (unsigned fail = 0; fail < 2; fail++) {
         power_on();

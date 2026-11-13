@@ -116,6 +116,9 @@ static const char *tv_name (void) {
     }
 }
 
+/**
+ * @brief Initialize the console for manually rendered qualification output.
+ */
 static void screen_init (void) {
     console_init();
     console_set_debug(false);
@@ -277,6 +280,9 @@ static void run_stress (void) {
 #endif
 
 #if defined(ED64_PRO_TEST_STORAGE) || defined(ED64_PRO_TEST_LOAD)
+/**
+ * @brief Print the mounted FAT variant and cluster size.
+ */
 static void print_volume (const FIL *file) {
     const FATFS *fs = file->obj.fs;
     const char *type = "unknown";
@@ -302,6 +308,9 @@ static void print_volume (const FIL *file) {
 
 static uint8_t storage_buffer[4096] __attribute__((aligned(16)));
 
+/**
+ * @brief Update a running CRC32 with fixture bytes.
+ */
 static uint32_t fixture_crc32 (uint32_t crc, const uint8_t *data, size_t length) {
     for (size_t i = 0; i < length; i++) {
         crc ^= data[i];
@@ -312,6 +321,9 @@ static uint32_t fixture_crc32 (uint32_t crc, const uint8_t *data, size_t length)
     return crc;
 }
 
+/**
+ * @brief Read and time the storage fixture, then verify its size and configured CRC32.
+ */
 static bool read_fixture (void) {
     FIL file;
     if (f_open(&file, ED64_PRO_TEST_FIXTURE_PATH, FA_READ) != FR_OK) {
@@ -363,7 +375,9 @@ static bool read_fixture (void) {
 }
 
 #ifdef ED64_PRO_TEST_RAW_WRITE
-/* Walk only an existing, exact-size read-only file; never allocate or alter FAT metadata. */
+/**
+ * @brief Map an existing scratch file to unique sector LBAs without changing FAT metadata.
+ */
 static bool map_scratch (uint32_t sectors[SCRATCH_SECTORS]) {
     FIL file;
     if (f_open(&file, SCRATCH_PATH, FA_READ) != FR_OK) {
@@ -410,6 +424,9 @@ static bool map_scratch (uint32_t sectors[SCRATCH_SECTORS]) {
     return true;
 }
 
+/**
+ * @brief Read or write one scratch sector within a bounded transport transaction.
+ */
 static bool scratch_sector_io (uint32_t lba, bool write) {
     ed64_pro_ll_transaction_t transaction;
     uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
@@ -429,10 +446,16 @@ static bool scratch_sector_io (uint32_t lba, bool write) {
     return true;
 }
 
+/**
+ * @brief Generate the replacement scratch byte for a file offset.
+ */
 static uint8_t scratch_pattern_b (uint32_t offset) {
     return (uint8_t)(offset * 29u + 0x3Cu);
 }
 
+/**
+ * @brief Verify scratch pattern A, write B to even sectors, and check every sector.
+ */
 static bool write_scratch (void) {
     uint32_t sectors[SCRATCH_SECTORS];
     if (!map_scratch(sectors)) {
@@ -479,12 +502,17 @@ static bool write_scratch (void) {
 #endif
 
 #ifdef ED64_PRO_TEST_STORAGE_FAIL_WRITE
-/* The standalone ROM uses the real fault view with the real Pro error callback. */
+/**
+ * @brief Resolve fault-view error text through the real Pro adapter callback.
+ */
 char *flashcart_convert_error_message (flashcart_err_t error) {
     return ed64_pro_get_flashcart()->get_error_message(error);
 }
 
 static void run_storage_fail_write (void) __attribute__((noreturn));
+/**
+ * @brief Verify an injected write fault invalidates handles and refuses handoff without I/O.
+ */
 static void run_storage_fail_write (void) {
     FIL writer;
     if (f_open(&writer, SCRATCH_PATH, FA_READ | FA_WRITE) != FR_OK || f_size(&writer) != SCRATCH_SIZE) {
@@ -558,6 +586,9 @@ static void run_storage_fail_write (void) {
 }
 #endif
 
+/**
+ * @brief Qualify mounted storage reads and optional writes, then release ownership.
+ */
 static void run_storage (void) {
     flashcart_t *adapter = ed64_pro_get_flashcart();
     flashcart_err_t error = adapter->init();
@@ -624,6 +655,9 @@ static uint8_t pi_buffer[4096] __attribute__((aligned(16)));
 static unsigned load_progress_percent;
 static bool load_progress_valid;
 
+/**
+ * @brief Check monotonic load progress and print each crossed quarter milestone.
+ */
 static void load_progress (float progress) {
     if (!(progress >= 0.0f && progress <= 1.0f)) {
         load_progress_valid = false;
@@ -640,6 +674,9 @@ static void load_progress (float progress) {
     load_progress_percent = percent;
 }
 
+/**
+ * @brief Validate a nonempty sector-aligned fixture and return its byte size.
+ */
 static bool fixture_size (const char *path, uint32_t *size) {
     FIL file;
     if (f_open(&file, path, FA_READ) != FR_OK) {
@@ -660,6 +697,9 @@ static bool fixture_size (const char *path, uint32_t *size) {
     return true;
 }
 
+/**
+ * @brief Compare cartridge ROM bytes with a fixture, optionally normalizing v64 byte order.
+ */
 static bool compare_loaded (const char *path, uint32_t rom_offset, uint32_t file_offset, bool normalize_v64) {
     FIL file;
     if (f_open(&file, path, FA_READ) != FR_OK || f_size(&file) < file_offset) {
@@ -713,6 +753,9 @@ static bool compare_loaded (const char *path, uint32_t rom_offset, uint32_t file
     return true;
 }
 
+/**
+ * @brief Time a ROM load, validate progress, and optionally compare loaded bytes.
+ */
 static bool load_rom_fixture (flashcart_t *adapter, char *path, bool normalize_v64, bool verify_contents) {
     cart_card_byteswap = normalize_v64;
     load_progress_percent = 0;
@@ -738,6 +781,9 @@ static bool load_rom_fixture (flashcart_t *adapter, char *path, bool normalize_v
     return !verify_contents || compare_loaded(path, 0, 0, normalize_v64);
 }
 
+/**
+ * @brief Run ROM and auxiliary load qualification or the selected timing-only mode.
+ */
 static void run_load (void) {
     flashcart_t *adapter = ed64_pro_get_flashcart();
     flashcart_err_t error = adapter->init();

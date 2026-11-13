@@ -64,6 +64,9 @@ static bool pro_context_valid (void) {
            !(sr & (C0_STATUS_EXL | C0_STATUS_ERL)) && kthread_current() == NULL;
 }
 
+/**
+ * @brief Check whether an absolute CP0 deadline has expired.
+ */
 static bool pro_expired (uint32_t deadline) {
     return (int32_t)(TICKS_READ() - deadline) >= 0;
 }
@@ -71,6 +74,9 @@ static bool pro_expired (uint32_t deadline) {
 /* The SDK's suggested replacement, dma_wait, cannot honor a deadline. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+/**
+ * @brief Check whether the PI has an active DMA transfer.
+ */
 static bool pro_pi_busy (void) {
     return dma_busy() != 0;
 }
@@ -198,10 +204,16 @@ ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Return the first latched transport failure and its diagnostic context.
+ */
 const ed64_pro_ll_failure_t *ed64_pro_ll_get_failure (void) {
     return &pro_ll.failure;
 }
 
+/**
+ * @brief Return cumulative PI timing, submission, and FIFO usage metrics.
+ */
 const ed64_pro_ll_metrics_t *ed64_pro_ll_get_metrics (void) {
     return &pro_ll.metrics;
 }
@@ -429,7 +441,11 @@ pro_fifo_available (ed64_pro_ll_transaction_t *transaction, uint32_t *available,
     return ED64_PRO_LL_OK;
 }
 
-/* Zero length is a no-op. On failure, any already copied bytes are invalid. */
+/**
+ * @brief Read FIFO bytes within the deadline; partial output is invalid on failure.
+ *
+ * Zero length is a no-op.
+ */
 static ed64_pro_ll_error_t
 pro_fifo_read (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size_t length, uint32_t deadline) {
     ed64_pro_ll_error_t error = pro_owned(transaction);
@@ -513,7 +529,11 @@ ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, s
     }
 }
 
-/* Only typed builders below may select protocol operations. */
+/**
+ * @brief Send a frame for an allowed command and subcommand through the FIFO.
+ *
+ * Only typed builders may select protocol operations.
+ */
 static ed64_pro_ll_error_t pro_send_frame (
     ed64_pro_ll_transaction_t *transaction,
     pro_command_t command,
@@ -564,6 +584,9 @@ static ed64_pro_ll_error_t pro_send_frame (
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Send a status, stop, or SD initialization command without a payload.
+ */
 static ed64_pro_ll_error_t
 pro_send_command (ed64_pro_ll_transaction_t *transaction, pro_command_t command, uint32_t deadline) {
     if (command != PRO_CMD_STATUS && command != PRO_CMD_STOP && command != PRO_CMD_SD_INIT) {
@@ -572,6 +595,9 @@ pro_send_command (ed64_pro_ll_transaction_t *transaction, pro_command_t command,
     return pro_send_frame(transaction, command, command == PRO_CMD_STATUS ? -1 : 0x10, NULL, 0, deadline);
 }
 
+/**
+ * @brief Write bytes to the FIFO in staging-sized chunks within the deadline.
+ */
 static ed64_pro_ll_error_t
 pro_fifo_write (ed64_pro_ll_transaction_t *transaction, const uint8_t *input, size_t length, uint32_t deadline) {
     ed64_pro_ll_error_t error = pro_owned(transaction);
@@ -598,6 +624,9 @@ pro_fifo_write (ed64_pro_ll_transaction_t *transaction, const uint8_t *input, si
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Reject unexpected data remaining in the receive FIFO.
+ */
 static ed64_pro_ll_error_t pro_assert_idle (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     uint32_t available = 0;
     ed64_pro_ll_error_t error = pro_fifo_available(transaction, &available, deadline);
@@ -741,6 +770,9 @@ ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *
     return ed64_pro_ll_check_status(transaction, status, deadline);
 }
 
+/**
+ * @brief Read and retain the detail byte for the current nonzero MCU status.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_read_nresp (ed64_pro_ll_transaction_t *transaction, uint8_t category, uint8_t *detail, uint32_t deadline) {
     if (!detail || !category || !pro_ll.status_valid || pro_ll.status != category || pro_ll.nresp_valid) {
@@ -772,6 +804,9 @@ ed64_pro_ll_read_nresp (ed64_pro_ll_transaction_t *transaction, uint8_t category
     return error;
 }
 
+/**
+ * @brief Encode a 32-bit value in big-endian byte order.
+ */
 static void pro_put_u32 (uint8_t *output, uint32_t value) {
     output[0] = value >> 24;
     output[1] = value >> 16;
@@ -779,6 +814,9 @@ static void pro_put_u32 (uint8_t *output, uint32_t value) {
     output[3] = value;
 }
 
+/**
+ * @brief Read the selected firmware timestamp or maximum ROM size values.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     ed64_pro_ll_transaction_t *transaction,
     const uint32_t *ids,
@@ -824,6 +862,9 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     return error;
 }
 
+/**
+ * @brief Request and read FIFO data in acknowledged blocks.
+ */
 static inline ed64_pro_ll_error_t
 pro_fifo_read_ack (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size_t length, uint32_t deadline) {
     if (length && !output) {
@@ -847,6 +888,9 @@ pro_fifo_read_ack (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Wait for each block acknowledgment before writing FIFO data.
+ */
 static inline ed64_pro_ll_error_t pro_fifo_write_ack (
     ed64_pro_ll_transaction_t *transaction,
     const uint8_t *input,
@@ -878,6 +922,9 @@ static inline ed64_pro_ll_error_t pro_fifo_write_ack (
     return ED64_PRO_LL_OK;
 }
 
+/**
+ * @brief Send a raw SD transfer command for the requested sectors and direction.
+ */
 static ed64_pro_ll_error_t
 pro_sd_xfer (ed64_pro_ll_transaction_t *transaction, uint32_t lba, uint32_t count, bool write, uint32_t deadline) {
     uint8_t payload[17] = {0};
@@ -888,6 +935,9 @@ pro_sd_xfer (ed64_pro_ll_transaction_t *transaction, uint32_t lba, uint32_t coun
     return pro_send_frame(transaction, PRO_CMD_EPO, 0x10, payload, sizeof(payload), deadline);
 }
 
+/**
+ * @brief Transfer SD sectors through the FIFO and validate the final MCU status.
+ */
 static ed64_pro_ll_error_t pro_sd_transfer (
     ed64_pro_ll_transaction_t *transaction,
     void *buffer,
@@ -941,6 +991,9 @@ static ed64_pro_ll_error_t pro_sd_transfer (
     return ed64_pro_ll_check_status(transaction, &status, deadline);
 }
 
+/**
+ * @brief Read SD sectors into the caller buffer through the FIFO.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_sd_read (
     ed64_pro_ll_transaction_t *transaction,
     void *output,
@@ -951,6 +1004,9 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read (
     return pro_sd_transfer(transaction, output, lba, count, false, deadline);
 }
 
+/**
+ * @brief Write SD sectors from the caller buffer through the FIFO.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_sd_write (
     ed64_pro_ll_transaction_t *transaction,
     const void *input,
@@ -962,6 +1018,9 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_write (
     return pro_sd_transfer(transaction, (void *)input, lba, count, true, deadline);
 }
 
+/**
+ * @brief Copy SD sectors directly into cartridge ROM memory and check MCU status.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     ed64_pro_ll_transaction_t *transaction,
     uint32_t fci,
@@ -998,6 +1057,9 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     return ed64_pro_ll_check_status(transaction, &status, deadline);
 }
 
+/**
+ * @brief Set the ROM byte-swap flag and wait for stable, idle device status.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline) {
     if (mask != ED64_PRO_FLAG_WRSW || (value & ~mask)) {
@@ -1038,6 +1100,9 @@ ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, ui
     }
 }
 
+/**
+ * @brief Send a device command and validate its fresh MCU status.
+ */
 static ed64_pro_ll_error_t pro_dev_command (
     ed64_pro_ll_transaction_t *transaction,
     uint8_t subcommand,
@@ -1064,6 +1129,9 @@ static ed64_pro_ll_error_t pro_dev_command (
     return ed64_pro_ll_check_status(transaction, &status, deadline);
 }
 
+/**
+ * @brief Set the absolute Game Pak or backup-memory path on the device.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     ed64_pro_ll_transaction_t *transaction,
     ed64_pro_path_t type,
@@ -1085,6 +1153,9 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     return pro_dev_command(transaction, 0x21, payload, length + 3, deadline);
 }
 
+/**
+ * @brief Validate and send the Game Pak and backup-memory configuration.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
     static const uint32_t brm_sizes[] = {0, 512, 2048, 32768, 98304, 131072, 131072};
@@ -1116,6 +1187,9 @@ ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_
     return pro_dev_command(transaction, 0x20, payload, sizeof(payload), deadline);
 }
 
+/**
+ * @brief Start the configured device and validate its MCU status.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     return pro_dev_command(transaction, 0x11, NULL, 0, deadline);
 }

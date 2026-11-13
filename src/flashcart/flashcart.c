@@ -273,6 +273,7 @@ flashcart_firmware_version_t flashcart_get_firmware_version (void) {
     return flashcart->get_firmware_version();
 }
 
+/** @brief Return the backend display name, or NULL if none is provided. */
 const char *flashcart_get_name (void) {
     return flashcart->get_name ? flashcart->get_name() : NULL;
 }

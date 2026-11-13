@@ -85,11 +85,15 @@ typedef struct {
  * @{
  */
 
+/** @brief Probe cartridge identity and retain the startup result. */
 ed64_pro_probe_t ed64_pro_probe (void);
-/* READY is transport/MCU readiness only, never a mounted or usable backend. */
+/** @brief Initialize MCU/SD transport readiness without mounting storage. */
 ed64_pro_ll_error_t ed64_pro_init_transport (void);
+/** @brief Return the retained startup and storage diagnostics. */
 const ed64_pro_diagnostics_t *ed64_pro_get_diagnostics (void);
+/** @brief Return display text for an initialization phase. */
 const char *ed64_pro_phase_name (ed64_pro_phase_t phase);
+/** @brief Format retained startup or storage diagnostics without cartridge I/O. */
 char *ed64_pro_get_error_message (void);
 flashcart_t *ed64_pro_get_flashcart (void);
 bool ed64_pro_init_sdfs (const char *prefix, int max_files);

@@ -145,43 +145,89 @@ typedef struct {
     uint32_t submissions;
 } ed64_pro_ll_metrics_t;
 
-/* Absolute CP0 deadlines must be within the signed half-range of the counter. */
+/**
+ * @brief Cap an absolute deadline by a local timeout.
+ *
+ * Absolute CP0 deadlines must be within the signed half-range of the counter.
+ */
 uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t timeout_ms);
 
-/*
+/**
+ * @brief Acquire exclusive foreground ownership of the transport.
+ *
  * The transaction's address is its ownership token. Keep it alive and unchanged
  * until end; never pass it to another caller. Interrupts must be enabled and the
  * libdragon kernel must not be running. No ISR may produce competing PI work.
  */
 ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, uint32_t deadline);
+/**
+ * @brief Release transport ownership without clearing faults or cancelling DMA.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction);
+/**
+ * @brief Return the first latched transport failure and its diagnostic context.
+ */
 const ed64_pro_ll_failure_t *ed64_pro_ll_get_failure (void);
+/**
+ * @brief Return cumulative PI timing, submission, and FIFO usage metrics.
+ */
 const ed64_pro_ll_metrics_t *ed64_pro_ll_get_metrics (void);
 
-/* One passive EDID read per launch; a failed read is never absence. */
+/**
+ * @brief Probe and cache the Pro identity with one passive EDID read per launch.
+ *
+ * A failed read is never absence.
+ */
 ed64_pro_probe_t ed64_pro_ll_probe (uint32_t deadline);
 
+/**
+ * @brief Read an allowed register and publish its value after successful DMA.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_read_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg, uint32_t *value, uint32_t deadline);
-/* Only the selected mailbox NOP write is supported, not arbitrary register I/O. */
+/**
+ * @brief Write the mailbox NOP value; arbitrary register writes are unsupported.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_write_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg, uint32_t value, uint32_t deadline);
 
-/* The only permitted discard operations are initial and post-stop handoff cleanup. */
+/**
+ * @brief Discard pending FIFO data within the cleanup time and byte limits.
+ *
+ * Only initial and post-stop handoff cleanup may discard data.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, size_t *drained, uint32_t deadline);
-/* Caller supplies the original phase deadline. Output is valid only on LL_OK. */
+/**
+ * @brief Request and validate one status frame without rejecting nonzero MCU status.
+ *
+ * Caller supplies the original phase deadline. Output is valid only on LL_OK.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline);
 
+/**
+ * @brief Send STOP and wait for two matching mailbox READY samples.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, uint32_t deadline);
-/* These fresh-status operations also publish the complete frame on MCU_ERROR. */
+/**
+ * @brief Check fresh MCU status and retain the complete frame on MCU_ERROR.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline);
+/**
+ * @brief Initialize the SD card and publish fresh status, including MCU_ERROR replies.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline);
 
+/**
+ * @brief Read the detail byte for the current nonzero MCU status.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_read_nresp (ed64_pro_ll_transaction_t *transaction, uint8_t category, uint8_t *detail, uint32_t deadline);
+/**
+ * @brief Read the selected firmware timestamp or maximum ROM size values.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     ed64_pro_ll_transaction_t *transaction,
     const uint32_t *ids,
@@ -189,6 +235,9 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     size_t count,
     uint32_t deadline
 );
+/**
+ * @brief Read SD sectors into the caller buffer through the FIFO.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_sd_read (
     ed64_pro_ll_transaction_t *transaction,
     void *output,
@@ -196,6 +245,9 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read (
     uint32_t count,
     uint32_t deadline
 );
+/**
+ * @brief Write SD sectors from the caller buffer through the FIFO.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_sd_write (
     ed64_pro_ll_transaction_t *transaction,
     const void *input,
@@ -204,6 +256,9 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_write (
     uint32_t deadline
 );
 
+/**
+ * @brief Copy SD sectors directly into cartridge ROM memory.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     ed64_pro_ll_transaction_t *transaction,
     uint32_t fci,
@@ -211,17 +266,29 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     uint32_t count,
     uint32_t deadline
 );
+/**
+ * @brief Set the ROM byte-swap flag and wait for stable, idle device status.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline);
 
+/**
+ * @brief Set the absolute Game Pak or backup-memory path on the device.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     ed64_pro_ll_transaction_t *transaction,
     ed64_pro_path_t type,
     const char *path,
     uint32_t deadline
 );
+/**
+ * @brief Validate and send the Game Pak and backup-memory configuration.
+ */
 ed64_pro_ll_error_t
 ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline);
+/**
+ * @brief Start the configured device and validate its MCU status.
+ */
 ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline);
 
 #endif

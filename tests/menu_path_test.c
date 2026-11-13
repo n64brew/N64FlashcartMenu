@@ -10,7 +10,9 @@ typedef struct {
 
 static allocation_t allocations[32];
 
-/* Move every path-buffer resize so interior-pointer regressions are deterministic. */
+/**
+ * @brief Move every resize to expose stale pointers into path buffers.
+ */
 static void *moving_realloc (void *pointer, size_t size) {
     size_t slot = 0;
     while (slot < sizeof(allocations) / sizeof(allocations[0]) && allocations[slot].pointer != pointer) {
@@ -28,6 +30,9 @@ static void *moving_realloc (void *pointer, size_t size) {
     return replacement;
 }
 
+/**
+ * @brief Remove an allocation from tracking before freeing it.
+ */
 static void tracked_free (void *pointer) {
     for (size_t i = 0; i < sizeof(allocations) / sizeof(allocations[0]); i++) {
         if (allocations[i].pointer == pointer) {
@@ -44,12 +49,18 @@ static void tracked_free (void *pointer) {
 #undef free
 #undef realloc
 
+/**
+ * @brief Verify all tracked path allocations were freed.
+ */
 static void check_allocations_freed (void) {
     for (size_t i = 0; i < sizeof(allocations) / sizeof(allocations[0]); i++) {
         TEST_CHECK(allocations[i].pointer == NULL);
     }
 }
 
+/**
+ * @brief Build a directory path long enough to require buffer growth.
+ */
 static void make_directory (char *output, size_t capacity) {
     size_t offset = 0;
     output[0] = '\0';
@@ -65,6 +76,9 @@ static void make_directory (char *output, size_t capacity) {
     }
 }
 
+/**
+ * @brief Verify long UTF-8 paths retain root and filename state through clone and pop.
+ */
 static void test_long_initial_path (void) {
     char directory[512];
     make_directory(directory, sizeof(directory));
@@ -97,6 +111,9 @@ static void test_long_initial_path (void) {
     check_allocations_freed();
 }
 
+/**
+ * @brief Verify long inserted directories preserve filename and extension operations.
+ */
 static void test_long_subdirectory_and_extension (void) {
     char directory[512];
     make_directory(directory, sizeof(directory));
@@ -121,6 +138,9 @@ static void test_long_subdirectory_and_extension (void) {
     check_allocations_freed();
 }
 
+/**
+ * @brief Verify cloned paths grow independently and preserve root state.
+ */
 static void test_clone_push_grows_independently (void) {
     char directory[512];
     make_directory(directory, sizeof(directory));
