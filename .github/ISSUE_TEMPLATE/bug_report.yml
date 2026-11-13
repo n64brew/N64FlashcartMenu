@@ -24,12 +24,12 @@ body:
     attributes:
       label: N64 console region
       options:
+        - Unknown
         - NTSC-U
         - NTSC-J
         - PAL
         - MPAL
         - Other
-        - Unknown
     validations:
       required: true
 
@@ -38,22 +38,22 @@ body:
     attributes:
       label: Expansion Pak
       options:
+        - Unknown
         - "Yes"
         - "No"
-        - Unknown
     validations:
-      required: false
+      required: true
 
   - type: dropdown
     id: works_with_original_carts
     attributes:
       label: Does the console work with original cartridges?
       options:
+        - Not checked
         - "Yes"
         - "No"
-        - Not checked
     validations:
-      required: false
+      required: true
 
   - type: input
     id: hardware_mods
@@ -77,10 +77,11 @@ body:
         - EverDrive 64 Pro
         - EverDrive 64 V3
         - EverDrive 64 X7
+        - DaisyDrive64
         - Other
         - Unknown
     validations:
-      required: false
+      required: true
 
   - type: input
     id: flashcart_supplier
