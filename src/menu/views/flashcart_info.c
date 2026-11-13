@@ -123,7 +123,7 @@ static void draw (menu_t *menu, surface_t *d) {
         "Type:\n"
         "  %s\n\n"
         "Firmware:\n"
-        "  Version: %s\n\n"
+        "  Version: %s - Menu probably out of date.\n\n"
         "Features:\n"
         "  Virtual 64DD:     %s.\n"
         "  Real Time Clock:  %s.\n"
