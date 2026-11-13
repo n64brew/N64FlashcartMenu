@@ -1252,8 +1252,8 @@ static void deinit (void) {
     music_count = 0;
     queue_cache_count = 0;
 
-    sound_init_default();
     audioplayer_deinit();
+    sound_init_default();
 }
 
 
