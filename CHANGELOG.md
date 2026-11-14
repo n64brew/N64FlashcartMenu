@@ -59,7 +59,7 @@ Files are made available:
 	- None.
 
 ### Breaking changes
-- None.
+- Minimum SC64 Firmware is now 2.18.0.
 
 ### Notes
 - dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
@@ -68,6 +68,7 @@ Files are made available:
 - Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
 - PixelFX HDMI mods may need to be updated to latest FW to support display.
 - Setting Background Images (for consoles with a Jumper Pak) is more restrictive due to other features taking priority.
+- SC64 firmware 2.18.0 and below may experience issues.
 
 ### Deprecation notices
 - None.

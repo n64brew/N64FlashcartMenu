@@ -10,7 +10,7 @@ static void draw (menu_t *menu, surface_t *d) {
         "Minimum supported firmware versions:\n"
         "64drive: 2.05+\n"
         "EverDrive-64: ???+\n"
-        "SummerCart64: 2.17.0+"
+        "SummerCart64: 2.18.0+"
     );
 
     ui_components_messagebox_draw(
