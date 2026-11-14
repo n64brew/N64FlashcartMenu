@@ -1,5 +1,5 @@
 #include "utils/fs.h"
-#include "../flashcart/flashcart.h"
+#include "../../flashcart/flashcart.h"
 #include "views.h"
 #include <stdlib.h>
 #include <string.h>
