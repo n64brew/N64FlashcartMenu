@@ -406,6 +406,15 @@ static void add_favorite (menu_t *menu, void *arg) {
 static void iterate_metadata_image(menu_t *menu, int direction) {
     scan_metadata_images(menu);
     if (metadata_image_count == 0) return;
+    bool has_available_image = false;
+    for (uint16_t i = 0; i < metadata_image_count; i++) {
+        if (metadata_image_available[i]) {
+            has_available_image = true;
+            break;
+        }
+    }
+    if (!has_available_image) return;
+
     bool low_memory_mode = !is_memory_expanded();
 
     // In expanded-memory mode the current boxart isn't freed up front before swapping
