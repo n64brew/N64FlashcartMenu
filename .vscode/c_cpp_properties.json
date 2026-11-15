@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "N64",
+
+            "compilerPath": "/opt/libdragon/bin/mips64-elf-gcc",
+
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/opt/libdragon/mips64-elf/include"
+            ],
+            "browse": {
+                "path": [
+                    "/workspaces/N64FlashcartMenu/libdragon/src"
+                ]
+            },
+            "defines": [
+                "N64"
+            ],
+            "cStandard": "gnu17",
+            "cppStandard": "gnu++17"
+        }
+    ],
+    "version": 4
+}

@@ -5,7 +5,9 @@
  */
 
 #include <stdlib.h>
+#include <limits.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "../ui_components.h"
 #include "../fonts.h"
@@ -23,6 +25,19 @@ static const char *directory_icon = "[DIR] ";
 // static const char *image_icon = "[Png] ";
 // static const char *save_icon = "[Save] ";
 // static const char *other_icon = "[?] ";
+
+#define FILE_ENTRY_TICKER_SCROLL_SPEED  (0.5f)
+#define FILE_ENTRY_TICKER_START_DELAY   (20)
+
+static float file_list_ticker_offset = 0.0f;
+static int file_list_ticker_delay_frames = FILE_ENTRY_TICKER_START_DELAY;
+static int file_list_ticker_selected = -1;
+static char *file_list_ticker_name = NULL;
+static bool file_list_ticker_widths_valid = false;
+static const rdpq_font_t *file_list_ticker_font = NULL;
+static menu_font_style_t file_list_ticker_style = STL_DEFAULT;
+static int file_list_ticker_name_width = 0;
+static int file_list_ticker_padding_width = 0;
 
 static rdpq_paragraph_t *file_list_layout_buffer;
 static size_t file_list_layout_capacity;
@@ -69,6 +84,10 @@ void ui_components_file_list_free(void) {
     free(file_list_layout_buffer);
     file_list_layout_buffer = NULL;
     file_list_layout_capacity = 0;
+    free(file_list_ticker_name);
+    file_list_ticker_name = NULL;
+    file_list_ticker_selected = -1;
+    file_list_ticker_widths_valid = false;
 }
 
 /**
@@ -104,6 +123,23 @@ static int format_file_size(char *buffer, int64_t size) {
 void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
     int starting_position = 0;
 
+    if (selected < 0 || selected >= entries) {
+        file_list_ticker_selected = -1;
+        free(file_list_ticker_name);
+        file_list_ticker_name = NULL;
+        file_list_ticker_widths_valid = false;
+    } else if (selected != file_list_ticker_selected ||
+               !file_list_ticker_name ||
+               strcmp(list[selected].name, file_list_ticker_name) != 0) {
+        char *new_name = strdup(list[selected].name);
+        free(file_list_ticker_name);
+        file_list_ticker_name = new_name;
+        file_list_ticker_selected = selected;
+        file_list_ticker_offset = 0.0f;
+        file_list_ticker_delay_frames = FILE_ENTRY_TICKER_START_DELAY;
+        file_list_ticker_widths_valid = false;
+    }
+
     if (entries > LIST_ENTRIES && selected >= (LIST_ENTRIES / 2)) {
         starting_position = selected - (LIST_ENTRIES / 2);
         if (starting_position >= entries - LIST_ENTRIES) {
@@ -131,6 +167,10 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
 
         size_t name_lengths[LIST_ENTRIES];
         size_t total_length = 1;
+        int name_x = VISIBLE_AREA_X0 + TEXT_MARGIN_HORIZONTAL;
+        int name_y = VISIBLE_AREA_Y0 + TEXT_MARGIN_VERTICAL + TAB_HEIGHT + TEXT_OFFSET_VERTICAL;
+        int name_width = FILE_LIST_MAX_WIDTH - (TEXT_MARGIN_HORIZONTAL * 2);
+        menu_font_style_t selected_style = STL_DEFAULT;
 
         for (int i = 0; i < visible_entries; i++) {
             int entry_index = starting_position + i;
@@ -153,7 +193,7 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
 
         rdpq_paragraph_builder_begin(
             &(rdpq_textparms_t) {
-                .width = FILE_LIST_MAX_WIDTH - (TEXT_MARGIN_HORIZONTAL * 2),
+                .width = name_width,
                 .height = LAYOUT_ACTIONS_SEPARATOR_Y - VISIBLE_AREA_Y0  - (TEXT_MARGIN_VERTICAL * 2),
                 .wrap = WRAP_ELLIPSES,
                 .line_spacing = TEXT_LINE_SPACING_ADJUST,
@@ -189,6 +229,10 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
 
             rdpq_paragraph_builder_style(style);
 
+            if (entry_index == selected) {
+                selected_style = style;
+            }
+
             rdpq_paragraph_builder_span(entry->name, name_lengths[i]);
 
             if ((i + 1) >= visible_entries) {
@@ -213,9 +257,87 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
 
         rdpq_paragraph_render(
             layout,
-            VISIBLE_AREA_X0 + TEXT_MARGIN_HORIZONTAL,
-            VISIBLE_AREA_Y0 + TEXT_MARGIN_VERTICAL + TAB_HEIGHT + TEXT_OFFSET_VERTICAL
+            name_x,
+            name_y
         );
+
+        if (selected >= starting_position && selected < starting_position + visible_entries) {
+            const char *selected_name = list[selected].name;
+            const char *wrap_pad = "     ";
+            const rdpq_font_t *font = rdpq_text_get_font(FNT_DEFAULT);
+
+            if (file_list_ticker_name && (!file_list_ticker_widths_valid ||
+                strcmp(selected_name, file_list_ticker_name) != 0 ||
+                font != file_list_ticker_font || selected_style != file_list_ticker_style)) {
+                file_list_ticker_widths_valid = false;
+                int name_bytes = (int)strlen(selected_name);
+                int padding_bytes = (int)strlen(wrap_pad);
+                rdpq_paragraph_t *name_layout = rdpq_paragraph_build(
+                    &(rdpq_textparms_t) { .style_id = selected_style, .wrap = WRAP_NONE },
+                    FNT_DEFAULT,
+                    selected_name, &name_bytes
+                );
+                rdpq_paragraph_t *padding_layout = rdpq_paragraph_build(
+                    &(rdpq_textparms_t) { .style_id = selected_style, .wrap = WRAP_NONE },
+                    FNT_DEFAULT,
+                    wrap_pad, &padding_bytes
+                );
+
+                if (name_layout && padding_layout) {
+                    file_list_ticker_name_width = (int)name_layout->advance_x;
+                    file_list_ticker_padding_width = (int)padding_layout->advance_x;
+                    file_list_ticker_font = font;
+                    file_list_ticker_style = selected_style;
+                    file_list_ticker_widths_valid = true;
+                }
+
+                if (name_layout) rdpq_paragraph_free(name_layout);
+                if (padding_layout) rdpq_paragraph_free(padding_layout);
+            }
+
+            if (file_list_ticker_widths_valid && file_list_ticker_name_width > name_width) {
+                int first_baseline = INT_MAX;
+                for (int i = 0; i < layout->nchars; i++) {
+                    if (layout->chars[i].y < first_baseline) {
+                        first_baseline = layout->chars[i].y;
+                    }
+                }
+
+                int line_step = layout->nlines > 1
+                    ? (int)((layout->advance_y - first_baseline) / (layout->nlines - 1))
+                    : 0;
+                int row = selected - starting_position;
+                int ticker_y = name_y + first_baseline + row * line_step;
+                char scroll_name[576];
+                snprintf(scroll_name, sizeof(scroll_name), "%s%s%s%s",
+                         selected_name, wrap_pad, selected_name, wrap_pad);
+                size_t scroll_len = strlen(scroll_name);
+                int cycle_width = file_list_ticker_name_width + file_list_ticker_padding_width;
+
+                if (file_list_ticker_delay_frames > 0) {
+                    file_list_ticker_delay_frames--;
+                } else {
+                    file_list_ticker_offset += FILE_ENTRY_TICKER_SCROLL_SPEED;
+                }
+                if ((int)file_list_ticker_offset >= cycle_width) {
+                    file_list_ticker_offset -= (float)cycle_width;
+                }
+
+                ui_components_box_draw(
+                    name_x, highlight_y,
+                    name_x + name_width, highlight_y + highlight_height,
+                    FILE_LIST_HIGHLIGHT_COLOR
+                );
+                rdpq_set_scissor(name_x, highlight_y, name_x + name_width, highlight_y + highlight_height);
+                rdpq_text_printn(
+                    &(rdpq_textparms_t) { .style_id = selected_style },
+                    FNT_DEFAULT,
+                    name_x - (int)file_list_ticker_offset, ticker_y,
+                    scroll_name, scroll_len
+                );
+                rdpq_set_scissor(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+            }
+        }
 
         rdpq_paragraph_builder_begin(
             &(rdpq_textparms_t) {

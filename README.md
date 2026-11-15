@@ -22,14 +22,15 @@ The current state of support is:
 * SummerCart64
 * 64Drive
 
-### Work in Progress
+### Help wanted (Work in Progress)
 * EverDrive-64 (X and V series)
+* DaisyDrive
+* EverDrive-64 Pro series
 * ED64P (clones)
 
 ### Not yet planned
 * Doctor V64
 * PicoCart
-* DaisyDrive
 
 
 ## Current (notable) menu features
@@ -38,12 +39,12 @@ The current state of support is:
 * Fully emulates the 64DD and loads 64DD disks (SummerCart64 only).
 * Emulator support (NES, SNES, GB, GBC, SMS, GG, CHF) ROMs.
 * N64 ROM box art image support.
-* Background image (PNG) support.
+* Background image (PNG & JPEG) support.
 * Comprehensive ROM save database (including homebrew headers).
 * Comprehensive ROM information display.
 * Real Time Clock support.
-* Music playback (MP3).
-* Menu sound effects.
+* Music player for MP3 & FLAC, with id metadata support.
+* Menu background music & sound effects.
 * N64 ROM fast reboot option (on reset).
 * ROM history and favorites.  
 * ROM Datel code editor.
@@ -90,8 +91,9 @@ Other compatible or commercial license options may be available upon request wit
 * [libdragon](https://github.com/n64brew/libdragon/tree/preview) - [UNLICENSE License](https://github.com/n64brew/libdragon/blob/preview/LICENSE.md)
 * [libspng](https://github.com/randy408/libspng) - [BSD 2-Clause License](https://github.com/randy408/libspng/blob/master/LICENSE)
 * [TJpgDec](https://elm-chan.org/fsw/tjpgd/) - [ChaN permissive license](https://elm-chan.org/fsw/tjpgd/en/appnote.html)
-* [dr_libs](https://github.com/mackron/dr_libs) (dr_mp3, dr_flac) - [Public domain or MIT-0](https://github.com/mackron/dr_libs/blob/master/LICENSE)
+* [minimp3](https://github.com/lieff/minimp3) - [CC0 1.0 Universal](https://github.com/lieff/minimp3/blob/master/LICENSE)
 * [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
+* [dr_flac](https://github.com/mackron/dr_libs) - [MIT License](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 
 ## Sounds
 See [License](https://pixabay.com/en/service/license-summary/) for the following sounds:

@@ -15,10 +15,10 @@ Files are made available:
 	- None.
 
 - **Documentation**
-	- Menu credits were updated to n64brew.
+	- None.
 
 - **Refactor**
-	- minimp3 was replaced with dr_mp3 (which is an abstraction).
+	- None.
 
 - **Other**
 	- None.
@@ -33,6 +33,42 @@ Files are made available:
 - Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
 - PixelFX HDMI mods may need to be updated to latest FW to support display.
 - Setting Background Images (for consoles with a Jumper Pak) is more restrictive due to other features taking priority.
+
+### Deprecation notices
+- None.
+
+## Release Notes 2026-11-15 - Tagged 0.3.8
+
+- **New Features**
+	- Browser items that are too long now ticker.
+	- audio player tracks that are too long now ticker.
+
+- **Bug Fixes**
+	- Preserve alpha transparency in decoded boxart.
+	- Fix music player track queue UI overflow.
+	- Close the current track's SD file handle before reconfiguring audio
+
+- **Documentation**
+	- Menu credits were updated to n64brew.
+	- Manual was improved for boxart
+
+- **Refactor**
+	- Menu action bar items for tabs.
+
+- **Other**
+	- None.
+
+### Breaking changes
+- Minimum SC64 Firmware is now 2.18.0.
+
+### Notes
+- dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
+
+### Current known Issues
+- Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- PixelFX HDMI mods may need to be updated to latest FW to support display.
+- Setting Background Images (for consoles with a Jumper Pak) is more restrictive due to other features taking priority.
+- SC64 firmware 2.18.0 and below may experience issues.
 
 ### Deprecation notices
 - None.

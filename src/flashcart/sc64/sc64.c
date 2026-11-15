@@ -26,7 +26,7 @@
 #define EEPROM_ADDRESS              (0x1FFE2000)
 
 #define SUPPORTED_MAJOR_VERSION     (2)
-#define SUPPORTED_MINOR_VERSION     (17)
+#define SUPPORTED_MINOR_VERSION     (18)
 #define SUPPORTED_REVISION          (0)
 
 #define DISK_MAPPING_ROM_OFFSET     (0x02000000)
