@@ -122,6 +122,7 @@ static void check_accessories(int controller) {
     has_pak[controller] = present;
 
     if (!present) {
+        show_single_note_dump_confirm_message = false;
         if (mounted[controller]) {
             cpakfs_unmount(controller);
             mounted[controller] = false;
