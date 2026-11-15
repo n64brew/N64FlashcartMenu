@@ -19,9 +19,16 @@
 static bool use_rtc;
 static char string_datetime_cpak[26];
 static char failure_message_note[255];
+static const char *controller_tabs[] = {
+    "Controller 1",
+    "Controller 2",
+    "Controller 3",
+    "Controller 4",
+};
 
 static int16_t controller_selected;
 static int16_t index_selected;
+static int note_count;
 
 static bool mounted[4] = { false, false, false, false };
 static bool has_pak[4] = { false, false, false, false };
@@ -42,7 +49,9 @@ static bool process_complete_delete;
 static bool error_message_displayed;
 
 static char controller_pak_name_notes[MAX_NUM_NOTES][MAX_STRING_LENGTH];
-static char controller_pak_name_notes_bank_size[MAX_NUM_NOTES][6]; // "(XXX)" = 5 chars + \0
+static char controller_pak_name_notes_bank_size[MAX_NUM_NOTES][6]; // Three-digit block count plus \0
+static entry_t controller_note_entries[MAX_NUM_NOTES];
+static char controller_note_names[MAX_NUM_NOTES][MAX_STRING_LENGTH + 32];
 
 static cpakfs_path_strings_t cpakfs_path_strings[MAX_NUM_NOTES];
 
@@ -93,6 +102,8 @@ static void get_rtc_time(char* formatted_time) {
 }
 
 static void free_controller_pak_name_notes() {
+    note_count = 0;
+
     for (int i = 0; i < MAX_NUM_NOTES; ++i) {
         snprintf(controller_pak_name_notes[i], sizeof(controller_pak_name_notes[i]), " ");
         snprintf(controller_pak_name_notes_bank_size[i], sizeof(controller_pak_name_notes_bank_size[i]), " ");
@@ -111,6 +122,7 @@ static void check_accessories(int controller) {
     has_pak[controller] = present;
 
     if (!present) {
+        show_single_note_dump_confirm_message = false;
         if (mounted[controller]) {
             cpakfs_unmount(controller);
             mounted[controller] = false;
@@ -169,7 +181,12 @@ static void format_controller_pak () {
 }
 
 static void active_single_note_delete_message(menu_t *menu, void *arg) {
-    show_single_note_delete_confirm_message = true;
+    if (note_count == 0) {
+        snprintf(failure_message_note, sizeof(failure_message_note), "No notes found on this Controller Pak.");
+        error_message_displayed = true;
+    } else {
+        show_single_note_delete_confirm_message = true;
+    }
 }
 
 static void active_format_controller_pak_message(menu_t *menu, void *arg) {
@@ -200,33 +217,50 @@ static void write_note_name_info_list(int16_t controller, int index, char* entry
     int size = get_block_size_from_fs_path(filename_cpak);
 
     if (size < 0) {
-        snprintf(controller_pak_name_notes_bank_size[index], sizeof(controller_pak_name_notes_bank_size[index]), " ");
+        snprintf(controller_pak_name_notes_bank_size[index], sizeof(controller_pak_name_notes_bank_size[index]), "---");
     } else {
-        snprintf(controller_pak_name_notes_bank_size[index], sizeof(controller_pak_name_notes_bank_size[index]), "%-3.3d", size);
+        snprintf(controller_pak_name_notes_bank_size[index], sizeof(controller_pak_name_notes_bank_size[index]), "%3.3d", size);
     }
     snprintf(controller_pak_name_notes[index], MAX_STRING_LENGTH, "%s", entry_name);
     parse_cpakfs_fullname(entry_name, &cpakfs_path_strings[index]);
+    snprintf(
+        controller_note_names[index],
+        sizeof(controller_note_names[index]),
+        "%02d. %-30s  %-4.4s  %-3.3s  %s",
+        index + 1,
+        cpakfs_path_strings[index].filename,
+        cpakfs_path_strings[index].gamecode,
+        cpakfs_path_strings[index].ext,
+        controller_pak_name_notes_bank_size[index]
+    );
+    controller_note_entries[index] = (entry_t) {
+        .name = controller_note_names[index],
+        .type = ENTRY_TYPE_SAVE,
+        .size = 0,
+        .index = index,
+    };
+    note_count = index + 1;
 }
 
-static void populate_list_cpakfs() {  
-    if (has_mem && !ctr_p_data_loop) {
+static void populate_list_cpakfs() {
+    if (has_mem && mounted[controller_selected] && !ctr_p_data_loop) {
         
         free_controller_pak_name_notes();
 
-        if (dir_findfirst(CPAK_MOUNT_ARRAY[controller_selected], &dir_entry) >= 0) {
-            
+        int result = dir_findfirst(CPAK_MOUNT_ARRAY[controller_selected], &dir_entry);
+        if (result == 0) {
             write_note_name_info_list(controller_selected, 0, dir_entry.d_name);
 
-            int i = 1;     
+            int i = 1;
             while(dir_findnext(CPAK_MOUNT_ARRAY[controller_selected], &dir_entry) == 0) {
-                
                 write_note_name_info_list(controller_selected, i, dir_entry.d_name);
-            
                 i++;
                 if (i >= MAX_NUM_NOTES) break;
-
-                ctr_p_data_loop = true;
             }
+
+            ctr_p_data_loop = true;
+        } else if (result == -1) {
+            ctr_p_data_loop = true;
         }
     }
 }
@@ -334,11 +368,9 @@ static void dump_single_note(int _port, int16_t selected_index) {
     rdpq_attach(d, NULL);
     
     ui_components_messagebox_draw(
-        "Which note would you like to dump?\n\n"
-        "Note selected: N.%-2.2d\n\n"
-        "A: Select    B: No\n"
-        "▼▲: Select note number",
-        index_selected + 1
+        "Backing up note:\n\n"
+        "%s",
+        controller_pak_name_notes[index_selected]
     );
     ui_components_loader_draw(0, "Saving Controller Pak note...");
     rdpq_detach_show();
@@ -442,19 +474,42 @@ static void process (menu_t *menu) {
         }
 
         if (!show_complete_dump_confirm_message && 
+            !show_single_note_dump_confirm_message &&
             !show_complete_write_confirm_message && 
             !show_single_note_write_info_message &&
-            !show_single_note_dump_confirm_message &&
             !show_single_note_delete_confirm_message &&
             !show_format_controller_pak_confirm_message) {
             if(menu->actions.go_left) {
                 sound_play_effect(SFX_SETTING);
                 controller_selected = ((controller_selected - 1) + 4) % 4;
                 reset_vars();
+                free_controller_pak_name_notes();
+                index_selected = 0;
             } else if (menu->actions.go_right) {
                 sound_play_effect(SFX_SETTING);
                 controller_selected = ((controller_selected + 1) + 4) % 4;
                 reset_vars();
+                free_controller_pak_name_notes();
+                index_selected = 0;
+            } else if (menu->actions.go_up && note_count > 0) {
+                int scroll_amount = menu->actions.go_fast ? 10 : 1;
+                if (menu->settings.wrap_file_list_scrolling) {
+                    index_selected = (index_selected - scroll_amount % note_count + note_count) % note_count;
+                } else if (index_selected > 0) {
+                    index_selected = (index_selected > scroll_amount) ? index_selected - scroll_amount : 0;
+                }
+                sound_play_effect(SFX_CURSOR);
+            } else if (menu->actions.go_down && note_count > 0) {
+                int scroll_amount = menu->actions.go_fast ? 10 : 1;
+                if (menu->settings.wrap_file_list_scrolling) {
+                    index_selected = (index_selected + scroll_amount) % note_count;
+                } else if (index_selected < note_count - 1) {
+                    index_selected += scroll_amount;
+                    if (index_selected >= note_count) {
+                        index_selected = note_count - 1;
+                    }
+                }
+                sound_play_effect(SFX_CURSOR);
             } else if (menu->actions.back) {
                 unmount_all_cpakfs();
                 reset_vars();
@@ -475,24 +530,29 @@ static void process (menu_t *menu) {
         check_accessories(controller_selected);
 
         populate_list_cpakfs();
+        if (note_count == 0) {
+            index_selected = 0;
+        } else if (index_selected >= note_count) {
+            index_selected = note_count - 1;
+        }
 
         if (has_mem && !corrupted_pak) {
 
-            // Pressing A : dump the Controller Pak
+            // Pressing A backs up the selected note.
             if (menu->actions.enter && 
                 use_rtc && 
+                note_count > 0 &&
                 !show_complete_dump_confirm_message && 
+                !show_single_note_dump_confirm_message &&
                 !show_complete_write_confirm_message &&
                 !show_single_note_write_info_message &&
-                !show_single_note_dump_confirm_message &&
                 !show_single_note_delete_confirm_message &&
                 !show_format_controller_pak_confirm_message) {
                 sound_play_effect(SFX_ENTER);
-                show_complete_dump_confirm_message = true;
+                show_single_note_dump_confirm_message = true;
                 return;
             } 
-
-            // Pressing L or Z : dump a single note
+            // Pressing L or Z backs up the whole Controller Pak.
             else if (menu->actions.lz_context && 
                 use_rtc && 
                 !show_complete_write_confirm_message &&
@@ -502,14 +562,14 @@ static void process (menu_t *menu) {
                 !show_single_note_delete_confirm_message &&
                 !show_format_controller_pak_confirm_message) {
                 sound_play_effect(SFX_ENTER);
-                show_single_note_dump_confirm_message = true;
+                show_complete_dump_confirm_message = true;
                 return;
             }
 
             if (show_complete_dump_confirm_message && 
+                !show_single_note_dump_confirm_message &&
                 !show_complete_write_confirm_message &&
                 !show_single_note_write_info_message &&
-                !show_single_note_dump_confirm_message &&
                 !show_single_note_delete_confirm_message &&
                 !show_format_controller_pak_confirm_message) {
                 if (menu->actions.enter) {
@@ -521,10 +581,25 @@ static void process (menu_t *menu) {
                     show_complete_dump_confirm_message = false;
                 }
                 return;
+            } else if (show_single_note_dump_confirm_message &&
+                !show_complete_dump_confirm_message &&
+                !show_complete_write_confirm_message &&
+                !show_single_note_write_info_message &&
+                !show_single_note_delete_confirm_message &&
+                !show_format_controller_pak_confirm_message) {
+                if (menu->actions.enter) {
+                    sound_play_effect(SFX_ENTER);
+                    show_single_note_dump_confirm_message = false;
+                    start_single_note_dump = true;
+                } else if (menu->actions.back) {
+                    sound_play_effect(SFX_EXIT);
+                    show_single_note_dump_confirm_message = false;
+                }
+                return;
             } else if (show_complete_write_confirm_message &&
+                !show_single_note_dump_confirm_message &&
                 !show_single_note_write_info_message &&
                 !show_complete_dump_confirm_message &&
-                !show_single_note_dump_confirm_message &&
                 !show_single_note_delete_confirm_message &&
                 !show_format_controller_pak_confirm_message) {
                 if (menu->actions.back) {
@@ -543,32 +618,11 @@ static void process (menu_t *menu) {
                     show_single_note_write_info_message = false;                    
                 }
                 return;
-            } else if (show_single_note_dump_confirm_message && 
-                !show_complete_dump_confirm_message &&
-                !show_complete_write_confirm_message &&
-                !show_single_note_write_info_message &&
-                !show_single_note_delete_confirm_message &&
-                !show_format_controller_pak_confirm_message) {
-                if (menu->actions.enter) {
-                    sound_play_effect(SFX_ENTER);
-                    show_single_note_dump_confirm_message = false;
-                    start_single_note_dump = true;
-                } else if (menu->actions.back) {
-                    sound_play_effect(SFX_EXIT);
-                    show_single_note_dump_confirm_message = false;                    
-                } else if (menu->actions.go_up) {
-                    sound_play_effect(SFX_CURSOR);
-                    index_selected = dec_index_note(index_selected);
-                } else if (menu->actions.go_down) {
-                    sound_play_effect(SFX_CURSOR);
-                    index_selected = inc_index_note(index_selected);
-                }
-                return;
             }  else if (show_single_note_delete_confirm_message && 
                 !show_complete_dump_confirm_message &&
                 !show_complete_write_confirm_message &&
-                !show_single_note_write_info_message &&
                 !show_single_note_dump_confirm_message &&
+                !show_single_note_write_info_message &&
                 !show_format_controller_pak_confirm_message) {
                 if (menu->actions.enter) {
                     show_single_note_delete_confirm_message = false;
@@ -577,19 +631,13 @@ static void process (menu_t *menu) {
                 } else if (menu->actions.back) {
                     show_single_note_delete_confirm_message = false;
                     sound_play_effect(SFX_EXIT);
-                } else if (menu->actions.go_left) {
-                    sound_play_effect(SFX_CURSOR);
-                    index_selected = dec_index_note(index_selected);
-                } else if (menu->actions.go_right) {
-                    sound_play_effect(SFX_CURSOR);
-                    index_selected = inc_index_note(index_selected);
                 }
                 return;
             } else if (show_format_controller_pak_confirm_message && 
                 !show_complete_dump_confirm_message &&
                 !show_complete_write_confirm_message &&
-                !show_single_note_write_info_message &&
                 !show_single_note_dump_confirm_message &&
+                !show_single_note_write_info_message &&
                 !show_single_note_delete_confirm_message) {
                 if (menu->actions.enter) {
                     sound_play_effect(SFX_ENTER);
@@ -630,265 +678,65 @@ static void draw (menu_t *menu, surface_t *d) {
 
     ui_components_background_draw();
 
-    ui_components_layout_draw();
-
-    char has_mem_text[64];
-    char free_space_cpak_text[64];
-    menu_font_type_t style;
-
-    style = STL_DEFAULT;
-
-    if (has_mem) {
-            snprintf(has_mem_text, sizeof(has_mem_text), "Controller Pak detected");
-        style = STL_GREEN;
-
-        if (has_mem && !corrupted_pak) {
-            style = STL_GREEN;
-            snprintf(free_space_cpak_text, sizeof(free_space_cpak_text), "%d/%d free blocks available", cpakfs_stats.pages.total - cpakfs_stats.pages.used, cpakfs_stats.pages.total);
-        } else if (has_mem && corrupted_pak) {
-            snprintf(has_mem_text, sizeof(has_mem_text), "Controller Pak detected (Corrupted)");
-            style = STL_ORANGE;
-            snprintf(free_space_cpak_text, sizeof(free_space_cpak_text), " ");
-        }
+    char status_text[64];
+    if (!use_rtc) {
+        snprintf(status_text, sizeof(status_text), "No RTC");
+    } else if (!has_mem) {
+        snprintf(status_text, sizeof(status_text), "No Controller Pak");
+    } else if (corrupted_pak) {
+        snprintf(status_text, sizeof(status_text), "Controller Pak corrupted");
     } else {
-        snprintf(has_mem_text, sizeof(has_mem_text), "No Controller Pak detected");
-        style = STL_ORANGE;
-        snprintf(free_space_cpak_text, sizeof(free_space_cpak_text), " ");
-    }
-
-    ui_components_main_text_draw(STL_DEFAULT,
-        ALIGN_CENTER, VALIGN_TOP,
-        "CONTROLLER PAK MANAGEMENT\n"
-    );
-
-    ui_components_main_text_draw(STL_DEFAULT,
-        ALIGN_LEFT, VALIGN_TOP,
-        "\n"
-        "Controller: < %d >\n",
-            controller_selected + 1
-    );
-
-    ui_components_main_text_draw(style,
-        ALIGN_LEFT, VALIGN_TOP,
-        "\n"
-        "                   %s\n",
-        has_mem_text
-    );
-
-    if (has_mem) {
-        ui_components_main_text_draw(STL_DEFAULT,
-            ALIGN_LEFT, VALIGN_TOP,
-            "\n"
-            "\n"
-            "                   %s\n",
-            free_space_cpak_text
-        );
-
-        ui_components_main_text_draw(STL_DEFAULT,
-            ALIGN_LEFT, VALIGN_TOP,
-            "\n"
-            "\n"
-            "\n"
-            "            Name           Code    Ext.    Blocks used\n"
-        );
-
-        ui_components_main_text_draw(style,
-            ALIGN_LEFT, VALIGN_TOP,
-            "\n"
-            "\n"
-            "\n"
-            "\n"
-            "N.01: %s\n"
-            "N.02: %s\n"
-            "N.03: %s\n"
-            "N.04: %s\n"
-            "N.05: %s\n"
-            "N.06: %s\n"
-            "N.07: %s\n"
-            "N.08: %s\n"
-            "N.09: %s\n"
-            "N.10: %s\n"
-            "N.11: %s\n"
-            "N.12: %s\n"
-            "N.13: %s\n"
-            "N.14: %s\n"
-            "N.15: %s\n"
-            "N.16: %s\n",
-            cpakfs_path_strings[0].filename,
-            cpakfs_path_strings[1].filename,
-            cpakfs_path_strings[2].filename,
-            cpakfs_path_strings[3].filename,
-            cpakfs_path_strings[4].filename,
-            cpakfs_path_strings[5].filename,
-            cpakfs_path_strings[6].filename,
-            cpakfs_path_strings[7].filename,
-            cpakfs_path_strings[8].filename,
-            cpakfs_path_strings[9].filename,
-            cpakfs_path_strings[10].filename,
-            cpakfs_path_strings[11].filename,
-            cpakfs_path_strings[12].filename,
-            cpakfs_path_strings[13].filename,
-            cpakfs_path_strings[14].filename,
-            cpakfs_path_strings[15].filename
-        );
-
-        ui_components_main_text_draw(style,
-            ALIGN_LEFT, VALIGN_TOP,
-            "\n"
-            "\n"
-            "\n"
-            "\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n"
-            "                           %s\n",
-            cpakfs_path_strings[0].gamecode,
-            cpakfs_path_strings[1].gamecode,
-            cpakfs_path_strings[2].gamecode,
-            cpakfs_path_strings[3].gamecode,
-            cpakfs_path_strings[4].gamecode,
-            cpakfs_path_strings[5].gamecode,
-            cpakfs_path_strings[6].gamecode,
-            cpakfs_path_strings[7].gamecode,
-            cpakfs_path_strings[8].gamecode,
-            cpakfs_path_strings[9].gamecode,
-            cpakfs_path_strings[10].gamecode,
-            cpakfs_path_strings[11].gamecode,
-            cpakfs_path_strings[12].gamecode,
-            cpakfs_path_strings[13].gamecode,
-            cpakfs_path_strings[14].gamecode,
-            cpakfs_path_strings[15].gamecode
-        );
-
-        ui_components_main_text_draw(style,
-            ALIGN_LEFT, VALIGN_TOP,
-            "\n"
-            "\n"
-            "\n"
-            "\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n"
-            "                                    %s\n", 
-            cpakfs_path_strings[0].ext,
-            cpakfs_path_strings[1].ext,
-            cpakfs_path_strings[2].ext,
-            cpakfs_path_strings[3].ext,
-            cpakfs_path_strings[4].ext,
-            cpakfs_path_strings[5].ext,
-            cpakfs_path_strings[6].ext,
-            cpakfs_path_strings[7].ext,
-            cpakfs_path_strings[8].ext,
-            cpakfs_path_strings[9].ext,
-            cpakfs_path_strings[10].ext,
-            cpakfs_path_strings[11].ext,
-            cpakfs_path_strings[12].ext,
-            cpakfs_path_strings[13].ext,
-            cpakfs_path_strings[14].ext,
-            cpakfs_path_strings[15].ext
-        );
-
-        ui_components_main_text_draw(style,
-            ALIGN_LEFT, VALIGN_TOP,
-            "\n"
-            "\n"
-            "\n"
-            "\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n"
-            "                                              %s\n", 
-            controller_pak_name_notes_bank_size[0],
-            controller_pak_name_notes_bank_size[1],
-            controller_pak_name_notes_bank_size[2],
-            controller_pak_name_notes_bank_size[3],
-            controller_pak_name_notes_bank_size[4],
-            controller_pak_name_notes_bank_size[5],
-            controller_pak_name_notes_bank_size[6],
-            controller_pak_name_notes_bank_size[7],
-            controller_pak_name_notes_bank_size[8],
-            controller_pak_name_notes_bank_size[9],
-            controller_pak_name_notes_bank_size[10],
-            controller_pak_name_notes_bank_size[11],
-            controller_pak_name_notes_bank_size[12],
-            controller_pak_name_notes_bank_size[13],
-            controller_pak_name_notes_bank_size[14],
-            controller_pak_name_notes_bank_size[15]
+        snprintf(
+            status_text,
+            sizeof(status_text),
+            "%d/%d free blocks",
+            cpakfs_stats.pages.total - cpakfs_stats.pages.used,
+            cpakfs_stats.pages.total
         );
     }
+
+    ui_components_tabs_draw(controller_tabs, 4, controller_selected, 132.0f);
+    ui_components_layout_draw_tabbed();
+    ui_components_file_list_draw(
+        controller_note_entries,
+        note_count,
+        index_selected,
+        MAX_NUM_NOTES,
+        false,
+        "No.  Name                          Code  Ext   Blocks",
+        has_mem ? NULL : "Not Available"
+    );
 
     ui_components_context_menu_draw(&options_context_menu);
 
-    style = (has_mem && !corrupted_pak) ? STL_DEFAULT : STL_GRAY;
+    menu_font_type_t note_backup_style =
+        (has_mem && !corrupted_pak && note_count > 0 && use_rtc) ? STL_DEFAULT : STL_GRAY;
+    menu_font_type_t pak_backup_style =
+        (has_mem && !corrupted_pak && use_rtc) ? STL_DEFAULT : STL_GRAY;
 
-    if (!use_rtc) {
-        ui_components_main_text_draw(STL_ORANGE,
-            ALIGN_LEFT, VALIGN_TOP,
-            "No RTC\n"
-        );
-        style = STL_GRAY;
-    }
+    ui_components_actions_bar_text_draw(note_backup_style,
+        ALIGN_LEFT, VALIGN_TOP,
+        "A: Backup note\n"
+        "B: Exit"
+    );
 
-    if (!corrupted_pak) {
+    ui_components_actions_bar_text_draw(pak_backup_style,
+        ALIGN_RIGHT, VALIGN_TOP,
+        "L|Z: Backup Pak"
+    );
 
-        ui_components_actions_bar_text_draw(style,
-            ALIGN_LEFT, VALIGN_TOP,
-            "A: Backup whole Pak\n"
-            "B: Back\n"
-        );
-        ui_components_actions_bar_text_draw(style,
-            ALIGN_RIGHT, VALIGN_TOP,
-            "L|Z: Backup a Note\n"
-            "R: Options\n"
-        );
-    } else {
-        ui_components_actions_bar_text_draw(style,
-            ALIGN_LEFT, VALIGN_TOP,
-            "A: Format Controller Pak\n"
-            "\n"
-        );
-    }
-
-    ui_components_actions_bar_text_draw(style,
-        ALIGN_CENTER, VALIGN_TOP,
+    ui_components_actions_bar_text_draw(
+        (use_rtc && has_mem) ? STL_DEFAULT : STL_GRAY,
+        ALIGN_RIGHT, VALIGN_TOP,
         "\n"
-        "◀ Change Controller ▶\n"
+        "R: Options"
+    );
+
+    ui_components_actions_bar_text_draw(STL_DEFAULT,
+        ALIGN_CENTER, VALIGN_TOP,
+        "◀ Tabs ▶ | ▼/▲: Notes\n"
+        "%s",
+        status_text
     );
 
     if (error_message_displayed) {
@@ -938,6 +786,14 @@ static void draw (menu_t *menu, surface_t *d) {
             "Do you want to backup the Controller Pak?\n\n"
             "A: Yes        B: No"
         );   
+    } else if (show_single_note_dump_confirm_message &&
+        !start_single_note_dump) {
+        ui_components_messagebox_draw(
+            "Do you want to back up this note?\n\n"
+            "%s\n\n"
+            "A: Yes        B: No",
+            controller_pak_name_notes[index_selected]
+        );
     } else if (show_complete_write_confirm_message) {
         ui_components_messagebox_draw(
             "To write a complete backup, browse to a file"
@@ -952,25 +808,13 @@ static void draw (menu_t *menu, surface_t *d) {
         );   
     }
 
-    if (show_single_note_dump_confirm_message &&
-        !start_single_note_dump) {
-        ui_components_messagebox_draw(
-            "Which note would you like to backup?\n\n"
-            "Note selected: N.%-2.2d\n\n"
-            "A: Select    B: No\n"
-            "▼▲: Select note number",
-            index_selected + 1
-        );
-    }
-
     if (show_single_note_delete_confirm_message &&
         !start_single_note_delete) {
         ui_components_messagebox_draw(
-            "Which note would you like to delete?\n\n"
-            "Note selected: N.%-2.2d\n\n"
-            "A: Select    B: No\n"
-            "▼▲: Select note number",
-            index_selected + 1
+            "Delete this note?\n\n"
+            "%s\n\n"
+            "A: Yes        B: No",
+            controller_pak_name_notes[index_selected]
         );
     }
 
@@ -1027,6 +871,8 @@ static void draw (menu_t *menu, surface_t *d) {
 void view_controller_pakfs_init (menu_t *menu) {
     ctr_p_data_loop = false;
     controller_selected = 0;
+    index_selected = 0;
+    free_controller_pak_name_notes();
     reset_vars();
     unmount_all_cpakfs();
     unmounted = true;

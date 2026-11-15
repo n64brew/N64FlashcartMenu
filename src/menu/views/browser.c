@@ -8,6 +8,7 @@
 
 #include "../cart_load.h"
 #include "../fonts.h"
+#include "../ui_components/constants.h"
 #include "../zip_entry_count.h"
 #include "utils/fs.h"
 #include "views.h"
@@ -693,7 +694,7 @@ static void draw (menu_t *menu, surface_t *d) {
 
     ui_components_layout_draw_tabbed();
 
-    ui_components_file_list_draw(menu->browser.list, menu->browser.entries, menu->browser.selected);
+    ui_components_file_list_draw(menu->browser.list, menu->browser.entries, menu->browser.selected, LIST_ENTRIES, true, NULL, NULL);
 
     const char *action = NULL;
 
