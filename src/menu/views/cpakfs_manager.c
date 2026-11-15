@@ -247,8 +247,8 @@ static void populate_list_cpakfs() {
         
         free_controller_pak_name_notes();
 
-        if (dir_findfirst(CPAK_MOUNT_ARRAY[controller_selected], &dir_entry) >= 0) {
-            
+        int result = dir_findfirst(CPAK_MOUNT_ARRAY[controller_selected], &dir_entry);
+        if (result == 0) {
             write_note_name_info_list(controller_selected, 0, dir_entry.d_name);
 
             int i = 1;
@@ -257,9 +257,11 @@ static void populate_list_cpakfs() {
                 i++;
                 if (i >= MAX_NUM_NOTES) break;
             }
-        }
 
-        ctr_p_data_loop = true;
+            ctr_p_data_loop = true;
+        } else if (result == -1) {
+            ctr_p_data_loop = true;
+        }
     }
 }
 
