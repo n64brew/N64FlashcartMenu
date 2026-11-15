@@ -241,8 +241,8 @@ static void write_note_name_info_list(int16_t controller, int index, char* entry
     note_count = index + 1;
 }
 
-static void populate_list_cpakfs() {  
-    if (has_mem && !ctr_p_data_loop) {
+static void populate_list_cpakfs() {
+    if (has_mem && mounted[controller_selected] && !ctr_p_data_loop) {
         
         free_controller_pak_name_notes();
 
@@ -714,7 +714,7 @@ static void draw (menu_t *menu, surface_t *d) {
     ui_components_actions_bar_text_draw(note_backup_style,
         ALIGN_LEFT, VALIGN_TOP,
         "A: Backup note\n"
-        "B: Back"
+        "B: Exit"
     );
 
     ui_components_actions_bar_text_draw(pak_backup_style,
