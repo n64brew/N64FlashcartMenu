@@ -18,7 +18,8 @@ Files are made available:
 	- None.
 
 - **Refactor**
-	- None.
+	- Menu Credits, Flashcart Information and N64 Information are now shown as tabs within the Device Information screen. 
+	- Controller Pak Manager has been improved to align with the rest of the menu.
 
 - **Other**
 	- None.
