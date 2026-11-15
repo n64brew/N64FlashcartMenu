@@ -381,8 +381,8 @@ static const settings_row_t audio_settings[] = {
 
 #ifdef BETA_SETTINGS
 static const settings_row_t beta_settings[] = {
-    { "Hide ROM Extensions", &set_show_browser_file_extensions_context_menu, NULL, NULL, NULL },
-    { "Hide ROM Tags", &set_show_browser_rom_tags_context_menu, NULL, NULL, NULL },
+    { "Show ROM Extensions", &set_show_browser_file_extensions_context_menu, NULL, NULL, NULL },
+    { "Show ROM Tags", &set_show_browser_rom_tags_context_menu, NULL, NULL, NULL },
     { "Rumble Feedback", &set_rumble_enabled_type_context_menu, NULL, NULL, NULL },
 };
 #endif

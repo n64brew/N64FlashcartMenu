@@ -5,7 +5,7 @@ If required, you can manually adjust the file (required for some advanced settin
 
 ### Using the Settings Editor
 
-Open the Settings Editor by pressing `START` in the File Browser.
+Press `START` in the File Browser to open the settings menu, then select `Menu settings` to open the Settings Editor.
 
 - Use `C or D-Pad Left` and `C or D-Pad Right` to switch between the General, Browser, Audio, and System tabs. Builds with beta settings enabled also have a Beta tab for beta-only options.
 - Use `C or D-Pad Up` and `C or D-Pad Down` to select a setting.
