@@ -19,8 +19,6 @@
 - [Menu Settings](./32_menu_settings.md)
 - [Date-Time (RTC) Settings](./33_rtc_settings.md)
 - [Menu Information](./35_menu_information.md)
-- [Flashcart Information](./36_flashcart_information.md)
-- [N64 Information](./37_n64_information.md)
 
 ### Other
 - [Music Player](./41_mp3_player.md)

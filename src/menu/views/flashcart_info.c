@@ -1,4 +1,5 @@
 #include "views.h"
+#include "info_tabs.h"
 #include "../sound.h"
 #include <libcart/cart.h>
 
@@ -87,7 +88,13 @@ static void process (menu_t *menu) {
     bool has_diagnostics_support = flashcart_has_voltage_temperature();
     bool has_extra_info = has_button_support || has_diagnostics_support;
 
-    if (menu->actions.back) {
+    if (menu->actions.go_left) {
+        sound_play_effect(SFX_SETTING);
+        menu->next_mode = MENU_MODE_CREDITS;
+    } else if (menu->actions.go_right) {
+        sound_play_effect(SFX_SETTING);
+        menu->next_mode = MENU_MODE_SYSTEM_INFO;
+    } else if (menu->actions.back) {
         sound_play_effect(SFX_EXIT);
         menu->next_mode = MENU_MODE_BROWSER;
     } else if (menu->actions.lz_context && has_extra_info) {
@@ -105,15 +112,8 @@ static void draw (menu_t *menu, surface_t *d) {
 
     ui_components_background_draw();
 
-    ui_components_layout_draw();
-
-    ui_components_main_text_draw(
-        STL_DEFAULT,
-        ALIGN_CENTER, VALIGN_TOP,
-        "FLASHCART INFORMATION"
-        "\n"
-        "\n"
-    );
+    ui_components_tabs_draw(info_tabs, 3, 1, 162.0f);
+    ui_components_layout_draw_tabbed();
 
     ui_components_main_text_draw(
         STL_DEFAULT,
@@ -123,7 +123,9 @@ static void draw (menu_t *menu, surface_t *d) {
         "Type:\n"
         "  %s\n\n"
         "Firmware:\n"
-        "  Version: %s - Menu probably out of date.\n\n"
+        "  Version: %s\n"
+        "  Menu updates are separate from firmware.\n"
+        "\n"
         "Features:\n"
         "  Virtual 64DD:     %s.\n"
         "  Real Time Clock:  %s.\n"
@@ -154,7 +156,14 @@ static void draw (menu_t *menu, surface_t *d) {
         STL_DEFAULT,
         ALIGN_LEFT, VALIGN_TOP,
         "\n"
-        "B: Back"
+        "B: Exit"
+    );
+
+    ui_components_actions_bar_text_draw(
+        STL_DEFAULT,
+        ALIGN_CENTER, VALIGN_TOP,
+        "\n"
+        "◀ Tabs ▶"
     );
 
     if (has_extra_info) {
