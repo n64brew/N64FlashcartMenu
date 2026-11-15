@@ -71,7 +71,6 @@ static void menu_init (boot_params_t *boot_params) {
     actions_init();
     sound_init_default();
     sound_init_sfx();
-    sound_init_bgm();
 
     hdmi_clear_game_id();
 
@@ -133,6 +132,8 @@ static void menu_init (boot_params_t *boot_params) {
     path_free(path);
 
     sound_use_sfx(menu->settings.soundfx_enabled);
+    sound_set_bgm_track(menu->settings.bgm_track);
+    sound_init_bgm();
     sound_use_bgm(menu->settings.bgm_enabled);
 
     menu->browser.directory = path_init(menu->storage_prefix, menu->settings.default_directory);

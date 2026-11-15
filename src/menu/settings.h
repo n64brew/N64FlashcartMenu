@@ -7,6 +7,16 @@
 #ifndef SETTINGS_H__
 #define SETTINGS_H__
 
+/* Reserve space for up to four built-in tracks. */
+#define BGM_TRACK_CAPACITY 4
+
+typedef enum {
+    BGM_TRACK_FLYING_DREAMS,
+    BGM_TRACK_WARM_WAVES,
+    BGM_TRACK_BLUE_HORIZON,
+    BGM_TRACK_WHITE_STONES,
+    BGM_TRACK_AVAILABLE_COUNT,
+} bgm_track_t;
 
 /** @brief Settings Structure */
 typedef struct {
@@ -54,6 +64,9 @@ typedef struct {
 
     /** @brief Enable Background music */
     bool bgm_enabled;
+
+    /** @brief Selected built-in background music track */
+    bgm_track_t bgm_track;
 
     /** @brief Enable Sound effects within the menu */
     bool soundfx_enabled;

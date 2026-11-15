@@ -18,8 +18,15 @@ static wav64_t sfx_cursor, sfx_error, sfx_enter, sfx_exit, sfx_setting, bgm;
 static bool sound_initialized = false;
 static bool sfx_enabled = false;
 static bool bgm_enabled = false;
+static bgm_track_t bgm_track = BGM_TRACK_FLYING_DREAMS;
 static bool sfx_opened = false;
 static bool bgm_opened = false;
+static const char *const bgm_track_paths[BGM_TRACK_CAPACITY] = {
+    [BGM_TRACK_FLYING_DREAMS] = "rom:/menu/sounds/flying_dreams.wav64",
+    [BGM_TRACK_WARM_WAVES] = "rom:/menu/sounds/warm_waves.wav64",
+    [BGM_TRACK_BLUE_HORIZON] = "rom:/menu/sounds/blue_horizon.wav64",
+    [BGM_TRACK_WHITE_STONES] = "rom:/menu/sounds/white_stones.wav64",
+};
 
 /**
  * @brief Reconfigure the sound system with the specified frequency.
@@ -93,10 +100,39 @@ void sound_init_sfx (void) {
  * @brief Initialize the background music.
  */
 void sound_init_bgm (void) {
-    wav64_open(&bgm, "rom:/menu/sounds/bgm.wav64");
+    wav64_open(&bgm, bgm_track_paths[bgm_track]);
     wav64_set_loop(&bgm, true);
     mixer_ch_set_vol(SOUND_BGM_CHANNEL, 0.1f, 0.1f);
     bgm_opened = true;
+}
+
+/**
+ * @brief Select the background music track.
+ *
+ * Reopens the current track so the selection takes effect immediately.
+ */
+void sound_set_bgm_track(bgm_track_t track) {
+    if ((unsigned int)track >= BGM_TRACK_AVAILABLE_COUNT) {
+        debugf("[SOUND] Invalid background music track: %d\n", track);
+        return;
+    }
+    if (bgm_track == track) {
+        return;
+    }
+
+    bgm_track = track;
+    if (!bgm_opened) {
+        return;
+    }
+
+    mixer_ch_stop(SOUND_BGM_CHANNEL);
+    wav64_close(&bgm);
+    bgm_opened = false;
+    sound_init_bgm();
+
+    if (bgm_enabled) {
+        wav64_play(&bgm, SOUND_BGM_CHANNEL);
+    }
 }
 
 /**

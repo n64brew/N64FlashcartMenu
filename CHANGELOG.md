@@ -9,7 +9,7 @@ Files are made available:
 ## Release Notes 202x-vNext
 
 - **New Features**
-	- None.
+	- Added four selectable built-in background music tracks.
 
 - **Bug Fixes**
 	- None.

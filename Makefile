@@ -106,10 +106,13 @@ FONTS = \
 SOUNDS_WAV = \
 	cursorsound.wav \
 	back.wav \
-	bgm.wav \
+	blue_horizon.wav \
 	enter.wav \
 	error.wav \
-	settings.wav
+	flying_dreams.wav \
+	settings.wav \
+	warm_waves.wav \
+	white_stones.wav
 
 SOUNDS_XM ?=
 

@@ -14,6 +14,7 @@
 
 static bool show_message_reset_settings = false;
 static bool show_setting_change_confirmation;
+static bool show_bgm_track_selection_menu;
 static bool pending_remove_background;
 static int selected_settings_tab;
 static int selected_settings_rows[SETTINGS_TAB_COUNT];
@@ -71,6 +72,20 @@ static void set_bgm_enabled_type (menu_t *menu, void *arg) {
     menu->settings.bgm_enabled = (bool)(uintptr_t)(arg);
     sound_use_bgm(menu->settings.bgm_enabled);
     settings_save(&menu->settings);
+}
+
+static void set_bgm_track_type (menu_t *menu, void *arg) {
+    menu->settings.bgm_track = (bgm_track_t)(uintptr_t)(arg);
+    sound_set_bgm_track(menu->settings.bgm_track);
+    settings_save(&menu->settings);
+}
+
+static void request_bgm_track_change (menu_t *menu, void *arg) {
+    pending_settings_tab = selected_settings_tab;
+    pending_settings_row = selected_settings_rows[selected_settings_tab];
+    pending_setting_choice = (int)(uintptr_t)(arg);
+    show_bgm_track_selection_menu = false;
+    show_setting_change_confirmation = menu->settings.bgm_track != pending_setting_choice;
 }
 
 static void set_pal60_type (menu_t *menu, void *arg) {
@@ -209,6 +224,28 @@ static component_context_menu_t set_bgm_enabled_type_context_menu = {
     .list = {
         {.text = "On", .action = set_bgm_enabled_type, .arg = (void *)(uintptr_t)(true) },
         {.text = "Off", .action = set_bgm_enabled_type, .arg = (void *)(uintptr_t)(false) },
+    COMPONENT_CONTEXT_MENU_LIST_END,
+}};
+
+static int get_bgm_track_current_selection (menu_t *menu) {
+    return menu->settings.bgm_track;
+}
+
+static component_context_menu_t set_bgm_track_type_context_menu = {
+    .get_default_selection = get_bgm_track_current_selection,
+    .list = {
+        {.text = "Flying Dreams", .action = set_bgm_track_type, .arg = (void *)(uintptr_t)(BGM_TRACK_FLYING_DREAMS) },
+        {.text = "Warm Waves", .action = set_bgm_track_type, .arg = (void *)(uintptr_t)(BGM_TRACK_WARM_WAVES) },
+        {.text = "Blue Horizon", .action = set_bgm_track_type, .arg = (void *)(uintptr_t)(BGM_TRACK_BLUE_HORIZON) },
+        {.text = "White Stones", .action = set_bgm_track_type, .arg = (void *)(uintptr_t)(BGM_TRACK_WHITE_STONES) },
+    COMPONENT_CONTEXT_MENU_LIST_END,
+}};
+
+static component_context_menu_t bgm_track_selection_context_menu = { .list = {
+    {.text = "Flying Dreams", .action = request_bgm_track_change, .arg = (void *)(uintptr_t)(BGM_TRACK_FLYING_DREAMS) },
+    {.text = "Warm Waves", .action = request_bgm_track_change, .arg = (void *)(uintptr_t)(BGM_TRACK_WARM_WAVES) },
+    {.text = "Blue Horizon", .action = request_bgm_track_change, .arg = (void *)(uintptr_t)(BGM_TRACK_BLUE_HORIZON) },
+    {.text = "White Stones", .action = request_bgm_track_change, .arg = (void *)(uintptr_t)(BGM_TRACK_WHITE_STONES) },
     COMPONENT_CONTEXT_MENU_LIST_END,
 }};
 
@@ -377,6 +414,7 @@ static const settings_row_t browser_settings[] = {
 static const settings_row_t audio_settings[] = {
     { "Sound Effects", &set_soundfx_enabled_type_context_menu, NULL, NULL, NULL },
     { "Background Music", &set_bgm_enabled_type_context_menu, NULL, NULL, NULL },
+    { "Background Music Track", &set_bgm_track_type_context_menu, NULL, NULL, NULL },
 };
 
 #ifdef BETA_SETTINGS
@@ -495,6 +533,14 @@ static void process (menu_t *menu) {
         return;
     }
 
+    if (show_bgm_track_selection_menu) {
+        ui_components_context_menu_process(menu, &bgm_track_selection_context_menu);
+        if (menu->actions.back) {
+            show_bgm_track_selection_menu = false;
+        }
+        return;
+    }
+
     const settings_tab_t *tab = &settings_tabs[selected_settings_tab];
 
     if (menu->actions.go_left) {
@@ -523,11 +569,21 @@ static void process (menu_t *menu) {
         int selected_row = selected_settings_rows[selected_settings_tab];
         const settings_row_t *row = &tab->rows[selected_row];
         if (row->choices) {
-            int current_value = row->choices->get_default_selection(menu);
-            pending_settings_tab = selected_settings_tab;
-            pending_settings_row = selected_row;
-            pending_setting_choice = (current_value == 0) ? 1 : 0;
-            show_setting_change_confirmation = true;
+            if (row->choices == &set_bgm_track_type_context_menu) {
+                ui_components_context_menu_init(&bgm_track_selection_context_menu);
+                ui_components_context_menu_show(&bgm_track_selection_context_menu);
+                bgm_track_selection_context_menu.row_selected = row->choices->get_default_selection(menu);
+                show_bgm_track_selection_menu = true;
+            } else {
+                int current_value = row->choices->get_default_selection(menu);
+                pending_settings_tab = selected_settings_tab;
+                pending_settings_row = selected_row;
+                pending_setting_choice = current_value + 1;
+                if (row->choices->list[pending_setting_choice].text == NULL) {
+                    pending_setting_choice = 0;
+                }
+                show_setting_change_confirmation = true;
+            }
             sound_play_effect(SFX_SETTING);
         } else if (row->action) {
             pending_settings_tab = selected_settings_tab;
@@ -588,7 +644,11 @@ static void draw (menu_t *menu, surface_t *d) {
         "◀ Tabs ▶ | ▼/▲: Settings"
     );
 
-    ui_components_context_menu_draw(&options_context_menu);
+    if (show_bgm_track_selection_menu) {
+        ui_components_context_menu_draw(&bgm_track_selection_context_menu);
+    } else {
+        ui_components_context_menu_draw(&options_context_menu);
+    }
 
     if (show_message_reset_settings) {
         ui_components_messagebox_draw(
