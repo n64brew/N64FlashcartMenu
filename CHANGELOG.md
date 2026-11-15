@@ -37,7 +37,7 @@ Files are made available:
 ### Deprecation notices
 - None.
 
-## Release Notes 2026-11-xx - Tagged 0.3.8
+## Release Notes 2026-11-15 - Tagged 0.3.8
 
 - **New Features**
 	- Browser items that are too long now ticker.
