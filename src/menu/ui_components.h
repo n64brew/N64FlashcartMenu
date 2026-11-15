@@ -235,8 +235,20 @@ void ui_components_background_image_free_only(void);
  * @param list List of entries.
  * @param entries Number of entries.
  * @param selected Index of the selected entry.
+ * @param visible_items Maximum number of entries to display.
+ * @param show_size Whether to draw the size column.
+ * @param column_header Optional column labels drawn above the scrolling entries.
+ * @param empty_message Optional message to draw when the list is empty.
  */
-void ui_components_file_list_draw(entry_t *list, int entries, int selected);
+void ui_components_file_list_draw(
+    entry_t *list,
+    int entries,
+    int selected,
+    int visible_items,
+    bool show_size,
+    const char *column_header,
+    const char *empty_message
+);
 
 /**
  * @brief Free file list component cached resources.
