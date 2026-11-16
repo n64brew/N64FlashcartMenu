@@ -205,8 +205,7 @@ static void pane_draw (menu_t *menu, bool focused) {
         status_message[0]
             ? status_message
             : "Left / Right selects a field. Up / Down adjusts it. Press A to save.\n\n"
-              "You can also use the PC terminal application via USB,\n"
-              "or even an N64 game with RTC support."
+              "The clock is shared by the menu and file timestamps."
     );
 }
 

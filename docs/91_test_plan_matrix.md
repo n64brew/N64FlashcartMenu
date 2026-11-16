@@ -62,7 +62,7 @@ Before starting a full test cycle, document the current baseline status to track
 | **Cheat Codes** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **ROM Patches** | ⚠ | ⚠ | ⚠ | ⚠ | ⚠ |
 | **USB Communication** | ✓ | Limited | ✓ | … | ✓ |
-| **RTC Support** | ✓ | ✓ | ✓ | … | ✓ |
+| **RTC Support** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Controller Pak** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Auto CIC/Region Detection** | ✓ | Manual | ✓ | ✓ | ✓ |
 | **Fast Reboot** | ✓ | - | - | - | ✓ |

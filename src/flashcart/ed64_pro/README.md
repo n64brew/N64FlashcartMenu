@@ -10,7 +10,7 @@ https://github.com/krikzz/ed64-pro-pub/blob/main/MANUAL.md
 - Revision: 43014e290f85140d4c5ca84fbf5ae48ac755a23d
 - Paths: edio/everdrive.c, edio/everdrive.h
 
-The cartridge-local driver adapts register and FIFO access, bounded command framing, STATUS/NRESP, firmware information, MCU filesystem initialization, raw-sector I/O, SD-to-FCI loading, and DEV stop/flags/paths/configuration/start. It uses fixed-width types, bounded libdragon ticket submission/completion, exclusive cache-line staging, and sticky failures instead of upstream's unbounded PI and protocol waits.
+The cartridge-local driver adapts register and FIFO access, bounded command framing, STATUS/NRESP, firmware information, MCU filesystem initialization, raw-sector I/O, SD-to-FCI loading, DEV stop/flags/paths/configuration/start, and RTC GET/SET. It uses fixed-width types, bounded libdragon ticket submission/completion, exclusive cache-line staging, and sticky failures instead of upstream's unbounded PI and protocol waits.
 
 N64FlashcartMenu retains its AGPL license; the upstream copyright and MIT license notice appear [below](#upstream-license).
 
@@ -26,7 +26,7 @@ ROM and emulator loads use FatFs with capacity checks and staged paths. Save con
 
 Automatic CIC, automatic region detection, and MCU save writeback are enabled. CIC detection uses the shared IPL3 checksum path. ROM TV type comes from the shared destination-code metadata mapping; manual CIC/TV overrides take priority, and an unknown destination passes through the console TV type.
 
-64DD, fast reboot, USB debugging, and menu RTC are not yet implemented.
+64DD, fast reboot, and USB debugging are not yet implemented.
 
 FatFs paths remain UTF-8. Only staged GPAK/BRM paths use FatFs's CP437 table and actual 8.3 aliases for unrepresentable components. Missing or unusable aliases, including on exFAT, are rejected before storage handoff without lossy replacement. The input path without `sd:` and its MCU encoding are each limited to 1023 bytes.
 
@@ -35,6 +35,14 @@ FatFs paths remain UTF-8. Only staged GPAK/BRM paths use FatFs's CP437 table and
 Idle RESET returned to the stock menu on the tested setup. SM64 EEPROM settings persisted after immediate, 3-second and 10-second RESET trials, console-only and console-plus-USB power cycles, and intervening games. Other save families have boot/configuration checks; their persistence and direct power-loss timing remain unqualified.
 
 With Jumper Pak (4 MiB), SM64 booted and restored saved settings, and both cheat actions were correctly refused. Earlier intermittent navigation/artwork/open failures remain unresolved. SC64 boot/save and X7 boot regression checks passed on the NTSC console with 8 MiB. Emulator boot/save checks are user-deferred to external testers.
+
+### Real-time clock
+
+Settings → Time reads and sets the Pro clock for 2000–2099. The menu, `time()`, `gettimeofday()`, `settimeofday()`, and file timestamps share that clock. Startup and Time-pane entry resync from hardware; ordinary reads advance a validated cache without MCU traffic.
+
+Invalid hardware dates and failed reads or write confirmation report errors instead of using the software fallback. The clock remains editable to repair an invalid date. RTC capability is independent of clock availability. Game launch keeps its existing read-only RTC mode.
+
+Verified on an original N64 with firmware `26.1014`: advancing time, Time-pane editing/readback/reentry, console restart, five seconds with console and USB power off, persisted FAT timestamps, and a Super Mario 64 launch. The original clock was restored with elapsed time, and menu settings were restored. RTC behavior on other hardware has not been tested. Host and sanitizer tests cover conversion, range limits, caching, lifecycle, and failures.
 
 ### Upstream license
 
