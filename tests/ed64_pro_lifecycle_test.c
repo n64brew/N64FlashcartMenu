@@ -598,7 +598,59 @@ static void test_optional_error_messages (void) {
     TEST_CHECK(spy.messages == 4 && spy.probes == 0 && spy.pro_inits == 0 && spy.file_calls == 0);
 }
 
+uint32_t mock_ticks_read (void) { return 0; }
+
+static unsigned custom_rtc_syncs;
+static flashcart_err_t custom_rtc_resync (void) {
+    TEST_CHECK(test_rtc_init_calls == 1);
+    custom_rtc_syncs++;
+    return FLASHCART_ERR_ARGS;
+}
+static rtc_range_t custom_rtc_range (void) {
+    return (rtc_range_t){946684800, 4102444799LL};
+}
+
+static void test_rtc_legacy_dispatch (void) {
+    power_on();
+    test_rtc_init_calls = test_rtc_resync_calls = 0;
+    test_rtc_source = RTC_SOURCE_JOYBUS;
+    test_rtc_available = true;
+    test_rtc_sync_result = RTC_ESUCCESS;
+    flashcart_init_rtc();
+    TEST_CHECK(test_rtc_init_calls == 1 && test_rtc_resync_calls == 0);
+    TEST_CHECK(flashcart_rtc_is_writable());
+    TEST_CHECK(flashcart_resync_rtc() == FLASHCART_OK && test_rtc_resync_calls == 1);
+    test_rtc_available = false;
+    TEST_CHECK(!flashcart_rtc_is_writable());
+    test_rtc_sync_result = RTC_EBADCLOCK;
+    TEST_CHECK(flashcart_resync_rtc() == FLASHCART_ERR_INT);
+    rtc_range_t range = flashcart_get_rtc_range();
+    TEST_CHECK(range.min == 820454400 && range.max == 3976214399LL);
+    test_rtc_source = RTC_SOURCE_NONE;
+    TEST_CHECK(!flashcart_rtc_is_writable());
+}
+
+static void test_rtc_backend_dispatch (void) {
+    power_on();
+    flashcart_t backend = *flashcart;
+    backend.resync_rtc = custom_rtc_resync;
+    backend.get_rtc_range = custom_rtc_range;
+    flashcart = &backend;
+    custom_rtc_syncs = 0;
+    test_rtc_init_calls = test_rtc_resync_calls = 0;
+    test_rtc_source = RTC_SOURCE_NONE;
+    flashcart_init_rtc();
+    TEST_CHECK(custom_rtc_syncs == 1 && test_rtc_resync_calls == 0);
+    TEST_CHECK(flashcart_rtc_is_writable());
+    TEST_CHECK(flashcart_resync_rtc() == FLASHCART_ERR_ARGS && custom_rtc_syncs == 2);
+    rtc_range_t range = flashcart_get_rtc_range();
+    TEST_CHECK(range.min == 946684800 && range.max == 4102444799LL);
+    flashcart = fallback;
+}
+
 TEST_LIST = {
+    {"legacy RTC initialization and source dispatch remain unchanged", test_rtc_legacy_dispatch},
+    {"backend RTC hooks activate after libdragon and resync errors propagate", test_rtc_backend_dispatch},
     {"Pro mounts storage only after successful initialization", test_pro_storage_mount},
     {"identified Pro failures never activate or fall back", test_identified_failures},
     {"indeterminate probe never selects another cartridge", test_failed_probe_never_falls_back},

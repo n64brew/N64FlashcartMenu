@@ -70,7 +70,7 @@ static void menu_init (boot_params_t *boot_params) {
 
     joypad_init();
     timer_init();
-    rtc_init();
+    flashcart_init_rtc();
     rspq_init();
     rdpq_init();
     dfs_init(DFS_DEFAULT_LOCATION);
@@ -287,7 +287,7 @@ void menu_run (boot_params_t *boot_params) {
                 }
             }
 
-            time(&menu->current_time);
+            menu->current_time = time(NULL);
         }
 
         sound_poll();

@@ -1277,3 +1277,15 @@ TEST_LIST = {
     {"release failures refuse handoff", test_release_refusals},
     {NULL, NULL},
 };
+
+/* RTC protocol framing is exercised by the transport suite. */
+ed64_pro_ll_error_t ed64_pro_ll_rtc_get (ed64_pro_ll_transaction_t *tx, uint8_t out[ED64_PRO_RTC_SIZE], uint32_t deadline) {
+    (void)tx; (void)out; (void)deadline;
+    TEST_CHECK(false);
+    return ED64_PRO_LL_CONTEXT;
+}
+ed64_pro_ll_error_t ed64_pro_ll_rtc_set (ed64_pro_ll_transaction_t *tx, const uint8_t in[ED64_PRO_RTC_SIZE], uint32_t deadline) {
+    (void)tx; (void)in; (void)deadline;
+    TEST_CHECK(false);
+    return ED64_PRO_LL_CONTEXT;
+}

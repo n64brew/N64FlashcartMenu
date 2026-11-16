@@ -254,6 +254,31 @@ flashcart_err_t flashcart_deinit (void) {
     return FLASHCART_OK;
 }
 
+void flashcart_init_rtc (void) {
+    rtc_init();
+    /* libdragon replaces both hooks during initialization. */
+    if (flashcart->resync_rtc) {
+        flashcart->resync_rtc();
+    }
+}
+
+flashcart_err_t flashcart_resync_rtc (void) {
+    if (flashcart->resync_rtc) {
+        return flashcart->resync_rtc();
+    }
+    return rtc_set_source(rtc_get_source()) == RTC_ESUCCESS ? FLASHCART_OK : FLASHCART_ERR_INT;
+}
+
+bool flashcart_rtc_is_writable (void) {
+    return flashcart->resync_rtc ||
+        (rtc_get_source() == RTC_SOURCE_JOYBUS && rtc_is_source_available(RTC_SOURCE_JOYBUS));
+}
+
+rtc_range_t flashcart_get_rtc_range (void) {
+    return flashcart->get_rtc_range ? flashcart->get_rtc_range() :
+        (rtc_range_t){ .min = 820454400, .max = 3976214399LL };
+}
+
 /**
  * @brief Check if the flashcart has a specific feature.
  * 

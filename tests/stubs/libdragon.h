@@ -4,6 +4,31 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
+
+typedef struct { time_t min, max; } rtc_range_t;
+typedef struct {
+    int (*gettime)(time_t *);
+    int (*settime)(time_t);
+} rtc_hooks_t;
+typedef enum { RTC_SOURCE_NONE, RTC_SOURCE_JOYBUS, RTC_SOURCE_DD, RTC_SOURCE_BB } rtc_source_t;
+#define RTC_ESUCCESS 0
+#define RTC_ENOCLOCK -1
+#define RTC_EBADCLOCK -2
+#define RTC_EBADTIME -3
+uint64_t get_ticks (void);
+int hook_rtc_calls (rtc_hooks_t *hooks);
+int unhook_rtc_calls (rtc_hooks_t *hooks);
+bool rtc_init (void);
+rtc_source_t rtc_get_source (void);
+bool rtc_is_source_available (rtc_source_t source);
+int rtc_set_source (rtc_source_t source);
+
+extern rtc_hooks_t test_rtc_hooks;
+extern rtc_source_t test_rtc_source;
+extern unsigned test_rtc_init_calls, test_rtc_resync_calls;
+extern int test_rtc_sync_result;
+extern bool test_rtc_available;
 
 typedef uint32_t pi_addr_t;
 typedef struct kthread_s kthread_t;

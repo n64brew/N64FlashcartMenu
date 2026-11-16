@@ -13,8 +13,9 @@
     _x < _min ? _max : _x > _max ? _min : _x; \
 })
 
-#define YEAR_MIN 1996
-#define YEAR_MAX 2095
+static int year_min = 1996;
+static int year_max = 2095;
+static bool clock_writable;
 
 typedef enum {
     RTC_EDIT_YEAR,
@@ -28,20 +29,24 @@ typedef enum {
 
 static struct tm rtc_tm = {0};
 static rtc_field_t editing_field_type;
-static char status_message[64];
+static char status_message[256];
 
 
 static void adjust_rtc_time (struct tm *t, int incr) {
+    static const int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int year = t->tm_year + 1900;
+    int last_day = days[t->tm_mon] + (t->tm_mon == 1 &&
+        (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)));
     switch (editing_field_type)
     {
         case RTC_EDIT_YEAR:
-            t->tm_year = WRAP( t->tm_year + incr, YEAR_MIN - 1900, YEAR_MAX - 1900 );
+            t->tm_year = WRAP( t->tm_year + incr, year_min - 1900, year_max - 1900 );
             break;
         case RTC_EDIT_MONTH:
             t->tm_mon = WRAP( t->tm_mon + incr, 0, 11 );
             break;
         case RTC_EDIT_DAY:
-            t->tm_mday = WRAP( t->tm_mday + incr, 1, 31 );
+            t->tm_mday = WRAP( t->tm_mday + incr, 1, last_day );
             break;
         case RTC_EDIT_HOUR:
             t->tm_hour = WRAP( t->tm_hour + incr, 0, 23 );
@@ -55,6 +60,11 @@ static void adjust_rtc_time (struct tm *t, int incr) {
         default:
             break;
     }
+    /* Keep month/year edits on a valid day, including February in leap years. */
+    year = t->tm_year + 1900;
+    last_day = days[t->tm_mon] + (t->tm_mon == 1 &&
+        (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)));
+    t->tm_mday = MIN(t->tm_mday, last_day);
     // Recalculate day-of-week and day-of-year
     time_t timestamp = mktime( t );
     *t = *gmtime( &timestamp );
@@ -63,8 +73,8 @@ static void adjust_rtc_time (struct tm *t, int incr) {
 /**
  * @brief Write the RTC time back to the hardware clock.
  */
-static void save_rtc_time (void) {
-    if (rtc_get_source() != RTC_SOURCE_JOYBUS || !rtc_is_source_available(RTC_SOURCE_JOYBUS)) {
+static void save_rtc_time (menu_t *menu) {
+    if (!clock_writable) {
         snprintf(status_message, sizeof(status_message), "RTC is not writable");
         sound_play_effect(SFX_ERROR);
         return;
@@ -77,23 +87,38 @@ static void save_rtc_time (void) {
         return;
     }
 
+    menu->current_time = time(NULL);
+    if (menu->current_time < 0) {
+        snprintf(status_message, sizeof(status_message), "Failed to confirm RTC time");
+        sound_play_effect(SFX_ERROR);
+        return;
+    }
+    rtc_tm = *gmtime(&menu->current_time);
     snprintf(status_message, sizeof(status_message), "Time saved");
     sound_play_effect(SFX_ENTER);
 }
 
 static void pane_enter (menu_t *menu) {
-    /* Resync the time from the hardware RTC */
-    rtc_set_source(rtc_get_source());
+    flashcart_err_t result = flashcart_resync_rtc();
     menu->current_time = time(NULL);
-
+    clock_writable = flashcart_rtc_is_writable();
+    rtc_range_t range = flashcart_get_rtc_range();
+    year_min = gmtime(&range.min)->tm_year + 1900;
+    year_max = gmtime(&range.max)->tm_year + 1900;
     editing_field_type = RTC_EDIT_YEAR;
     status_message[0] = '\0';
 
-    if (menu->current_time >= 0) {
+    if (menu->current_time >= 0 && result == FLASHCART_OK) {
         rtc_tm = *gmtime(&menu->current_time);
+        if (!clock_writable && rtc_get_source() == RTC_SOURCE_NONE) {
+            snprintf(status_message, sizeof(status_message), "Software clock; no hardware RTC is available");
+        }
     } else {
-        rtc_tm = (struct tm) { .tm_year = 100, .tm_mday = 1 };
-        snprintf(status_message, sizeof(status_message), "No hardware clock is available");
+        rtc_tm = (struct tm) { .tm_year = MAX(year_min, 2000) - 1900, .tm_mday = 1 };
+        time_t initial = mktime(&rtc_tm);
+        rtc_tm = *gmtime(&initial);
+        snprintf(status_message, sizeof(status_message), "%s",
+            result != FLASHCART_OK ? flashcart_convert_error_message(result) : "No hardware clock is available");
     }
 }
 
@@ -105,7 +130,7 @@ static void pane_leave (menu_t *menu) {
 static bool pane_process (menu_t *menu) {
     if (menu->actions.back) {
         return false;
-    } else if (menu->current_time < 0) {
+    } else if (menu->current_time < 0 && !clock_writable) {
         return true;
     } else if (menu->actions.go_left) {
         editing_field_type = WRAP((int) editing_field_type - 1, 0, RTC_EDIT_FIELDS - 1);
@@ -120,7 +145,7 @@ static bool pane_process (menu_t *menu) {
         adjust_rtc_time(&rtc_tm, -1);
         sound_play_effect(SFX_CURSOR);
     } else if (menu->actions.enter) {
-        save_rtc_time();
+        save_rtc_time(menu);
     }
 
     return true;
@@ -135,7 +160,7 @@ static void pane_draw (menu_t *menu, bool focused) {
     int x = SETTINGS_PANE_X0 + 16;
     int y = SETTINGS_PANE_Y0 + 8;
 
-    if (menu->current_time < 0) {
+    if (menu->current_time < 0 && !clock_writable) {
         ui_components_text_draw(
             x, y, SETTINGS_PANE_X1 - x - 16, 120,
             STL_DEFAULT, ALIGN_LEFT, WRAP_WORD,
@@ -144,14 +169,14 @@ static void pane_draw (menu_t *menu, bool focused) {
         return;
     }
 
-    if (focused) {
+    if (focused || menu->current_time < 0) {
         shown = rtc_tm;
     } else {
         shown = *gmtime(&menu->current_time);
     }
 
     snprintf(field_values[RTC_EDIT_YEAR], sizeof(field_values[0]), "%04d",
-             CLAMP(shown.tm_year + 1900, YEAR_MIN, YEAR_MAX));
+             CLAMP(shown.tm_year + 1900, year_min, year_max));
     snprintf(field_values[RTC_EDIT_MONTH], sizeof(field_values[0]), "%02d", CLAMP(shown.tm_mon + 1, 1, 12));
     snprintf(field_values[RTC_EDIT_DAY], sizeof(field_values[0]), "%02d", CLAMP(shown.tm_mday, 1, 31));
     snprintf(field_values[RTC_EDIT_HOUR], sizeof(field_values[0]), "%02d", CLAMP(shown.tm_hour, 0, 23));
@@ -186,7 +211,7 @@ static void pane_draw (menu_t *menu, bool focused) {
 }
 
 static const char *pane_hint (menu_t *menu, settings_hint_t slot) {
-    if (menu->current_time < 0) {
+    if (menu->current_time < 0 && !clock_writable) {
         switch (slot) {
             case SETTINGS_HINT_LEFT: return "B: Categories\n";
             case SETTINGS_HINT_CENTER: return "◀L Tab R▶\n";

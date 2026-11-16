@@ -19,6 +19,7 @@
 
 #include "../flashcart_utils.h"
 #include "ed64_pro.h"
+#include "ed64_pro_rtc.h"
 #include "utils/fs.h"
 
 #if FF_CODE_PAGE != 437 || FF_LFN_UNICODE != 2
@@ -405,7 +406,7 @@ static const char *pro_get_name (void) {
 /** @brief Report the supported Pro features, including shared boot detection. */
 static bool pro_has_feature (flashcart_features_t feature) {
     return feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_AUTO_REGION
-        || feature == FLASHCART_FEATURE_SAVE_WRITEBACK;
+        || feature == FLASHCART_FEATURE_SAVE_WRITEBACK || feature == FLASHCART_FEATURE_RTC;
 }
 
 /** @brief Return cached information without MCU traffic. */
@@ -599,6 +600,7 @@ static flashcart_err_t pro_release_storage (void) {
 
 /** @brief Release storage and configure MCU game services for the prepared launch. */
 static flashcart_err_t pro_deinit (void) {
+    ed64_pro_rtc_close();
     if (pro_diagnostics.storage_failed) {
         return FLASHCART_ERR_SD_CARD;
     }
@@ -1011,6 +1013,12 @@ static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
 
 /** @brief Supply retained diagnostics for the errors this adapter returns. */
 static char *pro_get_error_message (flashcart_err_t error) {
+    const char *rtc_error = ed64_pro_rtc_get_error_message();
+    if (!pro_diagnostics.storage_failed && rtc_error &&
+        error == FLASHCART_ERR_INT) {
+        snprintf(pro_error_message, sizeof(pro_error_message), "%s", rtc_error);
+        return pro_error_message;
+    }
     if (!pro_diagnostics.storage_failed && pro_diagnostics.path_error &&
         (error == FLASHCART_ERR_ARGS || error == FLASHCART_ERR_LOAD)) {
         snprintf(pro_error_message, sizeof(pro_error_message), "EverDrive-64 Pro: %s.", pro_diagnostics.path_error);
@@ -1045,6 +1053,8 @@ static flashcart_t flashcart_ed64_pro = {
     .set_save_writeback = NULL,
     .set_next_boot_mode = NULL,
     .get_error_message = pro_get_error_message,
+    .resync_rtc = ed64_pro_rtc_resync,
+    .get_rtc_range = ed64_pro_rtc_get_range,
 };
 
 /** @brief Return the Pro adapter without accessing the cartridge. */
