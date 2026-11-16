@@ -98,8 +98,8 @@ This matrix verifies that the menu displays correctly at boot and when launching
 | **N64 ROM Loading** | Boot Commercial ROMs | ✓ | ✓ | Tests ROM loading infrastructure |
 | **64DD Disk Loading** | Boot 64DD Disks | - | ✓ | Requires Expansion Pak |
 | **Emulator ROM Loading** | Boot NES/SNES/GB/SMS ROMs | ✓ | ✓ | Tests multi-system support |
-| **Cheat Codes** | Datel Cheat Application | ✓ | ✓ | Parser & installation validation |
-| **ROM Patches** | Patch Application | ✓ | ✓ | Feature validation |
+| **Cheat Codes** | Datel Cheat Application | - | ✓ | Requires Expansion Pak; parser & installation validation |
+| **ROM Patches** | In-menu Patch Application | - | - | Planned; prepatched ROM loading is supported |
 | **Save Data** | Game Save Persistence | ✓ | ✓ | Critical system feature |
 
 ## Test Coverage Checklist

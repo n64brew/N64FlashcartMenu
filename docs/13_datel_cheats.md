@@ -17,7 +17,7 @@ Another product by Blaze, called the Xploder64/Xplorer64 also existed in some re
 
 Caveats:
 - Requires an Expansion Pak to work.
-- Codes that require a button to pressed are not yet supported (TODO: possible with the SC64, requires hook).
+- Physical GameShark-button write codes are not supported (TODO: possible with the SC64, requires hook). N64 controller-button conditions using D0-D3 are supported.
 - `DE` codes are ignored.
 - Games that were developed using later versions of the libDragon SDK are not supported and are currently incompatible due to ipl3 clearing RDRAM.
 - The maximum number of cheat codes that will work is dependent on the available space in the N64 RAM (especially with game ROM's that use an Expansion Pak), exceeding them may cause unwanted side effects.
