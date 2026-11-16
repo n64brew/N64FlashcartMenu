@@ -56,26 +56,23 @@ Before starting a full test cycle, document the current baseline status to track
 | Feature | 64drive | ED64 V3 | ED64 X7 | ED64 Pro | SummerCart64 |
 |---|---|---|---|---|---|
 | **N64 ROM Loading** | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **64DD Disk Loading** | ✓ | ⚠ | ⚠ | - | ✓ |
-| **Emulator ROM Loading** | ✓ | ✓ | ✓ | ? | ✓ |
-| **Save Data Persistence** | ✓ | ⚠ | ⚠ | Partial | ✓ |
-| **Cheat Codes** | ✓ | ✓ | ✓ | Partial | ✓ |
-| **ROM Patches** | ⚠ | ⚠ | ⚠ | ? | ⚠ |
-| **USB Communication** | ✓ | Limited | ✓ | - | ✓ |
-| **RTC Support** | ✓ | ✓ | ✓ | - | ✓ |
-| **Controller Pak** | ✓ | ✓ | ✓ | ? | ✓ |
+| **64DD Disk Loading** | ✓ | ⚠ | ⚠ | … | ✓ |
+| **Emulator ROM Loading** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Save Data Persistence** | ✓ | ⚠ | ⚠ | ✓ | ✓ |
+| **Cheat Codes** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **ROM Patches** | ⚠ | ⚠ | ⚠ | ⚠ | ⚠ |
+| **USB Communication** | ✓ | Limited | ✓ | … | ✓ |
+| **RTC Support** | ✓ | ✓ | ✓ | … | ✓ |
+| **Controller Pak** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Auto CIC/Region Detection** | ✓ | Manual | ✓ | ✓ | ✓ |
 | **Fast Reboot** | ✓ | - | - | - | ✓ |
-| **Diagnostics** | - | - | - | - | ✓ |
+| **Diagnostics** | - | - | - | … | ✓ |
 
 **Notes:**
-- ED64 Pro: `Partial` = tested subsets; `?` = unvalidated; `-` = unavailable or not advertised.
-- ED64 Pro saves/cheats: SM64 EEPROM persistence passed, including FAT32 Unicode ROM/save
-  paths over 300 bytes. Other save families have boot/configuration checks; persistence
-  remains unqualified. One SM64 Datel cheat passed; broader compatibility remains unqualified.
-  Emulator boot/save testing is deferred to external testers.
+- `…` = possible, but not yet implemented; `-` = unavailable.
 - ED64 V3: Limited USB support (older revision)
 - ED64 V3: Requires manual CIC/region setting
+- ED64 Pro: Krikzz firmware `26.1014` has a bug that causes the last 2-3 bytes of 128 KiB FlashRAM and SRAM saves to be stored and loaded incorrectly. This does NOT affect any retail games. Only homebrew games that use the last 4 bytes of these specific save types are affected.
 - SummerCart64: Most feature-complete (includes diagnostics & BIOS updates)
 
 ## Display Mod Compatibility Matrix
