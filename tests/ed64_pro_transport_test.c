@@ -89,6 +89,13 @@ static struct {
     size_t info_reply_limit;
     bool info_trailing;
     unsigned info_requests;
+    uint8_t rtc_bytes[ED64_PRO_RTC_SIZE];
+    size_t rtc_reply_limit;
+    bool rtc_trailing;
+    bool rtc_set_ignored;
+    bool rtc_set_ack;
+    unsigned rtc_get_commands;
+    unsigned rtc_set_commands;
     unsigned nresp_requests;
     uint8_t nresp_detail;
     bool nresp_missing;
@@ -410,6 +417,29 @@ static void finish_pending (void) {
                     rx_push(0xEE);
                 }
                 break;
+            case 0x83:
+                if (mock.ram[4] == 0x10) {
+                    TEST_ASSERT(bytes == 5);
+                    mock.rtc_get_commands++;
+                    for (size_t i = 0; i < mock.rtc_reply_limit; i++) {
+                        rx_push(mock.rtc_bytes[i]);
+                    }
+                    if (mock.rtc_trailing) {
+                        rx_push(0xEE);
+                    }
+                } else {
+                    TEST_ASSERT(mock.ram[4] == 0x11 && bytes == 13);
+                    mock.rtc_set_commands++;
+                    if (!mock.rtc_set_ignored) {
+                        for (size_t i = 0; i < ED64_PRO_RTC_SIZE; i++) {
+                            mock.rtc_bytes[i] = mock.ram[5 + i];
+                        }
+                    }
+                    if (mock.rtc_set_ack) {
+                        rx_push(0x00);
+                    }
+                }
+                break;
             case 0x84: {
                 TEST_ASSERT(mock.ram[4] == 0x10 && mock.ram[5] >= 1 && mock.ram[5] <= 2);
                 size_t count = mock.ram[5];
@@ -655,6 +685,9 @@ static void power_on (void) {
     mock.info_values[0] = 0x90555D4Eu;
     mock.info_values[1] = 0x04000000u;
     mock.info_reply_limit = 8;
+    mock.rtc_reply_limit = ED64_PRO_RTC_SIZE;
+    const uint8_t rtc_bytes[] = {0x26, 0x11, 0x16, 0x12, 0x34, 0x56, 0x02, 0xA5};
+    memcpy(mock.rtc_bytes, rtc_bytes, sizeof(rtc_bytes));
     mock.nresp_detail = 0xA3;
     for (size_t i = 0; i < sizeof(mock.sectors); i++) {
         mock.sectors[i] = (uint8_t)(i * 37 + i / 512);
@@ -2147,6 +2180,128 @@ static void test_frame_limits (void) {
 }
 
 /**
+ * @brief Verify raw RTC framing and ordered SET/GET without a SET acknowledgment.
+ */
+static void test_rtc_frames (void) {
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    uint8_t output[ED64_PRO_RTC_SIZE];
+    const uint8_t initial[] = {0x26, 0x11, 0x16, 0x12, 0x34, 0x56, 0x02, 0xA5};
+    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000)) == ED64_PRO_LL_OK);
+    TEST_CHECK(memcmp(output, initial, sizeof(output)) == 0);
+    const uint8_t get_frame[] = {0x2B, 0xD4, 0x83, 0x7C, 0x10};
+    TEST_CHECK(mock.tx_count == sizeof(get_frame) && memcmp(mock.tx_bytes, get_frame, sizeof(get_frame)) == 0);
+    TEST_CHECK(mock.bus[1].write && mock.bus[1].length == 20);
+    const uint8_t next[] = {0x00, 0x02, 0x29, 0x23, 0x59, 0x58, 0x03, 0};
+    const uint8_t set_frame[] = {0x2B, 0xD4, 0x83, 0x7C, 0x11, 0x00, 0x02, 0x29, 0x23, 0x59, 0x58, 0x03, 0};
+    size_t bus_count = mock.bus_count;
+    pro_ll.status_valid = true;
+    pro_ll.nresp_valid = true;
+    TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, next, deadline_ms(1000)) == ED64_PRO_LL_OK);
+    TEST_CHECK(mock.bus_count == bus_count + 2 && mock.bus[bus_count + 1].write);
+    TEST_CHECK(mock.bus[bus_count + 1].length == sizeof(set_frame) * 4);
+    TEST_CHECK(!pro_ll.status_valid && !pro_ll.nresp_valid && mock.rx_count == 0);
+    TEST_CHECK(memcmp(mock.tx_bytes + sizeof(get_frame), set_frame, sizeof(set_frame)) == 0);
+    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000)) == ED64_PRO_LL_OK);
+    TEST_CHECK(memcmp(output, next, sizeof(output)) == 0);
+    TEST_CHECK(mock.rtc_get_commands == 2 && mock.rtc_set_commands == 1 && mock.status_requests == 0);
+    TEST_CHECK(mock.tx_count == sizeof(get_frame) * 2 + sizeof(set_frame));
+    TEST_CHECK(memcmp(mock.tx_bytes + sizeof(get_frame) + sizeof(set_frame), get_frame, sizeof(get_frame)) == 0);
+    end(&transaction);
+}
+
+/**
+ * @brief Reject invalid arguments, context, and ownership before issuing RTC commands.
+ */
+static void test_rtc_rejections (void) {
+    power_on();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    uint8_t bytes[ED64_PRO_RTC_SIZE] = {0};
+    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(mock.enqueues == 0);
+    end(&transaction);
+    identify();
+    begin(&transaction);
+    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    ed64_pro_ll_transaction_t other;
+    TEST_CHECK(ed64_pro_ll_rtc_get(&other, bytes, deadline_ms(1000)) == ED64_PRO_LL_BUSY);
+    TEST_CHECK(ed64_pro_ll_rtc_set(&other, bytes, deadline_ms(1000)) == ED64_PRO_LL_BUSY);
+    mock.kernel = true;
+    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
+    TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
+    mock.kernel = false;
+    TEST_CHECK(pro_send_frame(&transaction, PRO_CMD_RTC, 0x12, NULL, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(mock.enqueues == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
+    end(&transaction);
+}
+
+/**
+ * @brief Preserve output and sticky failures for partial, trailing, and unexpected RTC replies.
+ */
+static void test_rtc_reply_faults (void) {
+    for (unsigned fault = 0; fault < 4; fault++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        uint8_t output[ED64_PRO_RTC_SIZE];
+        memset(output, 0xAA, sizeof(output));
+        mock.tick_step = TICKS_FROM_MS(1) / 8;
+        mock.rtc_reply_limit = fault == 0 ? 0 : fault == 1 ? 7 : ED64_PRO_RTC_SIZE;
+        mock.rtc_trailing = fault == 2;
+        if (fault == 3) {
+            mock.rtc_set_ack = true;
+            TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, mock.rtc_bytes, deadline_ms(1000)) == ED64_PRO_LL_OK);
+        }
+        ed64_pro_ll_error_t error = ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000));
+        TEST_CHECK(fault < 2 ? is_deadline_error(error) : error == ED64_PRO_LL_TRAILING_DATA);
+        for (size_t i = 0; i < sizeof(output); i++) {
+            TEST_CHECK(output[i] == 0xAA);
+        }
+        TEST_CHECK(mock.rtc_get_commands == (fault == 3 ? 0u : 1u));
+        unsigned enqueues = mock.enqueues;
+        TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000)) == error);
+        TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, output, deadline_ms(1000)) == error);
+        TEST_CHECK(mock.enqueues == enqueues);
+        end(&transaction);
+    }
+}
+
+/**
+ * @brief Retain PI faults at each RTC DMA boundary without publishing or retrying.
+ */
+static void test_rtc_dma_faults (void) {
+    for (unsigned write = 0; write < 2; write++) {
+        for (unsigned fail_at = 1; fail_at <= (write ? 2u : 5u); fail_at++) {
+            power_on();
+            identify();
+            ed64_pro_ll_transaction_t transaction;
+            begin(&transaction);
+            uint8_t bytes[ED64_PRO_RTC_SIZE];
+            memset(bytes, 0xAA, sizeof(bytes));
+            mock.fail_at = fail_at;
+            mock.tick_step = TICKS_FROM_MS(1) / 8;
+            ed64_pro_ll_error_t error = write
+                ? ed64_pro_ll_rtc_set(&transaction, bytes, deadline_ms(1000))
+                : ed64_pro_ll_rtc_get(&transaction, bytes, deadline_ms(1000));
+            TEST_CHECK(error == ED64_PRO_LL_PI_TIMEOUT);
+            TEST_CHECK(mock.enqueues == fail_at && pro_ll.failure.poisoned && pro_ll.failure.ticket != 0);
+            for (size_t i = 0; i < sizeof(bytes); i++) {
+                TEST_CHECK(bytes[i] == 0xAA);
+            }
+            TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, bytes, deadline_ms(1000)) == error);
+            TEST_CHECK(mock.enqueues == fail_at);
+            end(&transaction);
+        }
+    }
+}
+
+/**
  * @brief Verify byte-exact system-info requests and decoded values.
  */
 static void test_sys_info (void) {
@@ -2768,6 +2923,10 @@ static void test_sd_injected_write_failure (void) {
 #endif
 
 TEST_LIST = {
+    {"RTC raw framing and ordered SET readback", test_rtc_frames},
+    {"RTC invalid inputs and contexts never write", test_rtc_rejections},
+    {"RTC partial and unexpected replies latch", test_rtc_reply_faults},
+    {"RTC PI faults never publish or retry", test_rtc_dma_faults},
     {"device paths encode lengths and long UTF8 bytes", test_dev_path_frames},
     {"device paths and configuration whitelist reject before I/O", test_dev_invalid_arguments},
     {"device configuration encodes sixteen BE words", test_dev_config_frame},

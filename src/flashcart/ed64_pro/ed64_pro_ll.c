@@ -49,6 +49,7 @@ typedef enum {
     PRO_CMD_STATUS = 0x10,
     PRO_CMD_NRESP = 0x13,
     PRO_CMD_EPO = 0x81,
+    PRO_CMD_RTC = 0x83,
     PRO_CMD_SYS = 0x84,
     PRO_CMD_SD_INIT = 0x80,
     PRO_CMD_STOP = 0x85,
@@ -549,7 +550,7 @@ static ed64_pro_ll_error_t pro_send_frame (
     bool selected =
         (command == PRO_CMD_STATUS && subcommand == -1) || (command == PRO_CMD_NRESP && subcommand == -1) ||
         ((command == PRO_CMD_STOP || command == PRO_CMD_SD_INIT || command == PRO_CMD_SYS) && subcommand == 0x10) ||
-        (command == PRO_CMD_EPO && (subcommand == 0x10 || subcommand == 0x11)) ||
+        ((command == PRO_CMD_EPO || command == PRO_CMD_RTC) && (subcommand == 0x10 || subcommand == 0x11)) ||
         (command == PRO_CMD_DEV &&
          (subcommand == 0x11 || subcommand == 0x20 || subcommand == 0x21 || subcommand == 0x28));
     if (!selected) {
@@ -802,6 +803,69 @@ ed64_pro_ll_read_nresp (ed64_pro_ll_transaction_t *transaction, uint8_t category
         *detail = reply;
     }
     return error;
+}
+
+/**
+ * @brief Read exactly eight RTC bytes without publishing a partial or ambiguous reply.
+ */
+ed64_pro_ll_error_t ed64_pro_ll_rtc_get (
+    ed64_pro_ll_transaction_t *transaction,
+    uint8_t output[ED64_PRO_RTC_SIZE],
+    uint32_t deadline
+) {
+    if (!output) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_STATUS_TIMEOUT_MS);
+    pro_ll.status_valid = false;
+    pro_ll.nresp_valid = false;
+    error = pro_assert_idle(transaction, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    error = pro_send_frame(transaction, PRO_CMD_RTC, 0x10, NULL, 0, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    uint8_t reply[ED64_PRO_RTC_SIZE];
+    error = pro_fifo_read(transaction, reply, sizeof(reply), deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    error = pro_assert_idle(transaction, deadline);
+    if (error == ED64_PRO_LL_OK) {
+        memcpy(output, reply, sizeof(reply));
+    }
+    return error;
+}
+
+/**
+ * @brief Send RTC SET without waiting for a nonexistent acknowledgment.
+ */
+ed64_pro_ll_error_t ed64_pro_ll_rtc_set (
+    ed64_pro_ll_transaction_t *transaction,
+    const uint8_t input[ED64_PRO_RTC_SIZE],
+    uint32_t deadline
+) {
+    if (!input) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_STATUS_TIMEOUT_MS);
+    pro_ll.status_valid = false;
+    pro_ll.nresp_valid = false;
+    error = pro_assert_idle(transaction, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    return pro_send_frame(transaction, PRO_CMD_RTC, 0x11, input, ED64_PRO_RTC_SIZE, deadline);
 }
 
 /**

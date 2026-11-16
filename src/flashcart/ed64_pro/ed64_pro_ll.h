@@ -56,6 +56,7 @@ enum {
     ED64_PRO_FIFO_CHUNK = 128,
     ED64_PRO_FIFO_LIMIT = 2048,
     ED64_PRO_CACHE_LINE = 16,
+    ED64_PRO_RTC_SIZE = 8,
 };
 
 typedef enum {
@@ -225,6 +226,23 @@ ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *
  */
 ed64_pro_ll_error_t
 ed64_pro_ll_read_nresp (ed64_pro_ll_transaction_t *transaction, uint8_t category, uint8_t *detail, uint32_t deadline);
+/**
+ * @brief Read one complete raw RTC value; publish only after a complete reply.
+ */
+ed64_pro_ll_error_t ed64_pro_ll_rtc_get (
+    ed64_pro_ll_transaction_t *transaction,
+    uint8_t output[ED64_PRO_RTC_SIZE],
+    uint32_t deadline
+);
+/**
+ * @brief Send a raw RTC value. The protocol has no SET acknowledgment; read back to confirm it.
+ */
+ed64_pro_ll_error_t ed64_pro_ll_rtc_set (
+    ed64_pro_ll_transaction_t *transaction,
+    const uint8_t input[ED64_PRO_RTC_SIZE],
+    uint32_t deadline
+);
+
 /**
  * @brief Read the selected firmware timestamp or maximum ROM size values.
  */
