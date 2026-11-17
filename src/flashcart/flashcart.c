@@ -277,6 +277,11 @@ const char *flashcart_get_name (void) {
     return flashcart->get_name ? flashcart->get_name() : NULL;
 }
 
+/** @brief Query a backend clock without performing cartridge I/O. */
+bool flashcart_get_rtc_write_range (time_t *minimum, time_t *maximum) {
+    return flashcart->get_rtc_write_range && flashcart->get_rtc_write_range(minimum, maximum);
+}
+
 /**
  * @brief Load a ROM into the flashcart.
  * 

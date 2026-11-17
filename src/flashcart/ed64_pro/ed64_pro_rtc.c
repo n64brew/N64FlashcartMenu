@@ -85,6 +85,15 @@ static bool pro_rtc_available (void) {
         diagnostics->storage_state == ED64_PRO_STORAGE_FATFS_OWNED;
 }
 
+bool ed64_pro_rtc_get_write_range (time_t *minimum, time_t *maximum) {
+    if (!pro_rtc_hooked || !pro_rtc_available()) {
+        return false;
+    }
+    *minimum = PRO_RTC_MIN;
+    *maximum = PRO_RTC_MAX;
+    return true;
+}
+
 static void pro_rtc_cache (time_t timestamp, uint64_t ticks) {
     pro_rtc_time = timestamp;
     pro_rtc_ticks = ticks;

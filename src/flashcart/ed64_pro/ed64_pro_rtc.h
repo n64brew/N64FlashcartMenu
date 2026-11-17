@@ -10,5 +10,7 @@ flashcart_err_t ed64_pro_rtc_resync (void);
 void ed64_pro_rtc_close (void);
 /** @brief Return retained RTC error text without performing cartridge I/O. */
 const char *ed64_pro_rtc_get_error_message (void);
+/** @brief Query write availability and supported dates without cartridge I/O. */
+bool ed64_pro_rtc_get_write_range (time_t *minimum, time_t *maximum);
 
 #endif

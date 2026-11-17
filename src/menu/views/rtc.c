@@ -5,6 +5,7 @@
 #include "../sound.h"
 #include "../ui_components/constants.h"
 #include "../../utils/utils.h"
+#include "../../flashcart/flashcart.h"
 #include "views.h"
 
 #define CLAMP(x, min, max) (MIN(MAX((x), (min)), (max)))
@@ -29,13 +30,19 @@ typedef enum {
 static struct tm rtc_tm = {0};
 static rtc_field_t editing_field_type;
 static char status_message[64];
+static bool rtc_writable;
+static int year_min = YEAR_MIN, year_max = YEAR_MAX;
+
+static bool clock_editable (menu_t *menu) {
+    return menu->current_time >= 0 || rtc_writable;
+}
 
 
 static void adjust_rtc_time (struct tm *t, int incr) {
     switch (editing_field_type)
     {
         case RTC_EDIT_YEAR:
-            t->tm_year = WRAP( t->tm_year + incr, YEAR_MIN - 1900, YEAR_MAX - 1900 );
+            t->tm_year = WRAP( t->tm_year + incr, year_min - 1900, year_max - 1900 );
             break;
         case RTC_EDIT_MONTH:
             t->tm_mon = WRAP( t->tm_mon + incr, 0, 11 );
@@ -63,8 +70,8 @@ static void adjust_rtc_time (struct tm *t, int incr) {
 /**
  * @brief Write the RTC time back to the hardware clock.
  */
-static void save_rtc_time (void) {
-    if (rtc_get_source() != RTC_SOURCE_JOYBUS || !rtc_is_source_available(RTC_SOURCE_JOYBUS)) {
+static void save_rtc_time (menu_t *menu) {
+    if (!rtc_writable) {
         snprintf(status_message, sizeof(status_message), "RTC is not writable");
         sound_play_effect(SFX_ERROR);
         return;
@@ -77,11 +84,23 @@ static void save_rtc_time (void) {
         return;
     }
 
+    menu->current_time = time(NULL);
     snprintf(status_message, sizeof(status_message), "Time saved");
     sound_play_effect(SFX_ENTER);
 }
 
 static void pane_enter (menu_t *menu) {
+    time_t minimum, maximum;
+    year_min = YEAR_MIN;
+    year_max = YEAR_MAX;
+    rtc_writable = flashcart_get_rtc_write_range(&minimum, &maximum);
+    if (rtc_writable) {
+        year_min = gmtime(&minimum)->tm_year + 1900;
+        year_max = gmtime(&maximum)->tm_year + 1900;
+    } else {
+        rtc_writable = rtc_get_source() == RTC_SOURCE_JOYBUS && rtc_is_source_available(RTC_SOURCE_JOYBUS);
+    }
+
     /* Resync the time from the hardware RTC */
     rtc_set_source(rtc_get_source());
     menu->current_time = time(NULL);
@@ -92,8 +111,9 @@ static void pane_enter (menu_t *menu) {
     if (menu->current_time >= 0) {
         rtc_tm = *gmtime(&menu->current_time);
     } else {
-        rtc_tm = (struct tm) { .tm_year = 100, .tm_mday = 1 };
-        snprintf(status_message, sizeof(status_message), "No hardware clock is available");
+        rtc_tm = (struct tm) { .tm_year = 100, .tm_mday = 1, .tm_wday = 6 };
+        snprintf(status_message, sizeof(status_message), "%s",
+                 rtc_writable ? "Clock time is invalid; set the date and time" : "No hardware clock is available");
     }
 }
 
@@ -105,7 +125,7 @@ static void pane_leave (menu_t *menu) {
 static bool pane_process (menu_t *menu) {
     if (menu->actions.back) {
         return false;
-    } else if (menu->current_time < 0) {
+    } else if (!clock_editable(menu)) {
         return true;
     } else if (menu->actions.go_left) {
         editing_field_type = WRAP((int) editing_field_type - 1, 0, RTC_EDIT_FIELDS - 1);
@@ -120,7 +140,7 @@ static bool pane_process (menu_t *menu) {
         adjust_rtc_time(&rtc_tm, -1);
         sound_play_effect(SFX_CURSOR);
     } else if (menu->actions.enter) {
-        save_rtc_time();
+        save_rtc_time(menu);
     }
 
     return true;
@@ -135,7 +155,7 @@ static void pane_draw (menu_t *menu, bool focused) {
     int x = SETTINGS_PANE_X0 + 16;
     int y = SETTINGS_PANE_Y0 + 8;
 
-    if (menu->current_time < 0) {
+    if (!clock_editable(menu)) {
         ui_components_text_draw(
             x, y, SETTINGS_PANE_X1 - x - 16, 120,
             STL_DEFAULT, ALIGN_LEFT, WRAP_WORD,
@@ -144,14 +164,14 @@ static void pane_draw (menu_t *menu, bool focused) {
         return;
     }
 
-    if (focused) {
+    if (focused || menu->current_time < 0) {
         shown = rtc_tm;
     } else {
         shown = *gmtime(&menu->current_time);
     }
 
     snprintf(field_values[RTC_EDIT_YEAR], sizeof(field_values[0]), "%04d",
-             CLAMP(shown.tm_year + 1900, YEAR_MIN, YEAR_MAX));
+             CLAMP(shown.tm_year + 1900, 0, 9999));
     snprintf(field_values[RTC_EDIT_MONTH], sizeof(field_values[0]), "%02d", CLAMP(shown.tm_mon + 1, 1, 12));
     snprintf(field_values[RTC_EDIT_DAY], sizeof(field_values[0]), "%02d", CLAMP(shown.tm_mday, 1, 31));
     snprintf(field_values[RTC_EDIT_HOUR], sizeof(field_values[0]), "%02d", CLAMP(shown.tm_hour, 0, 23));
@@ -186,7 +206,7 @@ static void pane_draw (menu_t *menu, bool focused) {
 }
 
 static const char *pane_hint (menu_t *menu, settings_hint_t slot) {
-    if (menu->current_time < 0) {
+    if (!clock_editable(menu)) {
         switch (slot) {
             case SETTINGS_HINT_LEFT: return "B: Categories\n";
             case SETTINGS_HINT_CENTER: return "◀L Tab R▶\n";

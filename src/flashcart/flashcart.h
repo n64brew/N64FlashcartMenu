@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
 
 /** @brief Flashcart error enumeration */
 typedef enum {
@@ -113,6 +114,8 @@ typedef struct {
     flashcart_err_t (*set_next_boot_mode) (flashcart_reboot_mode_t boot_mode);
     /** @brief Optional error detail from retained state; NULL uses the generic message. Must not perform I/O. */
     char *(*get_error_message)(flashcart_err_t err);
+    /** @brief Optional date range for an available hardware clock writable through settimeofday. */
+    bool (*get_rtc_write_range)(time_t *minimum, time_t *maximum);
 } flashcart_t;
 
 /**
@@ -160,6 +163,9 @@ flashcart_firmware_version_t flashcart_get_firmware_version (void);
  * Callers can fall back to libcart's cartridge type when no name is provided.
  */
 const char *flashcart_get_name (void);
+
+/** @brief Get the writable hardware clock range; false if unsupported or unavailable. */
+bool flashcart_get_rtc_write_range (time_t *minimum, time_t *maximum);
 
 /**
  * @brief Load a ROM onto the flashcart.
