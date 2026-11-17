@@ -72,7 +72,7 @@ Before starting a full test cycle, document the current baseline status to track
 - `…` = possible, but not yet implemented; `-` = unavailable.
 - ED64 V3: Limited USB support (older revision)
 - ED64 V3: Requires manual CIC/region setting
-- ED64 Pro: Krikzz firmware `26.1014` has a bug that causes the last 2-3 bytes of 128 KiB FlashRAM and SRAM saves to be stored and loaded incorrectly. This does NOT affect any retail games. Only homebrew games that use the last 4 bytes of these specific save types are affected.
+- ED64 Pro: On firmware `26.1014`, author-run synthetic tests found differences in the final four bytes of 128 KiB SRAM and FlashRAM saves. Retail SRAM/FlashRAM save-and-reload still needs qualification.
 - SummerCart64: Most feature-complete (includes diagnostics & BIOS updates)
 
 ### EverDrive-64 Pro testing
@@ -110,8 +110,8 @@ This matrix verifies that the menu displays correctly at boot and when launching
 | **N64 ROM Loading** | Boot Commercial ROMs | ✓ | ✓ | Tests ROM loading infrastructure |
 | **64DD Disk Loading** | Boot 64DD Disks | - | ✓ | Requires Expansion Pak |
 | **Emulator ROM Loading** | Boot NES/SNES/GB/SMS ROMs | ✓ | ✓ | Tests multi-system support |
-| **Cheat Codes** | Datel Cheat Application | - | ✓ | Requires Expansion Pak; parser & installation validation |
-| **ROM Patches** | In-menu Patch Application | - | - | Planned; prepatched ROM loading is supported |
+| **Cheat Codes** | Datel Cheat Application | ✓ | ✓ | Parser & installation validation |
+| **ROM Patches** | Patch Application | ✓ | ✓ | Feature validation |
 | **Save Data** | Game Save Persistence | ✓ | ✓ | Critical system feature |
 
 ## Test Coverage Checklist
