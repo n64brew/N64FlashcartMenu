@@ -75,6 +75,18 @@ Before starting a full test cycle, document the current baseline status to track
 - ED64 Pro: Krikzz firmware `26.1014` has a bug that causes the last 2-3 bytes of 128 KiB FlashRAM and SRAM saves to be stored and loaded incorrectly. This does NOT affect any retail games. Only homebrew games that use the last 4 bytes of these specific save types are affected.
 - SummerCart64: Most feature-complete (includes diagnostics & BIOS updates)
 
+### EverDrive-64 Pro testing
+
+The Pro checkmarks show implemented features. See the [driver notes](../src/flashcart/ed64_pro/README.md#storage-ownership) for author-run save tests and their limits. Retail SRAM/FlashRAM save-and-reload and emulator saves still need independent testing. Jumper Pak (4 MiB) navigation, artwork, and file-open failures remain unresolved; use an Expansion Pak (8 MiB) for now.
+
+Before merge, link independent reports in the PR covering:
+
+- SRAM and FlashRAM: save, restart, reload, and check the saved state.
+- Emulator saves: save, relaunch the emulator, and check the saved state.
+- Jumper Pak: repeat directory navigation, artwork loading, and file opening; record the steps for any failure.
+
+Include tester, console/region, memory size, cartridge revision, firmware, build commit or ROM hash, SD filesystem, content, steps, results, and evidence links.
+
 ## Display Mod Compatibility Matrix
 
 This matrix verifies that the menu displays correctly at boot and when launching ROM content on different display mods.

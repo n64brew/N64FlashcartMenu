@@ -32,9 +32,13 @@ FatFs paths remain UTF-8. Only staged GPAK/BRM paths use FatFs's CP437 table and
 
 `.v64` loading and a game launch are verified. On FAT32, a game booted and its fresh save was written under the correct Unicode name on paths over 300 bytes. Autoload and history paths retain the shared INI parser's 255-byte value limit.
 
-Idle RESET returned to the stock menu on the tested setup. SM64 EEPROM settings persisted after immediate, 3-second and 10-second RESET trials, console-only and console-plus-USB power cycles, and intervening games. Other save families have boot/configuration checks; their persistence and direct power-loss timing remain unqualified.
+Idle RESET returned to the stock menu on the tested setup. SM64 EEPROM settings persisted after immediate, 3-second and 10-second RESET trials, console-only and console-plus-USB power cycles, and intervening games.
 
-With Jumper Pak (4 MiB), SM64 booted and restored saved settings, and both cheat actions were correctly refused. Earlier intermittent navigation/artwork/open failures remain unresolved. SC64 boot/save and X7 boot regression checks passed on the NTSC console with 8 MiB. Emulator boot/save checks are user-deferred to external testers.
+Local synthetic tests passed EEPROM (4/16 Kbit) and SRAM (32/96 KiB) persistence under orderly MCU-stop power cycles. The 128 KiB SRAM, FlashRAM, and PKST2 fixtures had mismatches confined to the final four bytes. Retail SRAM/FlashRAM save-and-reload, emulator saves, and uncontrolled power-loss timing still need qualification.
+
+With Jumper Pak (4 MiB), SM64 booted and restored saved settings, and both cheat actions were correctly refused. Intermittent navigation, artwork, and file-open failures remain unresolved; use an Expansion Pak (8 MiB) for now. SC64 boot/save and X7 boot regression checks passed on the NTSC console with 8 MiB. Emulator boot/save checks remain deferred to external testers.
+
+Independent tester reports are still required before merge. See the [Pro test checklist](../../../docs/91_test_plan_matrix.md#everdrive-64-pro-testing). Gameplay screenshots establish booting, not save persistence.
 
 ### Real-time clock
 

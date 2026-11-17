@@ -26,7 +26,9 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 > [!IMPORTANT]
 > USB tools such as `edlink` should only be used with the console powered off or in the stock Pro menu.
 
-Automatic CIC and save writeback are enabled. 64DD, fast reboot, USB debugging, and menu RTC are not yet implemented.
+Automatic CIC, save writeback, and menu RTC are enabled. Set the clock in Settings → Time (2000–2099). 64DD, fast reboot, and USB debugging are not yet implemented.
+
+Use an Expansion Pak (8 MiB) for now. Jumper Pak (4 MiB) setups have unresolved navigation, artwork, and file-open failures.
 
 ROM and save paths use [CP437](https://en.wikipedia.org/wiki/Code_page_437), with existing [8.3 aliases](https://en.wikipedia.org/wiki/8.3_filename) for unsupported characters. Paths without usable aliases are rejected before launch.
 
