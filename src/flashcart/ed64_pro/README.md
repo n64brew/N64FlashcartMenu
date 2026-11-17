@@ -10,7 +10,11 @@ https://github.com/krikzz/ed64-pro-pub/blob/main/MANUAL.md
 - Revision: 43014e290f85140d4c5ca84fbf5ae48ac755a23d
 - Paths: edio/everdrive.c, edio/everdrive.h
 
-The cartridge-local driver adapts register and FIFO access, bounded command framing, STATUS/NRESP, firmware information, MCU filesystem initialization, raw-sector I/O, SD-to-FCI loading, DEV stop/flags/paths/configuration/start, and RTC GET/SET. It uses fixed-width types, bounded libdragon ticket submission/completion, exclusive cache-line staging, and sticky failures instead of upstream's unbounded PI and protocol waits.
+The cartridge-local driver adapts register and FIFO access, bounded command framing, STATUS/NRESP, firmware information, MCU filesystem initialization, raw-sector I/O, SD-to-FCI loading, DEV stop/flags/paths/configuration/start, and RTC GET/SET.
+
+Register accesses use libdragon `io_read()`/`io_write()`; FIFO transfers use synchronous `dma_read()`/`dma_write()` with exclusive, aligned cache-line staging and explicit cache maintenance. Each FIFO byte occupies exactly one 32-bit bus word. These addresses are already in the SDK wrappers' ROM range, and aligned reads take the exact-length path without extra FIFO reads.
+
+Libdragon serializes PI access and waits for DMA completion. A mailbox `io_write()` is followed by `dma_wait()` because register writes can return before the bus write completes. Transaction end needs no further wait. FIFO availability, MCU replies, mailbox readiness, STATUS, SD initialization, and cleanup retain protocol deadlines and limits checked between completed SDK operations; these cannot interrupt a synchronous SDK hardware wait. The first protocol fault and confirmed progress remain latched, and ambiguous writes are never retried.
 
 N64FlashcartMenu retains its AGPL license; the upstream copyright and MIT license notice appear [below](#upstream-license).
 
