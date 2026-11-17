@@ -12,7 +12,7 @@ Files are made available:
 	- Added four selectable built-in background music tracks.
 
 - **Bug Fixes**
-	- None.
+	- Fix: Long nested folder names cause the menu path buffer to grow, pointing to freed memory.
 
 - **Documentation**
 	- None.
