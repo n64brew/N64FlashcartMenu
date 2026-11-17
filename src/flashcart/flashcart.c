@@ -166,6 +166,16 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         return FLASHCART_OK;
     }
 
+    if (daisydrive_detected()) {
+        *storage_prefix = "sd:/";
+        daisydrive_init_sdfs(*storage_prefix, -1);
+        flashcart = daisydrive_get_flashcart();
+        if ((err = flashcart->init()) != FLASHCART_OK) {
+            return err;
+        }
+        return FLASHCART_OK;
+    }
+
     ed64_pro_probe_t pro = ed64_pro_probe();
     if (pro.outcome != ED64_PRO_PROBE_ABSENT) {
         /* rtc_init must skip libcart probes: ED X/V registers overlap Pro
@@ -188,15 +198,6 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         return FLASHCART_OK;
     }
 
-    if (daisydrive_detected()) {
-        *storage_prefix = "sd:/";
-        daisydrive_init_sdfs(*storage_prefix, -1);
-        flashcart = daisydrive_get_flashcart();
-        if ((err = flashcart->init()) != FLASHCART_OK) {
-            return err;
-        }
-        return FLASHCART_OK;
-    }
     *storage_prefix = "sd:/";
     bool sd_card_initialized = debug_init_sdfs(*storage_prefix, -1);
 

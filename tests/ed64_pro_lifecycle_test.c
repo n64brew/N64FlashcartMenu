@@ -67,7 +67,7 @@ int bbfs_init (void) {
  */
 ed64_pro_probe_t ed64_pro_probe (void) {
     spy.probes++;
-    TEST_CHECK(spy.daisy_detects == 0 && spy.sdfs == 0 && spy.usb == 0 && spy.callbacks == 0);
+    TEST_CHECK(spy.daisy_detects == 1 && spy.sdfs == 0 && spy.usb == 0 && spy.callbacks == 0);
     return spy.probe;
 }
 
@@ -127,7 +127,7 @@ flashcart_t *ed64_pro_get_flashcart (void) {
  */
 bool daisydrive_detected (void) {
     spy.daisy_detects++;
-    TEST_CHECK(spy.probes == 1);
+    TEST_CHECK(spy.probes == 0);
     return spy.daisy;
 }
 
@@ -350,7 +350,7 @@ static void require_terminal_result (bool identified) {
     TEST_CHECK(cart_type == CART_MAX);
     TEST_CHECK(strcmp(flashcart_get_name(), "EverDrive-64 Pro") == 0);
     TEST_CHECK(spy.probes == 1 && spy.pro_inits == (unsigned)identified && spy.pro_getters == 1);
-    TEST_CHECK(spy.daisy_detects == 0 && spy.daisy_mounts == 0 && spy.getters == 0);
+    TEST_CHECK(spy.daisy_detects == 1 && spy.daisy_mounts == 0 && spy.getters == 0);
     TEST_CHECK(spy.sdfs == 0 && spy.bbfs == 0 && spy.usb == 0 && spy.isviewer == 0);
     TEST_CHECK(spy.callbacks == 0 && spy.file_calls == 0 && spy.pro_mounts == 0);
     TEST_CHECK(flashcart_convert_error_message(expected) == spy.message);
@@ -369,13 +369,12 @@ static void test_pro_storage_mount (void) {
             .id_valid = true,
         };
         spy.sdfs_ok = !fail;
-        spy.daisy = true;
         const char *prefix = "previous:/";
         TEST_CHECK(flashcart_init(&prefix) == (fail ? FLASHCART_ERR_SD_CARD : FLASHCART_OK));
         TEST_CHECK(prefix && strcmp(prefix, "sd:/") == 0);
         TEST_CHECK(flashcart == &pro_backend && cart_type == CART_MAX);
         TEST_CHECK(spy.probes == 1 && spy.pro_inits == 1 && spy.pro_mounts == 1);
-        TEST_CHECK(spy.daisy_detects == 0 && spy.sdfs == 0 && spy.usb == 0 && spy.isviewer == 0);
+        TEST_CHECK(spy.daisy_detects == 1 && spy.sdfs == 0 && spy.usb == 0 && spy.isviewer == 0);
         TEST_CHECK(spy.callbacks == 0 && spy.file_calls == 0);
         TEST_CHECK(strcmp(flashcart_get_name(), "EverDrive-64 Pro") == 0);
     }
@@ -412,7 +411,6 @@ static void test_identified_failures (void) {
         };
         spy.transport_result = failures[i];
         spy.message = "SD readiness: retained transport/MCU error.";
-        spy.daisy = true;
         require_terminal_result(true);
     }
 }
@@ -432,7 +430,6 @@ static void test_failed_probe_never_falls_back (void) {
         power_on();
         spy.probe = (ed64_pro_probe_t){.outcome = ED64_PRO_PROBE_IO_ERROR, .error = failures[i]};
         spy.message = "Cartridge identity unknown: retained PI probe failure.";
-        spy.daisy = true;
         require_terminal_result(false);
     }
 }
@@ -528,12 +525,13 @@ static void test_non_pro_daisy_dispatch (void) {
     for (unsigned fail = 0; fail < 2; fail++) {
         power_on();
         spy.daisy = true;
+        spy.probe.outcome = ED64_PRO_PROBE_IDENTIFIED;
         spy.backend_result = fail ? FLASHCART_ERR_INT : FLASHCART_OK;
         const char *prefix;
         TEST_CHECK(flashcart_init(&prefix) == spy.backend_result);
         TEST_CHECK(strcmp(prefix, "sd:/") == 0 && flashcart == &backend);
         TEST_CHECK(flashcart_get_name() == NULL);
-        TEST_CHECK(spy.probes == 1 && spy.pro_inits == 0 && spy.daisy_detects == 1 && spy.daisy_mounts == 1);
+        TEST_CHECK(spy.probes == 0 && spy.pro_inits == 0 && spy.daisy_detects == 1 && spy.daisy_mounts == 1);
         TEST_CHECK(spy.getters == 1 && spy.selected_cart == 100 && spy.init_callbacks == 1);
         TEST_CHECK(spy.sdfs == 0 && spy.isviewer == 0 && spy.usb == 0);
     }
