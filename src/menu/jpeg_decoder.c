@@ -164,17 +164,19 @@ static jpeg_err_t jpeg_decoder_setup (int max_width, int max_height) {
         if (decoder->dst_w < 1) decoder->dst_w = 1;
         if (decoder->dst_h < 1) decoder->dst_h = 1;
 
-        for (uint8_t scale = 0; scale <= 3; scale++) {
+        for (uint8_t scale = 3;; scale--) {
             int decoded_w = decoder->jd.width >> scale;
             int decoded_h = decoder->jd.height >> scale;
             if (decoded_w < 1) decoded_w = 1;
             if (decoded_h < 1) decoded_h = 1;
-            if (decoded_w < decoder->dst_w || decoded_h < decoder->dst_h) continue;
-            decoder->scale = scale;
-            decoder->decoded_w = decoded_w;
-            decoder->decoded_h = decoded_h;
-            fits = true;
-            break;
+            if (decoded_w >= decoder->dst_w && decoded_h >= decoder->dst_h) {
+                decoder->scale = scale;
+                decoder->decoded_w = decoded_w;
+                decoder->decoded_h = decoded_h;
+                fits = true;
+                break;
+            }
+            if (scale == 0) break;
         }
         if (decoder->output_buffer->buffer == NULL
                 || surface_get_format(decoder->output_buffer) != FMT_RGBA16
