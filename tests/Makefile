@@ -199,3 +199,10 @@ $(RTC_VIEW_TEST): $(RTC_VIEW_DEPS)
 $(RTC_VIEW_SANITIZE): $(RTC_VIEW_DEPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/rtc_view_test.c $(LDFLAGS) -o $@
+
+.PHONY: test-file-list-ticker test-file-list-ticker-sanitize
+test-file-list-ticker:
+	python3 tests/test_file_list_ticker.py --cc "$(CC)" --build-dir "$(HOST_BUILD_DIR)/file-list-ticker"
+
+test-file-list-ticker-sanitize:
+	python3 tests/test_file_list_ticker.py --cc "$(CC)" --build-dir "$(HOST_BUILD_DIR)/file-list-ticker-sanitize" --sanitize
