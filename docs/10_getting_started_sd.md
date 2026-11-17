@@ -21,7 +21,8 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 
 - Use firmware `26.1014` or newer.
 - Download the latest `menu.n64` file from the [releases](https://github.com/Polprzewodnikowy/N64FlashcartMenu/releases/) page, then copy it to `/ed64/menu.n64` on your Micro SD card.
-- Launch `menu.n64` from the stock Pro menu, or move it to `/ed64/menu.n64` to automatically launch it on startup.
+- Place your ROM files on the Micro SD card, **in any folder except the root directory `ed64` folder**.
+- Remove the Micro SD Card from your computer and insert it into the ED64 Pro. 
 
 > [!IMPORTANT]
 > USB tools such as `edlink` should only be used with the console powered off or in the stock Pro menu.
