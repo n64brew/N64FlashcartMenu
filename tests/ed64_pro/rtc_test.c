@@ -5,335 +5,172 @@
 #include "../../src/flashcart/ed64_pro/ed64_pro_rtc.c"
 
 static struct {
-    ed64_pro_diagnostics_t diagnostics;
-    rtc_hooks_t hooks;
-    uint64_t ticks;
-    uint64_t operation_ticks;
-    uint8_t raw[ED64_PRO_RTC_SIZE];
-    uint8_t written[ED64_PRO_RTC_SIZE];
+    ed64_pro_dev_cfg_t config;
     ed64_pro_ll_transaction_t *owner;
-    uint32_t deadline;
-    ed64_pro_ll_error_t begin_error, get_error, set_error, end_error;
-    unsigned begins, gets, sets, ends, hooks_installed, hooks_removed;
-    bool echo_set;
-    bool hook_failed;
+    uint32_t ticks;
+    bool started, native_initialized, native_available, native_result;
+    rtc_source_t native_source;
+    unsigned begins, ends, configs, starts, stops, drains, statuses, inits, closes, source_sets;
+    int source_set_result;
+    ed64_pro_ll_error_t begin_error, cfg_error, start_error, stop_error, drain_error, status_error, end_error;
+    char events[128];
+    unsigned event_count;
 } mock;
+int cart_type;
 
-const ed64_pro_diagnostics_t *ed64_pro_get_diagnostics (void) {
-    return &mock.diagnostics;
+static void event (char c) {
+    TEST_ASSERT(mock.event_count + 1 < sizeof(mock.events));
+    mock.events[mock.event_count++] = c;
+    mock.events[mock.event_count] = 0;
 }
-
-uint64_t get_ticks (void) {
-    return mock.ticks;
+uint32_t mock_ticks_read (void) { return mock.ticks++; }
+uint64_t get_ticks (void) { return mock.ticks; }
+bool rtc_init (void) {
+    TEST_CHECK(mock.starts == 1 && mock.started);
+    event('I'); mock.inits++; mock.native_initialized = true;
+    return mock.native_result;
 }
-
-uint32_t mock_ticks_read (void) {
-    return mock.ticks;
+void rtc_close (void) { event('X'); mock.closes++; mock.native_initialized = false; }
+rtc_source_t rtc_get_source (void) { TEST_ASSERT(mock.native_initialized); return mock.native_source; }
+int rtc_set_source (rtc_source_t source) {
+    mock.source_sets++;
+    TEST_CHECK(source == RTC_SOURCE_JOYBUS && mock.native_available);
+    if (mock.source_set_result != RTC_ENOCLOCK) mock.native_source = source;
+    return mock.source_set_result;
 }
-
-int hook_rtc_calls (rtc_hooks_t *hooks) {
-    mock.hooks_installed++;
-    if (mock.hook_failed) {
-        return -1;
-    }
-    mock.hooks = *hooks;
-    return 0;
+bool rtc_is_source_available (rtc_source_t source) {
+    TEST_ASSERT(mock.native_initialized);
+    TEST_CHECK(source == RTC_SOURCE_JOYBUS);
+    return mock.native_available;
 }
+int hook_rtc_calls (rtc_hooks_t *hooks) { (void)hooks; TEST_CHECK(false); return -1; }
+int unhook_rtc_calls (rtc_hooks_t *hooks) { (void)hooks; TEST_CHECK(false); return -1; }
 
-int unhook_rtc_calls (rtc_hooks_t *hooks) {
-    mock.hooks_removed++;
-    if (hooks->gettime == mock.hooks.gettime) {
-        mock.hooks.gettime = NULL;
-    }
-    if (hooks->settime == mock.hooks.settime) {
-        mock.hooks.settime = NULL;
-    }
-    return 0;
-}
-
-ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
-    mock.begins++;
-    TEST_CHECK(mock.owner == NULL);
-    TEST_CHECK(deadline == (uint32_t)mock.ticks + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS));
-    if (mock.begin_error == ED64_PRO_LL_OK) {
-        mock.owner = transaction;
-        mock.deadline = deadline;
-    }
+ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *t, uint32_t deadline) {
+    event('B'); mock.begins++; TEST_CHECK(!mock.owner);
+    if (!mock.begin_error) { mock.owner = t; t->deadline = deadline; }
     return mock.begin_error;
 }
-
-ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
-    mock.ends++;
-    TEST_CHECK(mock.owner == transaction);
-    mock.owner = NULL;
-    return mock.end_error;
+ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *t) {
+    event('E'); mock.ends++; TEST_CHECK(mock.owner == t); mock.owner = NULL; return mock.end_error;
 }
-
-ed64_pro_ll_error_t ed64_pro_ll_rtc_get (
-    ed64_pro_ll_transaction_t *transaction, uint8_t raw[ED64_PRO_RTC_SIZE], uint32_t deadline
-) {
-    mock.gets++;
-    TEST_CHECK(mock.owner == transaction && deadline == mock.deadline);
-    mock.ticks += mock.operation_ticks;
-    if (mock.get_error == ED64_PRO_LL_OK) {
-        memcpy(raw, mock.raw, ED64_PRO_RTC_SIZE);
-    }
-    return mock.get_error;
+ed64_pro_ll_error_t ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *t, const ed64_pro_dev_cfg_t *cfg, uint32_t deadline) {
+    event('G'); mock.configs++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); mock.config = *cfg; return mock.cfg_error;
 }
-
-ed64_pro_ll_error_t ed64_pro_ll_rtc_set (
-    ed64_pro_ll_transaction_t *transaction, const uint8_t raw[ED64_PRO_RTC_SIZE], uint32_t deadline
-) {
-    mock.sets++;
-    TEST_CHECK(mock.owner == transaction && deadline == mock.deadline);
-    mock.ticks += mock.operation_ticks;
-    memcpy(mock.written, raw, ED64_PRO_RTC_SIZE);
-    if (mock.echo_set && mock.set_error == ED64_PRO_LL_OK) {
-        memcpy(mock.raw, raw, ED64_PRO_RTC_SIZE);
-    }
-    return mock.set_error;
+ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *t, uint32_t deadline) {
+    event('S'); mock.starts++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); mock.started = true; return mock.start_error;
 }
+ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *t, uint32_t deadline) {
+    event('T'); mock.stops++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); mock.started = false; return mock.stop_error;
+}
+ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *t, size_t *drained, uint32_t deadline) {
+    event('D'); mock.drains++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); *drained = 0; return mock.drain_error;
+}
+ed64_pro_ll_error_t ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *t, ed64_pro_status_t *status, uint32_t deadline) {
+    event('C'); mock.statuses++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); *status = (ed64_pro_status_t){.key = 0x5A}; return mock.status_error;
+}
+uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t ms) { (void)ms; return deadline; }
 
 static void fixture (void) {
+    mock.begin_error = mock.stop_error = mock.drain_error = mock.status_error = mock.end_error = ED64_PRO_LL_OK;
     ed64_pro_rtc_close();
+    /* Each fixture is a new simulated boot; production failures remain latched. */
+    pro_rtc_failed = pro_rtc_running = false;
+    pro_rtc_error = NULL;
     memset(&mock, 0, sizeof(mock));
-    mock.diagnostics.state = ED64_PRO_READY;
-    mock.diagnostics.storage_state = ED64_PRO_STORAGE_FATFS_OWNED;
-    mock.ticks = UINT64_C(0x1FFFFFFF0);
-    const uint8_t initial[] = {0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x07, 0xA5};
-    memcpy(mock.raw, initial, sizeof(initial));
+    mock.native_available = mock.native_result = true;
+    mock.native_source = RTC_SOURCE_JOYBUS;
+    mock.ticks = 0xFFFFFF00u;
+    cart_type = CART_NULL;
 }
-
-static void sync_clock (void) {
-    TEST_ASSERT(ed64_pro_rtc_resync() == FLASHCART_OK);
-    TEST_ASSERT(mock.hooks.gettime != NULL && mock.hooks.settime != NULL);
-}
-
-static void test_calendar (void) {
+static void test_native_services (void) {
     fixture();
-    const time_t minimum = INT64_C(946684800), maximum = INT64_C(4102444799);
-    for (time_t timestamp = minimum; timestamp <= maximum; timestamp += 86400) {
-        struct tm expected = *gmtime(&timestamp);
-        uint8_t raw[ED64_PRO_RTC_SIZE];
-        TEST_ASSERT(pro_rtc_encode(timestamp + 86399, raw));
-        unsigned fields[] = {
-            expected.tm_year - 100, expected.tm_mon + 1, expected.tm_mday,
-            23, 59, 59, expected.tm_wday + 1,
-        };
-        for (unsigned i = 0; i < 7; i++) {
-            TEST_CHECK(raw[i] == ((fields[i] / 10) << 4 | fields[i] % 10));
-        }
-        TEST_CHECK(raw[7] == 0);
-        raw[7] = 0xFF;
-        time_t decoded = -1;
-        TEST_CHECK(pro_rtc_decode(raw, &decoded));
-        TEST_CHECK(decoded == timestamp + 86399);
-    }
-    uint8_t raw[ED64_PRO_RTC_SIZE];
-    TEST_CHECK(!pro_rtc_encode(minimum - 1, raw));
-    TEST_CHECK(!pro_rtc_encode(maximum + 1, raw));
-    TEST_CHECK(!pro_rtc_encode(-1, raw));
+    TEST_ASSERT(ed64_pro_rtc_init() == FLASHCART_OK);
+    TEST_CHECK(mock.config.brom_type == 0); /* Vendor ROM_OFF. */
+    TEST_CHECK(mock.config.gpak_size == 0);
+    TEST_CHECK(mock.config.rtc_mode == ED64_PRO_RTC_STD);
+    TEST_CHECK(mock.config.brm_type == ED64_PRO_BRM_OFF && mock.config.brm_size == 0);
+    TEST_CHECK(mock.config.dd_en == 0 && mock.config.gpak_wren == 0 && mock.config.gpak_key == 0);
+    for (unsigned i = 0; i < 8; i++) TEST_CHECK(mock.config.reserved[i] == 0);
+    TEST_CHECK(mock.starts == 1 && mock.inits == 1 && cart_type == CART_MAX);
+    TEST_CHECK(rtc_get_source() == RTC_SOURCE_JOYBUS && rtc_is_source_available(RTC_SOURCE_JOYBUS));
+    TEST_CHECK(mock.owner == NULL && ed64_pro_rtc_get_error_message() == NULL);
+    unsigned begins = mock.begins;
+    TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_OK && mock.begins == begins && mock.inits == 1);
 }
-
-static void test_invalid_calendar (void) {
-    fixture();
-    const uint8_t invalid[][8] = {
-        {0x01, 0x02, 0x29, 0, 0, 0, 0x05, 0},
-        {0x00, 0x02, 0x30, 0, 0, 0, 0x04, 0},
-        {0x00, 0x04, 0x31, 0, 0, 0, 0x02, 0},
-        {0x00, 0x00, 0x01, 0, 0, 0, 0x07, 0},
-        {0x00, 0x13, 0x01, 0, 0, 0, 0x07, 0},
-        {0x00, 0x01, 0x00, 0, 0, 0, 0x07, 0},
-        {0x00, 0x01, 0x01, 0x24, 0, 0, 0x07, 0},
-        {0x00, 0x01, 0x01, 0, 0x60, 0, 0x07, 0},
-        {0x00, 0x01, 0x01, 0, 0, 0x60, 0x07, 0},
-        {0x00, 0x01, 0x01, 0, 0, 0, 0x00, 0},
-        {0x00, 0x01, 0x01, 0, 0, 0, 0x08, 0},
-        {0x00, 0x01, 0x01, 0, 0, 0, 0x01, 0},
-    };
-    time_t decoded = 123;
-    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
-        TEST_CHECK(!pro_rtc_decode(invalid[i], &decoded));
-        TEST_CHECK(decoded == 123);
-    }
-    for (unsigned i = 0; i < 7; i++) {
-        uint8_t raw[ED64_PRO_RTC_SIZE];
-        memcpy(raw, mock.raw, sizeof(raw));
-        raw[i] = 0x1A;
-        TEST_CHECK(!pro_rtc_decode(raw, &decoded));
-        raw[i] = 0xA1;
-        TEST_CHECK(!pro_rtc_decode(raw, &decoded));
+static void test_native_gate (void) {
+    for (unsigned failure = 0; failure < 2; failure++) {
+        fixture(); mock.native_available = false;
+        if (failure) mock.native_source = RTC_SOURCE_NONE;
+        TEST_CHECK(ed64_pro_rtc_init() != FLASHCART_OK);
+        TEST_CHECK(mock.starts == 1 && mock.stops == 1);
+        TEST_CHECK(!mock.native_initialized && !mock.started);
+        TEST_CHECK(mock.owner == NULL && ed64_pro_rtc_get_error_message() != NULL);
     }
 }
-
-static void test_cached_clock (void) {
+static void test_invalid_native_calendar (void) {
     fixture();
-    sync_clock();
-    TEST_CHECK(ed64_pro_rtc_get_error_message() == NULL);
-    time_t timestamp = -1;
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ESUCCESS);
-    TEST_CHECK(timestamp == PRO_RTC_MIN);
-    mock.ticks += (uint64_t)TICKS_PER_SECOND * 86401 + TICKS_PER_SECOND / 2;
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ESUCCESS);
-    TEST_CHECK(timestamp == PRO_RTC_MIN + 86401);
-    TEST_CHECK(mock.begins == 1 && mock.gets == 1 && mock.sets == 0 && mock.ends == 1);
-    TEST_ASSERT(pro_rtc_encode(INT64_C(1709251199), mock.raw));
-    sync_clock();
-    TEST_CHECK(mock.hooks_installed == 1 && mock.gets == 2);
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(1709251199));
-    mock.ticks += TICKS_PER_SECOND;
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(1709251200));
+    mock.native_result = false;
+    mock.native_source = RTC_SOURCE_NONE;
+    mock.source_set_result = RTC_EBADTIME;
+    TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_OK);
+    TEST_CHECK(mock.source_sets == 1 && rtc_get_source() == RTC_SOURCE_JOYBUS);
+    TEST_CHECK(mock.source_set_result == RTC_EBADTIME && mock.stops == 0);
 }
-
-static void test_cache_range (void) {
-    fixture();
-    TEST_ASSERT(pro_rtc_encode(PRO_RTC_MAX, mock.raw));
-    sync_clock();
-    time_t timestamp = -1;
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == PRO_RTC_MAX);
-    mock.ticks += TICKS_PER_SECOND;
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_EBADTIME && timestamp == PRO_RTC_MAX);
-    TEST_CHECK(ed64_pro_rtc_get_error_message() != NULL && mock.gets == 1);
-}
-
-static void test_writes (void) {
-    fixture();
-    sync_clock();
-    mock.echo_set = true;
-    mock.operation_ticks = TICKS_PER_SECOND / 3;
-    TEST_CHECK(mock.hooks.settime(INT64_C(1709251199)) == RTC_ESUCCESS);
-    const uint8_t expected[] = {0x24, 0x02, 0x29, 0x23, 0x59, 0x59, 0x05, 0};
-    TEST_CHECK(memcmp(mock.written, expected, sizeof(expected)) == 0);
-    TEST_CHECK(mock.begins == 2 && mock.gets == 2 && mock.sets == 1 && mock.ends == 2);
-    time_t timestamp = -1;
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(1709251199));
-    mock.ticks += TICKS_PER_SECOND;
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(1709251200));
-    TEST_CHECK(mock.hooks.settime(PRO_RTC_MIN - 1) == RTC_EBADTIME);
-    TEST_CHECK(mock.hooks.settime(PRO_RTC_MAX + 1) == RTC_EBADTIME);
-    TEST_CHECK(mock.sets == 1);
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(1709251200));
-}
-
-static void test_elapsed_readback (void) {
-    for (int advance = -1; advance <= 4; advance++) {
-        fixture();
-        sync_clock();
-        mock.operation_ticks = TICKS_PER_SECOND;
-        TEST_ASSERT(pro_rtc_encode(INT64_C(1709251199) + advance, mock.raw));
-        int expected = advance >= 0 && advance <= 3 ? RTC_ESUCCESS : RTC_EBADCLOCK;
-        TEST_CHECK(mock.hooks.settime(INT64_C(1709251199)) == expected);
-        time_t timestamp = -1;
-        TEST_CHECK(mock.hooks.gettime(&timestamp) == expected);
-        TEST_CHECK(expected != RTC_ESUCCESS || timestamp == INT64_C(1709251199) + advance);
-        TEST_CHECK(mock.sets == 1 && mock.gets == 2 && mock.ends == 2);
-    }
-}
-
-static void test_resync_failures (void) {
-    for (unsigned failure = 0; failure < 5; failure++) {
-        fixture();
-        sync_clock();
-        switch (failure) {
-            case 0: mock.begin_error = ED64_PRO_LL_TIMEOUT; break;
-            case 1: mock.get_error = ED64_PRO_LL_TIMEOUT; break;
-            case 2: mock.end_error = ED64_PRO_LL_FRAME; break;
-            case 3: mock.raw[1] = 0x13; break;
-            case 4: mock.diagnostics.storage_failed = true; break;
-        }
-        TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_ERR_INT);
-        time_t timestamp = 123;
-        int expected = failure == 3 ? RTC_EBADTIME : failure == 4 ? RTC_ENOCLOCK : RTC_EBADCLOCK;
-        TEST_CHECK(mock.hooks.gettime(&timestamp) == expected && timestamp == 123);
-        TEST_CHECK(ed64_pro_rtc_get_error_message() != NULL);
-        TEST_CHECK(mock.owner == NULL);
-    }
-}
-
-static void test_write_failures (void) {
-    for (unsigned failure = 0; failure < 6; failure++) {
-        fixture();
-        sync_clock();
-        switch (failure) {
-            case 0: mock.begin_error = ED64_PRO_LL_TIMEOUT; break;
-            case 1: mock.set_error = ED64_PRO_LL_TIMEOUT; break;
-            case 2: mock.get_error = ED64_PRO_LL_TIMEOUT; break;
-            case 3: mock.end_error = ED64_PRO_LL_FRAME; break;
-            case 4: mock.raw[2] = 0x32; break;
-            case 5: mock.diagnostics.storage_state = ED64_PRO_STORAGE_RELEASING; break;
-        }
-        int expected = failure == 4 ? RTC_EBADTIME : failure == 5 ? RTC_ENOCLOCK : RTC_EBADCLOCK;
-        TEST_CHECK(mock.hooks.settime(PRO_RTC_MIN) == expected);
-        time_t timestamp = 123;
-        TEST_CHECK(mock.hooks.gettime(&timestamp) == expected && timestamp == 123);
-        TEST_CHECK(ed64_pro_rtc_get_error_message() != NULL);
-        TEST_CHECK(mock.sets == (failure == 0 || failure == 5 ? 0u : 1u));
-        TEST_CHECK(mock.gets == (failure == 0 || failure == 1 || failure == 5 ? 1u : 2u));
-        TEST_CHECK(mock.owner == NULL);
-    }
-}
-
-static void test_invalid_repair (void) {
-    fixture();
-    mock.raw[1] = 0;
-    TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_ERR_INT);
-    TEST_ASSERT(mock.hooks.gettime && mock.hooks.settime);
-    time_t timestamp = 123;
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_EBADTIME && timestamp == 123);
-    mock.echo_set = true;
-    TEST_CHECK(mock.hooks.settime(INT64_C(1794844800)) == RTC_ESUCCESS);
-    TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(1794844800));
-    TEST_CHECK(ed64_pro_rtc_get_error_message() == NULL);
-}
-
-static void test_ownership (void) {
+static void test_init_faults (void) {
     for (unsigned failure = 0; failure < 4; failure++) {
         fixture();
         switch (failure) {
-            case 0: mock.diagnostics.state = ED64_PRO_COLD; break;
-            case 1: mock.diagnostics.state = ED64_PRO_FAILED; break;
-            case 2: mock.diagnostics.storage_failed = true; break;
-            case 3: mock.diagnostics.storage_state = ED64_PRO_STORAGE_MCU_OWNED; break;
+        case 0: mock.begin_error = ED64_PRO_LL_TIMEOUT; break;
+        case 1: mock.cfg_error = ED64_PRO_LL_MCU_ERROR; break;
+        case 2: mock.start_error = ED64_PRO_LL_TIMEOUT; break;
+        case 3: mock.end_error = ED64_PRO_LL_FRAME; break;
         }
-        TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_ERR_INT);
-        TEST_ASSERT(mock.hooks.gettime && mock.hooks.settime);
-        time_t timestamp = 123;
-        TEST_CHECK(mock.hooks.gettime(&timestamp) == RTC_ENOCLOCK && timestamp == 123);
-        TEST_CHECK(mock.hooks.settime(PRO_RTC_MIN) == RTC_ENOCLOCK);
-        TEST_CHECK(mock.begins == 0 && mock.gets == 0 && mock.sets == 0);
+        TEST_CHECK(ed64_pro_rtc_init() != FLASHCART_OK);
+        TEST_CHECK(mock.configs <= 1 && mock.starts <= 1 && mock.inits == 0);
+        TEST_CHECK(mock.owner == NULL && ed64_pro_rtc_get_error_message() != NULL);
+        unsigned begins = mock.begins, starts = mock.starts;
+        const char *error = ed64_pro_rtc_get_error_message();
+        TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_ERR_INT);
+        TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_ERR_INT);
+        TEST_CHECK(mock.begins == begins && mock.starts == starts && ed64_pro_rtc_get_error_message() == error);
     }
 }
-
-static void test_lifecycle (void) {
-    fixture();
-    mock.hook_failed = true;
-    TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_ERR_INT && mock.begins == 0);
-    TEST_CHECK(ed64_pro_rtc_get_error_message() != NULL);
-    mock.hook_failed = false;
-    sync_clock();
-    rtc_hooks_t saved = mock.hooks;
-    ed64_pro_rtc_close();
-    TEST_CHECK(mock.hooks.gettime == NULL && mock.hooks.settime == NULL);
-    time_t timestamp = 123;
-    TEST_CHECK(saved.gettime(&timestamp) == RTC_ENOCLOCK && timestamp == 123);
-    TEST_CHECK(mock.hooks_removed == 1 && ed64_pro_rtc_get_error_message() == NULL);
-    ed64_pro_rtc_close();
-    TEST_CHECK(mock.hooks_removed == 1);
-    sync_clock();
-    TEST_CHECK(mock.hooks_installed == 3 && mock.gets == 2);
+static void test_close_order (void) {
+    fixture(); TEST_ASSERT(ed64_pro_rtc_init() == FLASHCART_OK);
+    mock.event_count = 0; mock.events[0] = 0;
+    TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_OK);
+    TEST_CHECK(mock.events[0] == 'X');
+    TEST_CHECK(strstr(mock.events, "TDC") != NULL);
+    TEST_CHECK(!mock.native_initialized && !mock.started && mock.owner == NULL);
+    unsigned stops = mock.stops;
+    TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_OK && mock.stops == stops);
 }
-
+static void test_close_faults (void) {
+    for (unsigned failure = 0; failure < 5; failure++) {
+        fixture(); TEST_ASSERT(ed64_pro_rtc_init() == FLASHCART_OK);
+        switch (failure) {
+        case 0: mock.begin_error = ED64_PRO_LL_TIMEOUT; break;
+        case 1: mock.stop_error = ED64_PRO_LL_TIMEOUT; break;
+        case 2: mock.drain_error = ED64_PRO_LL_TIMEOUT; break;
+        case 3: mock.status_error = ED64_PRO_LL_FRAME; break;
+        case 4: mock.end_error = ED64_PRO_LL_FRAME; break;
+        }
+        TEST_CHECK(ed64_pro_rtc_close() != FLASHCART_OK);
+        TEST_CHECK(!mock.native_initialized && mock.owner == NULL);
+        TEST_CHECK(ed64_pro_rtc_get_error_message() != NULL);
+        unsigned stops = mock.stops, begins = mock.begins;
+        TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_ERR_INT);
+        TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_ERR_INT);
+        TEST_CHECK(mock.stops == stops && mock.begins == begins); /* Never retry an ambiguous shutdown. */
+    }
+}
 TEST_LIST = {
-    {"RTC Gregorian calendar roundtrip every day in 2000 through 2099", test_calendar},
-    {"RTC rejects malformed BCD and impossible calendars", test_invalid_calendar},
-    {"RTC cached time advances without MCU traffic and resyncs", test_cached_clock},
-    {"RTC cache stops at supported year boundary", test_cache_range},
-    {"RTC writes encoded UTC date and preserves cache on invalid arguments", test_writes},
-    {"RTC SET readback allows only bounded elapsed seconds", test_elapsed_readback},
-    {"RTC resync failures invalidate cache without fallback", test_resync_failures},
-    {"RTC failed writes never retry or publish success", test_write_failures},
-    {"RTC invalid hardware date can be repaired", test_invalid_repair},
-    {"RTC hardware operations require menu ownership", test_ownership},
-    {"RTC hooks close and reinstall without stale cached time", test_lifecycle},
+    {"native RTC starts only compatible services before native detection", test_native_services},
+    {"native source and availability failures stop services and close RTC", test_native_gate},
+    {"genuine invalid-calendar RTC keeps native source and error", test_invalid_native_calendar},
+    {"configuration and start failures do not publish RTC", test_init_faults},
+    {"RTC closes before STOP and shutdown is idempotent", test_close_order},
+    {"failed shutdown clears native state without retrying writes", test_close_faults},
     {NULL, NULL},
 };

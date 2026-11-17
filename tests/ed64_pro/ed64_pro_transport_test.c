@@ -93,11 +93,7 @@ static struct {
     uint8_t rtc_bytes[ED64_PRO_RTC_SIZE];
     size_t rtc_reply_limit;
     bool rtc_trailing;
-    bool rtc_set_ignored;
-    bool rtc_set_ack;
-    bool rtc_mount;
     unsigned rtc_get_commands;
-    unsigned rtc_set_commands;
     unsigned nresp_requests;
     uint8_t nresp_detail;
     bool nresp_missing;
@@ -342,26 +338,13 @@ static void execute_bus (void) {
                 }
                 break;
             case 0x83:
-                if (mock.ram[4] == 0x10) {
-                    TEST_ASSERT(bytes == 5);
-                    mock.rtc_get_commands++;
-                    for (size_t i = 0; i < mock.rtc_reply_limit; i++) {
-                        rx_push(mock.rtc_bytes[i]);
-                    }
-                    if (mock.rtc_trailing) {
-                        rx_push(0xEE);
-                    }
-                } else {
-                    TEST_ASSERT(mock.ram[4] == 0x11 && bytes == 13);
-                    mock.rtc_set_commands++;
-                    if (!mock.rtc_set_ignored) {
-                        for (size_t i = 0; i < ED64_PRO_RTC_SIZE; i++) {
-                            mock.rtc_bytes[i] = mock.ram[5 + i];
-                        }
-                    }
-                    if (mock.rtc_set_ack) {
-                        rx_push(0x00);
-                    }
+                TEST_ASSERT(mock.ram[4] == 0x10 && bytes == 5);
+                mock.rtc_get_commands++;
+                for (size_t i = 0; i < mock.rtc_reply_limit; i++) {
+                    rx_push(mock.rtc_bytes[i]);
+                }
+                if (mock.rtc_trailing) {
+                    rx_push(0xEE);
                 }
                 break;
             case 0x84: {
@@ -1799,17 +1782,12 @@ char *strip_fs_prefix (char *path) {
 }
 
 /**
- * @brief Permit the RTC integration fixture's normal mount; reject other filesystem use.
+ * @brief Fail the test if transport code attempts to mount a filesystem.
  */
 int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
-    if (!mock.rtc_mount) {
-        TEST_CHECK(false);
-        return -1;
-    }
-    TEST_CHECK(strcmp(prefix, "sd:/") == 0 && flags == 0);
-    TEST_CHECK(disk == &pro_disk && disk->disk_initialize() == 0);
-    TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_MOUNTING);
-    return 0;
+    (void)prefix; (void)disk; (void)flags;
+    TEST_CHECK(false);
+    return -1;
 }
 
 /**
@@ -1856,99 +1834,7 @@ static void test_frame_limits (void) {
 }
 
 /**
- * @brief Enter real initialized and mounted adapter ownership before using RTC hooks.
- */
-static flashcart_t *rtc_mounted_fixture (void) {
-    handoff_fixture();
-    mock.rtc_mount = true;
-    flashcart_t *adapter = ed64_pro_get_flashcart();
-    TEST_ASSERT(adapter->init() == FLASHCART_OK);
-    TEST_ASSERT(ed64_pro_init_sdfs("sd:/", 4));
-    TEST_ASSERT(pro_diagnostics.storage_state == ED64_PRO_STORAGE_FATFS_OWNED);
-    return adapter;
-}
-
-/**
- * @brief Exercise adapter resync through real RTC framing, cache ticks, and clock-hook removal.
- */
-static void test_rtc_adapter_cache (void) {
-    (void)rtc_mounted_fixture();
-    TEST_CHECK(test_rtc_init_calls == 1 && mock.rtc_get_commands == 1 && cart_type == CART_MAX);
-    TEST_ASSERT(test_rtc_hooks.gettime && test_rtc_hooks.settime);
-    rtc_hooks_t installed = test_rtc_hooks;
-    rtc_init();
-    TEST_CHECK(test_rtc_init_calls == 2 && test_rtc_hooks.gettime == installed.gettime &&
-        test_rtc_hooks.settime == installed.settime && mock.rtc_get_commands == 1);
-    time_t timestamp = 0;
-    TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS);
-    TEST_CHECK(timestamp == INT64_C(1794832496));
-    unsigned accesses = mock.accesses;
-    mock.now += TICKS_FROM_MS(2500);
-    TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS);
-    TEST_CHECK(timestamp == INT64_C(1794832498) && mock.accesses == accesses);
-    for (unsigned i = 0; i < 16; i++) {
-        TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS);
-    }
-    TEST_CHECK(mock.accesses == accesses && mock.rtc_get_commands == 1);
-    uint8_t sector[512];
-    TEST_CHECK(pro_disk.disk_read(sector, 3, 1) == RES_OK);
-    TEST_CHECK(memcmp(sector, mock.sectors + 3 * 512, sizeof(sector)) == 0);
-    mock.rtc_bytes[5] = 0x59;
-    TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_OK && mock.rtc_get_commands == 2);
-    TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(1794832499));
-    int (*saved_gettime)(time_t *) = test_rtc_hooks.gettime;
-    accesses = mock.accesses;
-    TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD);
-    TEST_CHECK(test_rtc_hooks.gettime == NULL && test_rtc_hooks.settime == NULL);
-    TEST_CHECK(saved_gettime(&timestamp) == RTC_ENOCLOCK && mock.accesses == accesses);
-}
-
-/**
- * @brief Confirm actual SET/readback sequencing and reject an ignored write without retrying it.
- */
-static void test_rtc_adapter_set (void) {
-    flashcart_t *adapter = rtc_mounted_fixture();
-    TEST_ASSERT(test_rtc_hooks.settime != NULL);
-    time_t target = INT64_C(951868798);
-    TEST_CHECK(test_rtc_hooks.settime(target) == RTC_ESUCCESS);
-    const uint8_t expected[] = {0x00, 0x02, 0x29, 0x23, 0x59, 0x58, 0x03, 0};
-    TEST_CHECK(memcmp(mock.rtc_bytes, expected, sizeof(expected)) == 0);
-    TEST_CHECK(mock.rtc_set_commands == 1 && mock.rtc_get_commands == 2);
-    time_t timestamp = 0;
-    unsigned accesses = mock.accesses;
-    TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == target);
-    TEST_CHECK(mock.accesses == accesses && pro_ll.owner == NULL);
-    mock.rtc_set_ignored = true;
-    TEST_CHECK(test_rtc_hooks.settime(INT64_C(946684800)) == RTC_EBADCLOCK);
-    TEST_CHECK(mock.rtc_set_commands == 2 && mock.rtc_get_commands == 3 && pro_ll.owner == NULL);
-    accesses = mock.accesses;
-    TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_EBADCLOCK && mock.accesses == accesses);
-    TEST_CHECK(strstr(adapter->get_error_message(FLASHCART_ERR_INT), "readback did not match") != NULL);
-    TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_OK);
-    TEST_CHECK(mock.rtc_set_commands == 2 && mock.rtc_get_commands == 4);
-    TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == target);
-}
-
-/**
- * @brief Keep invalid hardware distinct from transport failure and permit a confirmed repair.
- */
-static void test_rtc_adapter_invalid_date (void) {
-    flashcart_t *adapter = rtc_mounted_fixture();
-    mock.rtc_bytes[1] = 0x1A;
-    TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_ERR_INT);
-    TEST_ASSERT(test_rtc_hooks.gettime && test_rtc_hooks.settime);
-    time_t timestamp = 42;
-    TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_EBADTIME && timestamp == 42);
-    TEST_CHECK(pro_ll.failure.code == ED64_PRO_LL_OK && adapter->has_feature(FLASHCART_FEATURE_RTC));
-    TEST_CHECK(strstr(adapter->get_error_message(FLASHCART_ERR_INT), "hardware date is invalid") != NULL);
-    TEST_CHECK(test_rtc_hooks.settime(INT64_C(946684800)) == RTC_ESUCCESS);
-    TEST_CHECK(mock.rtc_set_commands == 1 && mock.rtc_get_commands == 3);
-    TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(946684800));
-    TEST_CHECK(ed64_pro_rtc_get_error_message() == NULL);
-}
-
-/**
- * @brief Verify raw RTC framing and ordered SET/GET without a SET acknowledgment.
+ * @brief Verify byte-exact physical RTC observation framing.
  */
 static void test_rtc_frames (void) {
     power_on();
@@ -1962,21 +1848,7 @@ static void test_rtc_frames (void) {
     const uint8_t get_frame[] = {0x2B, 0xD4, 0x83, 0x7C, 0x10};
     TEST_CHECK(mock.tx_count == sizeof(get_frame) && memcmp(mock.tx_bytes, get_frame, sizeof(get_frame)) == 0);
     TEST_CHECK(mock.bus[1].write && mock.bus[1].length == 20);
-    const uint8_t next[] = {0x00, 0x02, 0x29, 0x23, 0x59, 0x58, 0x03, 0};
-    const uint8_t set_frame[] = {0x2B, 0xD4, 0x83, 0x7C, 0x11, 0x00, 0x02, 0x29, 0x23, 0x59, 0x58, 0x03, 0};
-    size_t bus_count = mock.bus_count;
-    pro_ll.status_valid = true;
-    pro_ll.nresp_valid = true;
-    TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, next, deadline_ms(1000)) == ED64_PRO_LL_OK);
-    TEST_CHECK(mock.bus_count == bus_count + 2 && mock.bus[bus_count + 1].write);
-    TEST_CHECK(mock.bus[bus_count + 1].length == sizeof(set_frame) * 4);
-    TEST_CHECK(!pro_ll.status_valid && !pro_ll.nresp_valid && mock.rx_count == 0);
-    TEST_CHECK(memcmp(mock.tx_bytes + sizeof(get_frame), set_frame, sizeof(set_frame)) == 0);
-    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000)) == ED64_PRO_LL_OK);
-    TEST_CHECK(memcmp(output, next, sizeof(output)) == 0);
-    TEST_CHECK(mock.rtc_get_commands == 2 && mock.rtc_set_commands == 1 && mock.status_requests == 0);
-    TEST_CHECK(mock.tx_count == sizeof(get_frame) * 2 + sizeof(set_frame));
-    TEST_CHECK(memcmp(mock.tx_bytes + sizeof(get_frame) + sizeof(set_frame), get_frame, sizeof(get_frame)) == 0);
+    TEST_CHECK(mock.rtc_get_commands == 1 && mock.status_requests == 0);
     end(&transaction);
 }
 
@@ -1989,20 +1861,17 @@ static void test_rtc_rejections (void) {
     begin(&transaction);
     uint8_t bytes[ED64_PRO_RTC_SIZE] = {0};
     TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
-    TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
     TEST_CHECK(mock.accesses == 0);
     end(&transaction);
     identify();
     begin(&transaction);
     TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     ed64_pro_ll_transaction_t other;
     TEST_CHECK(ed64_pro_ll_rtc_get(&other, bytes, deadline_ms(1000)) == ED64_PRO_LL_BUSY);
-    TEST_CHECK(ed64_pro_ll_rtc_set(&other, bytes, deadline_ms(1000)) == ED64_PRO_LL_BUSY);
     mock.kernel = true;
     TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
-    TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
     mock.kernel = false;
+    TEST_CHECK(pro_send_frame(&transaction, PRO_CMD_RTC, 0x11, NULL, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(pro_send_frame(&transaction, PRO_CMD_RTC, 0x12, NULL, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
     end(&transaction);
@@ -2023,8 +1892,7 @@ static void test_rtc_reply_faults (void) {
         mock.rtc_reply_limit = fault == 0 ? 0 : fault == 1 ? 7 : ED64_PRO_RTC_SIZE;
         mock.rtc_trailing = fault == 2;
         if (fault == 3) {
-            mock.rtc_set_ack = true;
-            TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, mock.rtc_bytes, deadline_ms(1000)) == ED64_PRO_LL_OK);
+            rx_push(0x00); /* Unsolicited data must not be consumed as a fresh reply. */
         }
         ed64_pro_ll_error_t error = ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000));
         TEST_CHECK(fault < 2 ? is_deadline_error(error) : error == ED64_PRO_LL_TRAILING_DATA);
@@ -2034,7 +1902,6 @@ static void test_rtc_reply_faults (void) {
         TEST_CHECK(mock.rtc_get_commands == (fault == 3 ? 0u : 1u));
         unsigned accesses = mock.accesses;
         TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000)) == error);
-        TEST_CHECK(ed64_pro_ll_rtc_set(&transaction, output, deadline_ms(1000)) == error);
         TEST_CHECK(mock.accesses == accesses);
         end(&transaction);
     }
@@ -2442,6 +2309,59 @@ static void test_fci_status_failure (void) {
 }
 
 /**
+ * @brief Encode the RTC-only OFF/zero profile and reject storage or mapping additions.
+ */
+static void test_menu_config (void) {
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    ed64_pro_dev_cfg_t config = {.rtc_mode = ED64_PRO_RTC_STD};
+    TEST_ASSERT(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_OK);
+    const uint8_t expected[] = {
+        0x2B, 0xD4, 0x85, 0x7A, 0x20,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1
+    };
+    TEST_CHECK(mock.tx_count == 73 && memcmp(mock.tx_bytes, expected, sizeof(expected)) == 0);
+    for (size_t i = sizeof(expected); i < 69; i++) {
+        TEST_CHECK(mock.tx_bytes[i] == 0);
+    }
+    const uint8_t status[] = {0x2B, 0xD4, 0x10, 0xEF};
+    TEST_CHECK(memcmp(mock.tx_bytes + 69, status, sizeof(status)) == 0);
+    TEST_CHECK(mock.config_commands == 1 && mock.start_commands == 0 && mock.status_requests == 1);
+    end(&transaction);
+
+    power_on();
+    identify();
+    begin(&transaction);
+    for (unsigned fault = 0; fault < 20; fault++) {
+        config = (ed64_pro_dev_cfg_t){.rtc_mode = ED64_PRO_RTC_STD};
+        switch (fault) {
+        case 0: config.brom_type = 1; break;
+        case 1: config.brom_type = ED64_PRO_ROM_GPAK; break;
+        case 2: config.brom_type = 3; break;
+        case 3: config.gpak_size = 1; break;
+        case 4: config.gpak_size = 512; break;
+        case 5: config.brm_type = ED64_PRO_BRM_EEP4K; config.brm_size = 512; break;
+        case 6: config.brm_size = 512; break;
+        case 7: config.rtc_mode = ED64_PRO_RTC_RDO; break;
+        case 8: config.rtc_mode = 0; break;
+        case 9: config.dd_en = 1; break;
+        case 10: config.gpak_wren = 1; break;
+        case 11: config.gpak_key = 1; break;
+        default: config.reserved[fault - 12] = 1; break;
+        }
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    }
+    ed64_pro_dev_cfg_t unsafe = {.brom_type = ED64_PRO_ROM_GPAK, .gpak_size = 512,
+                               .brm_type = ED64_PRO_BRM_SRM32K, .brm_size = 32768, .rtc_mode = ED64_PRO_RTC_STD};
+    TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &unsafe, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(mock.accesses == 0 && ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
+    end(&transaction);
+}
+
+/**
  * @brief Return a valid ROM, EEPROM, and RTC launch configuration.
  */
 static ed64_pro_dev_cfg_t launch_config (void) {
@@ -2662,10 +2582,8 @@ static void test_sd_injected_write_failure (void) {
 #endif
 
 TEST_LIST = {
-    {"RTC adapter uses hardware then cache and unhooks on deinit", test_rtc_adapter_cache},
-    {"RTC adapter confirms writes and refuses ignored SET", test_rtc_adapter_set},
-    {"RTC adapter can repair an invalid hardware date", test_rtc_adapter_invalid_date},
-    {"RTC raw framing and ordered SET readback", test_rtc_frames},
+    {"RTC physical observation framing", test_rtc_frames},
+    {"menu RTC configuration uses OFF/zero and disables storage services", test_menu_config},
     {"RTC invalid inputs and contexts never write", test_rtc_rejections},
     {"RTC partial and unexpected replies latch", test_rtc_reply_faults},
     {"device paths encode lengths and long UTF8 bytes", test_dev_path_frames},

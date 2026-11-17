@@ -19,9 +19,24 @@ int get_memory_size (void);
 int hook_rtc_calls (rtc_hooks_t *hooks);
 int unhook_rtc_calls (rtc_hooks_t *hooks);
 bool rtc_init (void);
+typedef enum {
+    RTC_SOURCE_NONE = 0,
+    RTC_SOURCE_JOYBUS = 1,
+    RTC_SOURCE_DD = 2,
+    RTC_SOURCE_BB = 3,
+} rtc_source_t;
+void rtc_close (void);
+rtc_source_t rtc_get_source (void);
+int rtc_set_source (rtc_source_t source);
+bool rtc_is_source_available (rtc_source_t source);
 
 extern rtc_hooks_t test_rtc_hooks;
 extern unsigned test_rtc_init_calls;
+extern unsigned test_rtc_close_calls, test_rtc_set_source_calls;
+extern int test_rtc_set_source_result;
+extern rtc_source_t test_rtc_source;
+extern bool test_rtc_available, test_rtc_init_result, test_rtc_initialized;
+extern void (*test_rtc_init_observer)(void);
 
 typedef uint32_t pi_addr_t;
 typedef struct kthread_s kthread_t;

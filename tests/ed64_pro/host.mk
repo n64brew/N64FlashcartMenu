@@ -69,11 +69,11 @@ $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE): $(LIFECYCLE_DEPS)
 
 $(ADAPTER_TEST): $(ADAPTER_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 tests/ed64_pro/ed64_pro_adapter_test.c $(PRO_RTC_SOURCE) $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 tests/ed64_pro/ed64_pro_adapter_test.c $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
 
 $(ADAPTER_SANITIZE): $(ADAPTER_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro/ed64_pro_adapter_test.c $(PRO_RTC_SOURCE) $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro/ed64_pro_adapter_test.c $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
 
 RTC_TEST := $(HOST_BUILD_DIR)/rtc_test
 RTC_SANITIZE := $(HOST_BUILD_DIR)/rtc_test_sanitize

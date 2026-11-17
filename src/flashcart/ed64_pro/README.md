@@ -10,7 +10,7 @@ https://github.com/krikzz/ed64-pro-pub/blob/main/MANUAL.md
 - Revision: 43014e290f85140d4c5ca84fbf5ae48ac755a23d
 - Paths: edio/everdrive.c, edio/everdrive.h
 
-The cartridge-local driver adapts register and FIFO access, bounded command framing, STATUS/NRESP, firmware information, MCU filesystem initialization, raw-sector I/O, SD-to-FCI loading, DEV stop/flags/paths/configuration/start, and RTC GET/SET.
+The cartridge-local driver adapts register and FIFO access, bounded command framing, STATUS/NRESP, firmware information, MCU filesystem initialization, raw-sector I/O, SD-to-FCI loading, DEV stop/flags/paths/configuration/start, and diagnostic RTC GET.
 
 Register accesses use libdragon `io_read()`/`io_write()`; FIFO transfers use synchronous `dma_read()`/`dma_write()` with exclusive, aligned cache-line staging and explicit cache maintenance. Each FIFO byte occupies exactly one 32-bit bus word. These addresses are already in the SDK wrappers' ROM range, and aligned reads take the exact-length path without extra FIFO reads.
 
@@ -42,9 +42,15 @@ Local synthetic tests passed EEPROM (4/16 Kbit) and SRAM (32/96 KiB) persistence
 
 ### Real-time clock
 
-The Pro backend initializes libdragon time after mounting storage, then installs its clock hooks. The unchanged menu's later `rtc_init()` is idempotent. The menu, `time()`, `gettimeofday()`, and file timestamps use the Pro clock; ordinary reads advance a validated cache without MCU traffic.
+After mounting FatFs, the Pro backend sends a documented DEV_SET_CFG with ROM_OFF, ROM size zero, STD RTC, and every other field zero, then DEV_START before the first `rtc_init()`. Backup RAM and 64DD services remain disabled while N64 FatFs owns storage. No ROM extent, bundle enumeration, bank fingerprinting, FCI samples, private SDK API, or production build metadata is needed.
 
-Pro-specific clock editing in Settings is deferred to a separate PR. Set the clock in the stock Pro menu or with `edlink` while this menu is not running. Hardware dates must be in 2000–2099. Invalid dates and failed reads report errors instead of using a software fallback. Game launch keeps its existing read-only RTC mode.
+ROM_OFF disables ROM mapping according to the vendor documentation; it does not mean "preserve configuration", and size zero is not an "unchanged" convention. On the tested original N64 and Pro firmware 26.1014, this configuration left the default cartridge read aperture usable through both stock-menu SD launch and directly installed physical cold boot. A 3 MiB probe independently verified a known fixture at offset `0x280000` and compared fresh header/fixture bytes before and after START. This is measured behavior on that hardware/firmware, not a claim about every firmware implementation.
+
+Libdragon then detects the genuine Joybus RTC and supplies its ordinary POSIX clock integration and cache. There are no Pro clock overrides. The unchanged Settings > Time pane reads and saves the clock; leaving and reentering refreshes the same native cache. Game launch closes native RTC state and stops the menu services before FatFs unmount/FS INIT, then retains the existing game-side RDO configuration.
+
+Use hardware dates in 2000–2099. The shared year selector remains 1996–2095, so qualification uses the supported intersection; no shared range or invalid-clock editing behavior was changed. If genuine detection succeeds but the calendar is invalid, public source resynchronization preserves the clock error instead of presenting libdragon's software fallback date. Failed service transitions retain their first error and require a console/cartridge power cycle.
+
+OFF/zero probes selected genuine Joybus RTC after START on both launch routes; settled native and physical MCU readings agreed within one second. MCU RTC GET can lag a native Joybus write by approximately one second, so immediate cached success alone is not persistence evidence.
 
 ### Upstream license
 

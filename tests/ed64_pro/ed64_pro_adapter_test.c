@@ -4,6 +4,7 @@
 #include <stdarg.h>
 
 #include "../../src/flashcart/ed64_pro/ed64_pro.c"
+#include "../../src/flashcart/ed64_pro/ed64_pro_rtc.c"
 
 /* Compare the adapter's mapping with the table used by actual shared save allocation. */
 #undef ALIGN
@@ -224,6 +225,10 @@ static struct {
     unsigned mounts;
     unsigned unmounts;
     unsigned fs_inits;
+    unsigned rtc_starts, rtc_stops;
+    bool rtc_pending, rtc_running;
+    ed64_pro_dev_cfg_t rtc_config;
+    ed64_pro_ll_error_t rtc_stop_error;
     const fat_disk_t *disk;
     char events[64];
     unsigned events_count;
@@ -316,6 +321,12 @@ ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_statu
 ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     (void)transaction;
     (void)deadline;
+    if (mock.rtc_running) {
+        mock.rtc_stops++;
+        mock.events[mock.events_count++] = 'T';
+        mock.rtc_running = false;
+        return mock.rtc_stop_error;
+    }
     return ED64_PRO_LL_OK;
 }
 
@@ -562,6 +573,11 @@ ed64_pro_ll_error_t
 ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
     (void)transaction;
     (void)deadline;
+    if (config->rtc_mode == ED64_PRO_RTC_STD) {
+        mock.rtc_config = *config;
+        mock.rtc_pending = true;
+        return ED64_PRO_LL_OK;
+    }
     mock.config = *config;
     return launch_command('G');
 }
@@ -572,6 +588,12 @@ ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_
 ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
     (void)transaction;
     (void)deadline;
+    if (mock.rtc_pending) {
+        mock.rtc_pending = false;
+        mock.rtc_running = true;
+        mock.rtc_starts++;
+        return ED64_PRO_LL_OK;
+    }
     return launch_command('S');
 }
 
@@ -621,9 +643,18 @@ static uint32_t fat_date (unsigned year, unsigned month, unsigned day) {
  * @brief Reset adapter state and configure successful mock defaults.
  */
 static void fixture (void) {
+    mock.begin_error = mock.rtc_stop_error = ED64_PRO_LL_OK;
     ed64_pro_rtc_close();
-    test_rtc_init_calls = 0;
+    /* Separate fixtures represent fresh console boots, including RTC latches. */
+    pro_rtc_failed = pro_rtc_running = false;
+    pro_rtc_error = NULL;
+    test_rtc_init_calls = test_rtc_close_calls = test_rtc_set_source_calls = 0;
+    test_rtc_set_source_result = RTC_ESUCCESS;
     test_rtc_hooks = (rtc_hooks_t){0};
+    test_rtc_source = RTC_SOURCE_JOYBUS;
+    test_rtc_available = test_rtc_init_result = true;
+    test_rtc_initialized = false;
+    test_rtc_init_observer = NULL;
     memset(&mock, 0, sizeof(mock));
     mock.memory_size = 8 * 1024 * 1024;
     memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
@@ -638,13 +669,22 @@ static void fixture (void) {
 /**
  * @brief Initialize and mount the adapter, then reset transfer counters.
  */
+static void observe_native_init (void) {
+    TEST_CHECK(mock.mounts == 1 && mock.rtc_starts == 1 && mock.rtc_running);
+    TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_FATFS_OWNED);
+    TEST_CHECK(cart_type == CART_MAX);
+}
+
 static void mounted_fixture (void) {
     fixture();
+    test_rtc_init_observer = observe_native_init;
     TEST_ASSERT(pro_init() == FLASHCART_OK);
     TEST_ASSERT(ed64_pro_init_sdfs("sd:/", 4));
     mock.operations = 0;
     mock.reads = 0;
     mock.begin_calls = 0;
+    mock.events_count = mock.command_calls = 0;
+    memset(mock.events, 0, sizeof(mock.events));
 }
 
 /**
@@ -714,6 +754,26 @@ static void test_mount (void) {
     TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_FATFS_OWNED);
     TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4) && mock.mounts == 1);
     TEST_CHECK(pro_disk.disk_status() == 0);
+    TEST_CHECK(mock.rtc_starts == 1 && test_rtc_init_calls == 1);
+    TEST_CHECK(rtc_get_source() == RTC_SOURCE_JOYBUS);
+    TEST_CHECK(mock.rtc_config.brom_type == 0); /* Vendor ROM_OFF. */
+    TEST_CHECK(mock.rtc_config.gpak_size == 0 && mock.rtc_config.rtc_mode == ED64_PRO_RTC_STD);
+    TEST_CHECK(mock.rtc_config.brm_type == ED64_PRO_BRM_OFF && mock.rtc_config.brm_size == 0);
+    TEST_CHECK(test_rtc_hooks.gettime == NULL && test_rtc_hooks.settime == NULL);
+}
+
+static void test_mount_native_failure (void) {
+    for (unsigned failure = 0; failure < 2; failure++) {
+        fixture();
+        TEST_ASSERT(pro_init() == FLASHCART_OK);
+        test_rtc_available = false;
+        if (failure) test_rtc_source = RTC_SOURCE_NONE;
+        TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4));
+        TEST_CHECK(pro_diagnostics.storage_failed && mock.unmounts == 1);
+        TEST_CHECK(mock.rtc_starts == 1 && mock.rtc_stops == 1 && !mock.rtc_running);
+        TEST_CHECK(!test_rtc_initialized);
+        TEST_CHECK(strstr(mock.events, "TU") != NULL);
+    }
 }
 
 /**
@@ -1056,7 +1116,7 @@ static void test_game_handoff (void) {
         TEST_CHECK(pro_deinit() == FLASHCART_OK);
         TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 1);
         TEST_CHECK(mock.command_calls == (save ? 4u : 3u));
-        TEST_CHECK(strcmp(mock.events, save ? "UFPBGS" : "UFPGS") == 0);
+        TEST_CHECK(strcmp(mock.events, save ? "TUFPBGS" : "TUFPGS") == 0);
         TEST_CHECK(strcmp(mock.launch_paths[0], "/game.z64") == 0);
         TEST_CHECK(strcmp(mock.launch_paths[1], save ? "/saves/game.sav" : "") == 0);
         TEST_CHECK(mock.config.brom_type == ED64_PRO_ROM_GPAK && mock.config.gpak_size == 1024);
@@ -1076,7 +1136,7 @@ static void test_game_handoff_callback (void) {
     staged_game_fixture(false);
     handoff_halt_calls = 0;
     TEST_CHECK(ed64_pro_get_flashcart()->deinit() == FLASHCART_OK);
-    TEST_CHECK(handoff_halt_calls == 0 && strcmp(mock.events, "UFPGS") == 0);
+    TEST_CHECK(handoff_halt_calls == 0 && strcmp(mock.events, "TUFPGS") == 0);
 
     for (unsigned failure = 0; failure < 2; failure++) {
         staged_game_fixture(true);
@@ -1114,12 +1174,23 @@ static void test_game_handoff_failures (void) {
     }
 }
 
+/** @brief Failed service shutdown blocks SD handoff and cannot be retried. */
+static void test_rtc_shutdown_failure (void) {
+    staged_game_fixture(false);
+    mock.rtc_stop_error = ED64_PRO_LL_TIMEOUT;
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_INT);
+    TEST_CHECK(mock.rtc_stops == 1 && mock.unmounts == 0 && mock.fs_inits == 0 && mock.command_calls == 0);
+    TEST_CHECK(!test_rtc_initialized);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD && mock.rtc_stops == 1);
+}
+
 /**
  * @brief Verify incomplete staging and pending writes block launch before handoff.
  */
 static void test_launch_preflight (void) {
     mounted_fixture();
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD);
+    TEST_CHECK(rtc_get_source() == RTC_SOURCE_JOYBUS && mock.rtc_stops == 0);
     TEST_CHECK(mock.unmounts == 0 && mock.fs_inits == 0 && mock.command_calls == 0);
     TEST_ASSERT(pro_load_rom("sd:/game.z64", NULL) == FLASHCART_OK);
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0);
@@ -1359,7 +1430,9 @@ TEST_LIST = {
     {"cached firmware identity and capacity", test_firmware_info},
     {"firmware date and minimum boundaries", test_firmware_boundaries},
     {"firmware query failure is latched", test_firmware_query_failure},
-    {"immediate mount invokes disk callbacks", test_mount},
+    {"mount starts compatible RTC services after FatFs", test_mount},
+    {"unavailable native RTC cleans services and failed mount", test_mount_native_failure},
+    {"failed RTC shutdown blocks SD handoff without retry", test_rtc_shutdown_failure},
     {"mount and nonzero volume failures are terminal", test_mount_failure},
     {"mount retains sector I/O failure", test_mount_io_failure},
     {"sector chunking and sync", test_sector_chunks},
@@ -1371,17 +1444,3 @@ TEST_LIST = {
     {"release failures refuse handoff", test_release_refusals},
     {NULL, NULL},
 };
-
-/* RTC protocol framing is exercised by the transport suite. */
-ed64_pro_ll_error_t ed64_pro_ll_rtc_get (ed64_pro_ll_transaction_t *tx, uint8_t out[ED64_PRO_RTC_SIZE], uint32_t deadline) {
-    (void)tx; (void)deadline;
-    TEST_CHECK(test_rtc_init_calls == 1 && cart_type == CART_MAX);
-    const uint8_t value[] = {0x26, 0x11, 0x16, 0x12, 0x34, 0x56, 0x02, 0};
-    memcpy(out, value, sizeof(value));
-    return ED64_PRO_LL_OK;
-}
-ed64_pro_ll_error_t ed64_pro_ll_rtc_set (ed64_pro_ll_transaction_t *tx, const uint8_t in[ED64_PRO_RTC_SIZE], uint32_t deadline) {
-    (void)tx; (void)in; (void)deadline;
-    TEST_CHECK(false);
-    return ED64_PRO_LL_CONTEXT;
-}

@@ -26,7 +26,7 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 > [!IMPORTANT]
 > USB tools such as `edlink` should only be used with the console powered off or in the stock Pro menu.
 
-Automatic CIC, save writeback, and clock reads are enabled. Set the clock in the stock Pro menu or with `edlink` while this menu is not running. Pro-specific clock editing in Settings is deferred. 64DD, fast reboot, and USB debugging are not yet implemented.
+Automatic CIC, save writeback, and RTC reads/writes are enabled. Set the clock in Settings > Time, or use the stock Pro menu or `edlink` while this menu is not running. 64DD, fast reboot, and USB debugging are not yet implemented.
 
 ROM and save paths use [CP437](https://en.wikipedia.org/wiki/Code_page_437), with existing [8.3 aliases](https://en.wikipedia.org/wiki/8.3_filename) for unsupported characters. Paths without usable aliases are rejected before launch.
 

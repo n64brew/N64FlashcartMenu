@@ -565,11 +565,12 @@ bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
     }
     pro_diagnostics.volume_id = volume_id;
     pro_diagnostics.storage_state = ED64_PRO_STORAGE_FATFS_OWNED;
-    /* Initialize libdragon before installing Pro hooks. Later rtc_init calls
-     * are idempotent. Skip libcart's overlapping legacy-cart probes here too. */
-    cart_type = CART_MAX;
-    rtc_init();
-    ed64_pro_rtc_resync();
+    if (ed64_pro_rtc_init() != FLASHCART_OK) {
+        fat_unmount(volume_id);
+        pro_diagnostics.volume_id = -1;
+        pro_storage_fail(ed64_pro_rtc_get_error_message(), "RTC START", 0, 0, ed64_pro_ll_get_failure()->code);
+        return false;
+    }
     return true;
 }
 
@@ -607,8 +608,8 @@ static flashcart_err_t pro_release_storage (void) {
 
 /** @brief Release storage and configure MCU game services for the prepared launch. */
 static flashcart_err_t pro_deinit (void) {
-    ed64_pro_rtc_close();
     if (pro_diagnostics.storage_failed) {
+        ed64_pro_rtc_close();
         return FLASHCART_ERR_SD_CARD;
     }
 #ifndef ED64_PRO_TEST_STORAGE
@@ -619,6 +620,10 @@ static flashcart_err_t pro_deinit (void) {
         return FLASHCART_ERR_LOAD;
     }
 #endif
+    if (ed64_pro_rtc_close() != FLASHCART_OK) {
+        pro_storage_fail("Menu services could not be stopped", "RTC STOP", 0, 0, ed64_pro_ll_get_failure()->code);
+        return FLASHCART_ERR_INT;
+    }
     flashcart_err_t release_error = pro_release_storage();
     if (release_error != FLASHCART_OK) {
         return release_error;
