@@ -287,7 +287,7 @@ void menu_run (boot_params_t *boot_params) {
                 }
             }
 
-            menu->current_time = time(NULL);
+            time(&menu->current_time);
         }
 
         sound_poll();
