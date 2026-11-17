@@ -1,5 +1,9 @@
 # EverDrive-64 Pro navigation qualification
 
+> Historical qualification: the shared CIC, path, artwork, and ticker fixes
+> described below have been removed from this PR for separate review.
+> Their regression tests are also deferred; previous results describe those builds.
+
 The November 16–17, 2026 re-test of [PR #459](https://github.com/n64brew/N64FlashcartMenu/pull/459)
 confirmed two pre-existing UI defects and a Pro-specific RAM-validation defect.
 Their fixes pass the checks below. Intermittent corruption, startup exceptions
@@ -71,7 +75,7 @@ before this round. Fresh INFO, STORAGE and LOAD builds pass; restoring the old
 dependency list reproduces the missing RTC symbols. It is not a runtime-crash
 classification. [Link regression check](../output/unresolved-qualification/20261116/host/rtc-n64-link-regression/summary.json).
 
-The durable [ticker test](../tests/test_file_list_ticker.py) uses production
+The historical ticker test used production
 layout code, the actual SDK paragraph engine and font metrics: 150 checks in
 each of ordinary and ASan/UBSan modes (300 total). The former unbounded SDK call
 reproduces its assertion as a positive control. This tests layout, not GPU/N64

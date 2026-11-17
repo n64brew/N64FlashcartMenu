@@ -97,13 +97,3 @@ not establish a menu crash.
 A passing traversal does not establish the cause of the historical intermittent
 ROM-open error or the separate `rdpq_triangle_rsp` exception. Keep those results
 bounded to the tested builds and schedules.
-
-## Ticker host regression
-
-Run `make -f tests/Makefile test-file-list-ticker test-file-list-ticker-sanitize`.
-The test compiles the current production ticker helpers with the current SDK
-paragraph engine and existing built-in Monogram font metrics. It checks the
-former overflow, long names, UTF-8 boundaries, whitespace, maximum glyph advance,
-baseline positioning and cleanup. Generated sources stay under `build/tests`;
-no implementation or font data is copied into the tests. GPU rendering remains
-a hardware check.

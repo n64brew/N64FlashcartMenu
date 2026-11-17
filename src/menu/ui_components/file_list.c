@@ -15,8 +15,6 @@
 
 #define FILE_ENTRY_TICKER_SCROLL_SPEED  (0.5f)
 #define FILE_ENTRY_TICKER_START_DELAY   (20)
-#define FILE_ENTRY_TICKER_CHUNK_WIDTH   (1024)
-#define FILE_ENTRY_TICKER_CHUNK_BYTES   (128)
 
 static float file_list_ticker_offset = 0.0f;
 static int file_list_ticker_delay_frames = FILE_ENTRY_TICKER_START_DELAY;
@@ -27,96 +25,6 @@ static const rdpq_font_t *file_list_ticker_font = NULL;
 static menu_font_style_t file_list_ticker_style = STL_DEFAULT;
 static int file_list_ticker_name_width = 0;
 static int file_list_ticker_padding_width = 0;
-
-typedef struct {
-    rdpq_paragraph_t *layout;
-    float x;
-} file_list_ticker_chunk_t;
-
-static file_list_ticker_chunk_t *file_list_ticker_chunks;
-static size_t file_list_ticker_chunk_count;
-
-static void file_list_ticker_layout_free(void) {
-    for (size_t i = 0; i < file_list_ticker_chunk_count; i++) {
-        rdpq_paragraph_free(file_list_ticker_chunks[i].layout);
-    }
-    free(file_list_ticker_chunks);
-    file_list_ticker_chunks = NULL;
-    file_list_ticker_chunk_count = 0;
-    file_list_ticker_widths_valid = false;
-}
-
-/* Keep every paragraph below libdragon's 2048-pixel coordinate limit, even
- * when archive entry paths are much longer than ordinary filenames. */
-static bool file_list_ticker_layout_build(const char *name, menu_font_style_t style) {
-    file_list_ticker_layout_free();
-    float x = 0;
-    const rdpq_font_t *font = rdpq_text_get_font(FNT_DEFAULT);
-    size_t remaining = strlen(name);
-    while (remaining) {
-        size_t bytes = remaining < FILE_ENTRY_TICKER_CHUNK_BYTES ? remaining : FILE_ENTRY_TICKER_CHUNK_BYTES;
-        rdpq_paragraph_t *chunk;
-        for (;;) {
-            while (bytes && ((unsigned char)name[bytes] & 0xC0) == 0x80) bytes--;
-            if (!bytes) {
-                bytes = 1;
-                while (bytes < remaining && ((unsigned char)name[bytes] & 0xC0) == 0x80) bytes++;
-            }
-            /* Blank glyphs bypass libdragon's width wrapping. End after the
-             * first one so spaces/tabs cannot overflow before the next glyph. */
-            for (size_t i = 0; i < bytes;) {
-                uint32_t codepoint = (unsigned char)name[i++];
-                if (codepoint >= 0xC0) {
-                    codepoint &= codepoint < 0xE0 ? 0x1F : codepoint < 0xF0 ? 0x0F : 0x07;
-                    while (i < bytes && ((unsigned char)name[i] & 0xC0) == 0x80) {
-                        codepoint = (codepoint << 6) | (name[i++] & 0x3F);
-                    }
-                }
-                rdpq_font_gmetrics_t metrics;
-                if (codepoint == '\t' ||
-                    (rdpq_font_get_glyph_metrics(font, codepoint, &metrics) && metrics.x1 == 0)) {
-                    bytes = i;
-                    break;
-                }
-            }
-            rdpq_paragraph_builder_begin(
-                &(rdpq_textparms_t) {
-                    .style_id = style, .width = FILE_ENTRY_TICKER_CHUNK_WIDTH,
-                    .height = FILE_ENTRY_TICKER_CHUNK_WIDTH, .wrap = WRAP_CHAR,
-                }, FNT_DEFAULT, NULL
-            );
-            rdpq_paragraph_builder_span(name, bytes);
-            chunk = rdpq_paragraph_builder_end();
-            if (chunk->nlines <= 1 && chunk->advance_x <= FILE_ENTRY_TICKER_CHUNK_WIDTH) break;
-            rdpq_paragraph_free(chunk);
-            bytes /= 2;
-        }
-        file_list_ticker_chunk_t *grown = realloc(
-            file_list_ticker_chunks, (file_list_ticker_chunk_count + 1) * sizeof(*grown)
-        );
-        if (!grown) {
-            rdpq_paragraph_free(chunk);
-            file_list_ticker_layout_free();
-            return false;
-        }
-        file_list_ticker_chunks = grown;
-        grown[file_list_ticker_chunk_count++] = (file_list_ticker_chunk_t) { .layout = chunk, .x = x };
-        x += chunk->advance_x;
-        name += bytes;
-        remaining -= bytes;
-    }
-    file_list_ticker_name_width = (int)x;
-    return true;
-}
-
-static void file_list_ticker_render(float x, int y, int left, int right) {
-    for (size_t i = 0; i < file_list_ticker_chunk_count; i++) {
-        const file_list_ticker_chunk_t *chunk = &file_list_ticker_chunks[i];
-        float chunk_x = x + chunk->x;
-        if (chunk_x + chunk->layout->bbox.x1 < left || chunk_x + chunk->layout->bbox.x0 >= right) continue;
-        rdpq_paragraph_render(chunk->layout, chunk_x, y - chunk->layout->advance_y);
-    }
-}
 
 static rdpq_paragraph_t *file_list_layout_buffer;
 static size_t file_list_layout_capacity;
@@ -160,7 +68,6 @@ static rdpq_paragraph_t *file_list_layout_get(size_t required_capacity) {
 }
 
 void ui_components_file_list_free(void) {
-    file_list_ticker_layout_free();
     free(file_list_layout_buffer);
     file_list_layout_buffer = NULL;
     file_list_layout_capacity = 0;
@@ -207,7 +114,7 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
         file_list_ticker_selected = -1;
         free(file_list_ticker_name);
         file_list_ticker_name = NULL;
-        file_list_ticker_layout_free();
+        file_list_ticker_widths_valid = false;
     } else if (selected != file_list_ticker_selected ||
                !file_list_ticker_name ||
                strcmp(list[selected].name, file_list_ticker_name) != 0) {
@@ -217,7 +124,7 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
         file_list_ticker_selected = selected;
         file_list_ticker_offset = 0.0f;
         file_list_ticker_delay_frames = FILE_ENTRY_TICKER_START_DELAY;
-        file_list_ticker_layout_free();
+        file_list_ticker_widths_valid = false;
     }
 
     if (entries > LIST_ENTRIES && selected >= (LIST_ENTRIES / 2)) {
@@ -350,20 +257,28 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
                 strcmp(selected_name, file_list_ticker_name) != 0 ||
                 font != file_list_ticker_font || selected_style != file_list_ticker_style)) {
                 file_list_ticker_widths_valid = false;
+                int name_bytes = (int)strlen(selected_name);
                 int padding_bytes = (int)strlen(wrap_pad);
+                rdpq_paragraph_t *name_layout = rdpq_paragraph_build(
+                    &(rdpq_textparms_t) { .style_id = selected_style, .wrap = WRAP_NONE },
+                    FNT_DEFAULT,
+                    selected_name, &name_bytes
+                );
                 rdpq_paragraph_t *padding_layout = rdpq_paragraph_build(
-                    &(rdpq_textparms_t) { .style_id = selected_style, .width = FILE_ENTRY_TICKER_CHUNK_WIDTH },
+                    &(rdpq_textparms_t) { .style_id = selected_style, .wrap = WRAP_NONE },
                     FNT_DEFAULT,
                     wrap_pad, &padding_bytes
                 );
 
-                if (padding_layout && file_list_ticker_layout_build(selected_name, selected_style)) {
+                if (name_layout && padding_layout) {
+                    file_list_ticker_name_width = (int)name_layout->advance_x;
                     file_list_ticker_padding_width = (int)padding_layout->advance_x;
                     file_list_ticker_font = font;
                     file_list_ticker_style = selected_style;
                     file_list_ticker_widths_valid = true;
                 }
 
+                if (name_layout) rdpq_paragraph_free(name_layout);
                 if (padding_layout) rdpq_paragraph_free(padding_layout);
             }
 
@@ -380,6 +295,10 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
                     : 0;
                 int row = selected - starting_position;
                 int ticker_y = name_y + first_baseline + row * line_step;
+                char scroll_name[576];
+                snprintf(scroll_name, sizeof(scroll_name), "%s%s%s%s",
+                         selected_name, wrap_pad, selected_name, wrap_pad);
+                size_t scroll_len = strlen(scroll_name);
                 int cycle_width = file_list_ticker_name_width + file_list_ticker_padding_width;
 
                 if (file_list_ticker_delay_frames > 0) {
@@ -397,9 +316,12 @@ void ui_components_file_list_draw(entry_t *list, int entries, int selected) {
                     FILE_LIST_HIGHLIGHT_COLOR
                 );
                 rdpq_set_scissor(name_x, highlight_y, name_x + name_width, highlight_y + highlight_height);
-                float ticker_x = name_x - (int)file_list_ticker_offset;
-                file_list_ticker_render(ticker_x, ticker_y, name_x, name_x + name_width);
-                file_list_ticker_render(ticker_x + cycle_width, ticker_y, name_x, name_x + name_width);
+                rdpq_text_printn(
+                    &(rdpq_textparms_t) { .style_id = selected_style },
+                    FNT_DEFAULT,
+                    name_x - (int)file_list_ticker_offset, ticker_y,
+                    scroll_name, scroll_len
+                );
                 rdpq_set_scissor(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
             }
         }
