@@ -20,15 +20,13 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 #### Preparations for EverDrive-64 Pro
 
 - Use firmware `26.1014` or newer.
-- Copy `menu.n64` to the SD card.
+- Download the latest `menu.n64` file from the [releases](https://github.com/Polprzewodnikowy/N64FlashcartMenu/releases/) page, then copy it to `/ed64/menu.n64` on your Micro SD card.
 - Launch `menu.n64` from the stock Pro menu, or move it to `/ed64/menu.n64` to automatically launch it on startup.
 
 > [!IMPORTANT]
 > USB tools such as `edlink` should only be used with the console powered off or in the stock Pro menu.
 
 Automatic CIC, save writeback, and clock reads are enabled. Set the clock in the stock Pro menu or with `edlink` while this menu is not running. Pro-specific clock editing in Settings is deferred. 64DD, fast reboot, and USB debugging are not yet implemented.
-
-Use an Expansion Pak (8 MiB) for now. Jumper Pak (4 MiB) setups have unresolved navigation, artwork, and file-open failures.
 
 ROM and save paths use [CP437](https://en.wikipedia.org/wiki/Code_page_437), with existing [8.3 aliases](https://en.wikipedia.org/wiki/8.3_filename) for unsupported characters. Paths without usable aliases are rejected before launch.
 
