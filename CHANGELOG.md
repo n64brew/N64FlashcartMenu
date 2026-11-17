@@ -15,9 +15,10 @@ Files are made available:
 	- Menu colour themes.
 
 - **Bug Fixes**
-	- None.
+	- Preserve alpha transparency in decoded boxart.
 
 - **Documentation**
+	- Menu credits were updated to n64brew.
 	- Improve documents with new features.
 
 - **Refactor**
@@ -32,6 +33,7 @@ Files are made available:
 - None.
 
 ### Notes
+- dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
 - A new version of the SMSPlus64 emulator is available: https://github.com/fhoedemakers/smsplus64/releases/tag/v0.9
 
 ### Current known Issues
