@@ -230,6 +230,11 @@ void ui_components_background_reload(void);
 void ui_components_background_image_free_only(void);
 
 /**
+ * @brief Return the reserved background decode surface, or NULL if unavailable.
+ */
+surface_t *ui_components_background_get_decode_buffer(void);
+
+/**
  * @brief Draw the file list component.
  * 
  * @param list List of entries.

@@ -24,8 +24,11 @@ typedef struct {
     size_t mem_buf_pos;
     void *work_buf;
     surface_t *image;
+    surface_t *output_buffer;
     int dst_w;
     int dst_h;
+    int decoded_w;
+    int decoded_h;
     uint8_t scale;
     float progress;
     jpeg_callback_t *callback;
@@ -80,21 +83,48 @@ static int jpeg_output (JDEC *jd, void *bitmap, JRECT *rect) {
     int block_h = rect->bottom - rect->top + 1;
     const uint8_t *src = bitmap;
 
-    for (int y = 0; y < block_h; y++) {
-        uint16_t *dst_row = (uint16_t *) ((uint8_t *) state->image->buffer
-                                          + (rect->top + y) * state->image->stride);
-        for (int x = 0; x < block_w; x++) {
-            const uint8_t *pixel = src + (y * block_w + x) * 3;
-            dst_row[rect->left + x] = ((pixel[0] >> 3) << 11)
-                                    | ((pixel[1] >> 3) << 6)
-                                    | ((pixel[2] >> 3) << 1) | 1;
+    if (state->output_buffer == NULL) {
+        for (int y = 0; y < block_h; y++) {
+            uint16_t *dst_row = (uint16_t *) ((uint8_t *) state->image->buffer
+                                              + (rect->top + y) * state->image->stride);
+            for (int x = 0; x < block_w; x++) {
+                const uint8_t *pixel = src + (y * block_w + x) * 3;
+                dst_row[rect->left + x] = ((pixel[0] >> 3) << 11)
+                                        | ((pixel[1] >> 3) << 6)
+                                        | ((pixel[2] >> 3) << 1) | 1;
+            }
+        }
+    } else {
+        for (int y = 0; y < block_h; y++) {
+            int source_y = rect->top + y;
+            int dest_y = (((source_y + 1) * state->dst_h) - 1) / state->decoded_h;
+            if (dest_y >= state->dst_h
+                    || (dest_y * state->decoded_h) / state->dst_h != source_y) {
+                continue;
+            }
+
+            uint16_t *dst_row = (uint16_t *) ((uint8_t *) state->image->buffer
+                                              + dest_y * state->image->stride);
+            for (int x = 0; x < block_w; x++) {
+                int source_x = rect->left + x;
+                int dest_x = (((source_x + 1) * state->dst_w) - 1) / state->decoded_w;
+                if (dest_x >= state->dst_w
+                        || (dest_x * state->decoded_w) / state->dst_w != source_x) {
+                    continue;
+                }
+
+                const uint8_t *pixel = src + (y * block_w + x) * 3;
+                dst_row[dest_x] = ((pixel[0] >> 3) << 11)
+                                | ((pixel[1] >> 3) << 6)
+                                | ((pixel[2] >> 3) << 1) | 1;
+            }
         }
     }
 
-    state->progress = (float) (rect->bottom + 1) / state->dst_h;
+    state->progress = (float) (rect->bottom + 1) / state->decoded_h;
     state->blocks_this_poll++;
-    bool at_end = rect->right + 1 >= state->dst_w
-               && rect->bottom + 1 >= state->dst_h;
+    bool at_end = rect->right + 1 >= state->decoded_w
+               && rect->bottom + 1 >= state->decoded_h;
     if (!at_end && state->blocks_this_poll >= JPEG_BLOCKS_PER_POLL) {
         coro_yield();
     }
@@ -120,24 +150,60 @@ static jpeg_err_t jpeg_decoder_setup (int max_width, int max_height) {
             ? JPEG_ERR_OUT_OF_MEM : JPEG_ERR_BAD_FILE;
     }
 
-    heap_stats_t heap;
-    sys_get_heap_stats(&heap);
-    size_t available = heap.total - heap.used;
     bool fits = false;
-    for (uint8_t scale = 0; scale <= 3; scale++) {
-        int dst_w = decoder->jd.width >> scale;
-        int dst_h = decoder->jd.height >> scale;
-        if (dst_w < 1) dst_w = 1;
-        if (dst_h < 1) dst_h = 1;
-        if (dst_w > max_width || dst_h > max_height) continue;
+    if (decoder->output_buffer != NULL) {
+        int src_w = decoder->jd.width;
+        int src_h = decoder->jd.height;
+        decoder->dst_w = (src_w < max_width) ? src_w : max_width;
+        decoder->dst_h = (src_h < max_height) ? src_h : max_height;
+        if (src_w * decoder->dst_h > src_h * decoder->dst_w) {
+            decoder->dst_h = (src_h * decoder->dst_w) / src_w;
+        } else {
+            decoder->dst_w = (src_w * decoder->dst_h) / src_h;
+        }
+        if (decoder->dst_w < 1) decoder->dst_w = 1;
+        if (decoder->dst_h < 1) decoder->dst_h = 1;
 
-        size_t surface_size = (size_t) dst_w * dst_h * 2;
-        if (surface_size + 64 * 1024 <= available) {
+        for (uint8_t scale = 0; scale <= 3; scale++) {
+            int decoded_w = decoder->jd.width >> scale;
+            int decoded_h = decoder->jd.height >> scale;
+            if (decoded_w < 1) decoded_w = 1;
+            if (decoded_h < 1) decoded_h = 1;
+            if (decoded_w < decoder->dst_w || decoded_h < decoder->dst_h) continue;
             decoder->scale = scale;
-            decoder->dst_w = dst_w;
-            decoder->dst_h = dst_h;
+            decoder->decoded_w = decoded_w;
+            decoder->decoded_h = decoded_h;
             fits = true;
             break;
+        }
+        if (decoder->output_buffer->buffer == NULL
+                || surface_get_format(decoder->output_buffer) != FMT_RGBA16
+                || decoder->output_buffer->stride < decoder->dst_w * 2
+                || decoder->dst_w > decoder->output_buffer->width
+                || decoder->dst_h > decoder->output_buffer->height) {
+            fits = false;
+        }
+    } else {
+        heap_stats_t heap;
+        sys_get_heap_stats(&heap);
+        size_t available = heap.total - heap.used;
+        for (uint8_t scale = 0; scale <= 3; scale++) {
+            int dst_w = decoder->jd.width >> scale;
+            int dst_h = decoder->jd.height >> scale;
+            if (dst_w < 1) dst_w = 1;
+            if (dst_h < 1) dst_h = 1;
+            if (dst_w > max_width || dst_h > max_height) continue;
+
+            size_t surface_size = (size_t) dst_w * dst_h * 2;
+            if (surface_size + 64 * 1024 <= available) {
+                decoder->scale = scale;
+                decoder->dst_w = dst_w;
+                decoder->dst_h = dst_h;
+                decoder->decoded_w = dst_w;
+                decoder->decoded_h = dst_h;
+                fits = true;
+                break;
+            }
         }
     }
 
@@ -151,7 +217,13 @@ static jpeg_err_t jpeg_decoder_setup (int max_width, int max_height) {
         jpeg_decoder_deinit(false);
         return JPEG_ERR_OUT_OF_MEM;
     }
-    *decoder->image = surface_alloc(FMT_RGBA16, decoder->dst_w, decoder->dst_h);
+    if (decoder->output_buffer != NULL) {
+        *decoder->image = surface_make(decoder->output_buffer->buffer, FMT_RGBA16,
+                                       decoder->dst_w, decoder->dst_h,
+                                       decoder->output_buffer->stride);
+    } else {
+        *decoder->image = surface_alloc(FMT_RGBA16, decoder->dst_w, decoder->dst_h);
+    }
     if (decoder->image->buffer == NULL) {
         jpeg_decoder_deinit(true);
         return JPEG_ERR_OUT_OF_MEM;
@@ -182,17 +254,33 @@ static jpeg_err_t jpeg_decoder_begin (jpeg_callback_t *callback, void *callback_
     return JPEG_OK;
 }
 
-jpeg_err_t jpeg_decoder_start (char *path, int max_width, int max_height,
-                               jpeg_callback_t *callback, void *callback_data) {
+static jpeg_err_t jpeg_decoder_start_file (char *path, int max_width, int max_height,
+                                           surface_t *output_buffer,
+                                           jpeg_callback_t *callback, void *callback_data) {
     jpeg_err_t err = jpeg_decoder_begin(callback, callback_data);
     if (err != JPEG_OK) return err;
 
+    decoder->output_buffer = output_buffer;
     decoder->f = fopen(path, "rb");
     if (decoder->f == NULL) {
         jpeg_decoder_deinit(false);
         return JPEG_ERR_NO_FILE;
     }
     return jpeg_decoder_setup(max_width, max_height);
+}
+
+jpeg_err_t jpeg_decoder_start (char *path, int max_width, int max_height,
+                               jpeg_callback_t *callback, void *callback_data) {
+    return jpeg_decoder_start_file(path, max_width, max_height, NULL,
+                                   callback, callback_data);
+}
+
+jpeg_err_t jpeg_decoder_start_into (char *path, int max_width, int max_height,
+                                    surface_t *output_buffer,
+                                    jpeg_callback_t *callback, void *callback_data) {
+    if (output_buffer == NULL) return JPEG_ERR_OUT_OF_MEM;
+    return jpeg_decoder_start_file(path, max_width, max_height, output_buffer,
+                                   callback, callback_data);
 }
 
 jpeg_err_t jpeg_decoder_start_mem (void *buf, size_t buf_size, int max_width,

@@ -18,6 +18,7 @@
  */
 typedef struct {
     char *cache_location;      /**< Path to the cache file location. */
+    surface_t decode_buffer;   /**< Reusable full-resolution decode buffer. */
     surface_t *image;          /**< Pointer to the loaded image surface. */
     rspq_block_t *image_display_list; /**< Display list for rendering the image. */
 } component_background_t;
@@ -40,7 +41,7 @@ static component_background_t *background = NULL;
  * @param c Pointer to the background component structure.
  */
 static void load_from_cache(component_background_t *c) {
-    if (!c->cache_location) {
+    if (!c->cache_location || c->decode_buffer.buffer == NULL) {
         return;
     }
 
@@ -57,36 +58,33 @@ static void load_from_cache(component_background_t *c) {
         return;
     }
 
-    if (cache_metadata.magic != CACHE_METADATA_MAGIC || cache_metadata.width > DISPLAY_WIDTH || cache_metadata.height > DISPLAY_HEIGHT) {
+    if (cache_metadata.magic != CACHE_METADATA_MAGIC
+            || cache_metadata.width == 0 || cache_metadata.height == 0
+            || cache_metadata.width > c->decode_buffer.width
+            || cache_metadata.height > c->decode_buffer.height) {
         fclose(f);
         return;
+    }
+
+    uint32_t expected_size = cache_metadata.width * cache_metadata.height * 2;
+    if (cache_metadata.size != expected_size) {
+        fclose(f);
+        return;
+    }
+
+    for (uint32_t y = 0; y < cache_metadata.height; y++) {
+        uint8_t *row = (uint8_t *) c->decode_buffer.buffer + y * c->decode_buffer.stride;
+        if (fread(row, cache_metadata.width * 2, 1, f) != 1) {
+            fclose(f);
+            return;
+        }
     }
 
     c->image = calloc(1, sizeof(surface_t));
-    if (c->image == NULL) {
-        fclose(f);
-        return;
-    }
-    *c->image = surface_alloc(FMT_RGBA16, cache_metadata.width, cache_metadata.height);
-    if (c->image->buffer == NULL) {
-        free(c->image);
-        c->image = NULL;
-        fclose(f);
-        return;
-    }
-
-    if (cache_metadata.size != (c->image->height * c->image->stride)) {
-        surface_free(c->image);
-        free(c->image);
-        c->image = NULL;
-        fclose(f);
-        return;
-    }
-
-    if (fread(c->image->buffer, cache_metadata.size, 1, f) != 1) {
-        surface_free(c->image);
-        free(c->image);
-        c->image = NULL;
+    if (c->image != NULL) {
+        *c->image = surface_make(c->decode_buffer.buffer, FMT_RGBA16,
+                                 cache_metadata.width, cache_metadata.height,
+                                 c->decode_buffer.stride);
     }
 
     fclose(f);
@@ -112,11 +110,15 @@ static void save_to_cache(component_background_t *c) {
         .magic = CACHE_METADATA_MAGIC,
         .width = c->image->width,
         .height = c->image->height,
-        .size = (c->image->height * c->image->stride),
+        .size = c->image->width * c->image->height * 2,
     };
 
-    fwrite(&cache_metadata, sizeof(cache_metadata), 1, f);
-    fwrite(c->image->buffer, cache_metadata.size, 1, f);
+    if (fwrite(&cache_metadata, sizeof(cache_metadata), 1, f) == 1) {
+        for (int y = 0; y < c->image->height; y++) {
+            uint8_t *row = (uint8_t *) c->image->buffer + y * c->image->stride;
+            if (fwrite(row, c->image->width * 2, 1, f) != 1) break;
+        }
+    }
 
     fclose(f);
 }
@@ -208,7 +210,15 @@ static void surface_image_free(void *arg) {
 void ui_components_background_init(char *cache_location) {
     if (!background) {
         background = calloc(1, sizeof(component_background_t));
+        if (!background) {
+            debugf("[Background] Unable to allocate component\n");
+            return;
+        }
         background->cache_location = strdup(cache_location);
+        background->decode_buffer = surface_alloc(FMT_RGBA16, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        if (background->decode_buffer.buffer == NULL) {
+            debugf("[Background] Unable to reserve decode buffer\n");
+        }
         load_from_cache(background);
         prepare_background(background);
     }
@@ -225,6 +235,7 @@ void ui_components_background_free(void) {
             free(background->image);
             background->image = NULL;
         }
+        surface_free(&background->decode_buffer);
         if (background->image_display_list) {
             rspq_block_free(background->image_display_list);
             background->image_display_list = NULL;
@@ -323,4 +334,11 @@ void ui_components_background_image_free_only(void) {
         rspq_block_free(background->image_display_list);
         background->image_display_list = NULL;
     }
+}
+
+surface_t *ui_components_background_get_decode_buffer(void) {
+    if (!background || background->decode_buffer.buffer == NULL) {
+        return NULL;
+    }
+    return &background->decode_buffer;
 }
