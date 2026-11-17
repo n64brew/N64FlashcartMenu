@@ -17,6 +17,7 @@ typedef enum { RTC_SOURCE_NONE, RTC_SOURCE_JOYBUS, RTC_SOURCE_DD, RTC_SOURCE_BB 
 #define RTC_EBADCLOCK -2
 #define RTC_EBADTIME -3
 uint64_t get_ticks (void);
+int get_memory_size (void);
 int hook_rtc_calls (rtc_hooks_t *hooks);
 int unhook_rtc_calls (rtc_hooks_t *hooks);
 bool rtc_init (void);

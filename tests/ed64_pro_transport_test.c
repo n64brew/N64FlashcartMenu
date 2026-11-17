@@ -10,6 +10,10 @@
 
 volatile uint32_t mock_pi_status;
 
+int get_memory_size (void) {
+    return 8 * 1024 * 1024;
+}
+
 typedef struct {
     uint32_t address;
     size_t length;

@@ -156,6 +156,7 @@ bool file_fill (char *path, uint8_t value) {
 
 static struct {
     uint32_t now;
+    int memory_size;
     FATFS fs;
     FSIZE_t file_size;
     unsigned opens, file_reads, closes, seeks;
@@ -207,6 +208,10 @@ static struct {
     char events[64];
     unsigned events_count;
 } mock;
+
+int get_memory_size (void) {
+    return mock.memory_size;
+}
 
 /**
  * @brief Return and advance the simulated clock.
@@ -597,6 +602,7 @@ static uint32_t fat_date (unsigned year, unsigned month, unsigned day) {
  */
 static void fixture (void) {
     memset(&mock, 0, sizeof(mock));
+    mock.memory_size = 8 * 1024 * 1024;
     memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
     pro_diagnostics.state = ED64_PRO_READY;
     mock.info[0] = 0x90555D4Eu;
@@ -748,6 +754,43 @@ static void test_sector_arguments (void) {
     TEST_CHECK(pro_disk.disk_write((void *)0x807FFF00u, 0, 1) == RES_PARERR);
     TEST_CHECK(mock.begin_calls == 0);
     TEST_CHECK(pro_disk.disk_read(data, UINT32_MAX, 1) == RES_OK);
+}
+
+/**
+ * @brief Reject buffers outside installed RDRAM before any transport access.
+ */
+static void test_sector_rdram_bounds (void) {
+    mounted_fixture();
+    static const uintptr_t aliases[] = {0x80000000u, 0xA0000000u};
+    for (unsigned expanded = 0; expanded < 2; expanded++) {
+        mock.memory_size = (expanded ? 8 : 4) * 1024 * 1024;
+        for (unsigned i = 0; i < sizeof(aliases) / sizeof(aliases[0]); i++) {
+            uintptr_t end = aliases[i] + (unsigned)mock.memory_size;
+            TEST_CHECK(pro_disk_arguments((void *)(end - 512), 0, 1, false));
+            TEST_CHECK(pro_disk_arguments((void *)(end - 512), 0, 1, true));
+            TEST_CHECK(!pro_disk_arguments((void *)(end - 511), 0, 1, false));
+            TEST_CHECK(!pro_disk_arguments((void *)(end - 511), 0, 1, true));
+            TEST_CHECK(!pro_disk_arguments((void *)end, 0, 1, false));
+            TEST_CHECK(!pro_disk_arguments((void *)end, 0, 1, true));
+        }
+        TEST_CHECK(pro_disk_arguments((void *)0x10000000u, 0, 1, false));
+        TEST_CHECK(!pro_disk_arguments((void *)0x10000000u, 0, 1, true));
+    }
+
+    mock.memory_size = 4 * 1024 * 1024;
+    /* Keep a defective guard from dereferencing synthetic host addresses. */
+    mock.begin_error = ED64_PRO_LL_CONTEXT;
+    mock.begin_calls = 0;
+    static const uintptr_t invalid[] = {
+        0x803FFF00u, 0x80400000u, 0x807FFE00u,
+        0xA03FFF00u, 0xA0400000u, 0xA07FFE00u,
+    };
+    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        TEST_CHECK(pro_disk.disk_read((void *)invalid[i], 0, 1) == RES_PARERR);
+        TEST_CHECK(pro_disk.disk_write((void *)invalid[i], 0, 1) == RES_PARERR);
+    }
+    TEST_CHECK(mock.begin_calls == 0 && mock.operations == 0);
+    TEST_CHECK(!pro_diagnostics.storage_failed);
 }
 
 /**
@@ -1271,6 +1314,7 @@ TEST_LIST = {
     {"mount retains sector I/O failure", test_mount_io_failure},
     {"sector chunking and sync", test_sector_chunks},
     {"sector bounds reject without I/O", test_sector_arguments},
+    {"sector buffers respect installed RDRAM", test_sector_rdram_bounds},
     {"storage failure invalidates subsequent I/O", test_storage_latch},
     {"unsupported context is nonfatal and performs no I/O", test_unsupported_context},
     {"release unmounts before MCU FS INIT", test_release},

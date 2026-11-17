@@ -444,8 +444,9 @@ static bool pro_disk_arguments (const void *buffer, int64_t sector, int count, b
     }
     uintptr_t physical = PhysicalAddr(buffer);
     uint64_t bytes = (uint64_t)(unsigned)count * 512;
-    if (physical < 0x00800000u) {
-        return bytes <= 0x00800000u - physical;
+    unsigned rdram_size = (unsigned)get_memory_size();
+    if (physical < rdram_size) {
+        return bytes <= rdram_size - physical;
     }
     return !write && physical >= 0x10000000u && (physical & 511u) == 0 &&
            physical - 0x10000000u <= pro_diagnostics.rom_capacity &&
