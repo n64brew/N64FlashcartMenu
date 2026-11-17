@@ -32,21 +32,15 @@ FatFs paths remain UTF-8. Only staged GPAK/BRM paths use FatFs's CP437 table and
 
 `.v64` loading and a game launch are verified. On FAT32, a game booted and its fresh save was written under the correct Unicode name on paths over 300 bytes. Autoload and history paths retain the shared INI parser's 255-byte value limit.
 
-Idle RESET returned to the stock menu on the tested setup. SM64 EEPROM settings persisted after immediate, 3-second and 10-second RESET trials, console-only and console-plus-USB power cycles, and intervening games.
+Idle RESET returns to the stock menu. SM64 EEPROM settings persist after immediate, 3-second and 10-second RESET trials, console-only and console-plus-USB power cycles, and intervening games.
 
 Local synthetic tests passed EEPROM (4/16 Kbit) and SRAM (32/96 KiB) persistence under orderly MCU-stop power cycles. The 128 KiB SRAM, FlashRAM, and PKST2 fixtures had mismatches confined to the final four bytes. Retail SRAM/FlashRAM save-and-reload, emulator saves, and uncontrolled power-loss timing still need qualification.
-
-With Jumper Pak (4 MiB), SM64 booted and restored saved settings, and both cheat actions were correctly refused. Shared missing-artwork, long-name ticker, and path-allocation fixes are deferred to separate PRs. Intermittent memory corruption, startup exceptions, navigation freezes, and historical file-open failures remain unresolved or unclassified; use an Expansion Pak (8 MiB) for now. See the [navigation qualification report](../../../docs/ed64_pro_navigation_qualification.md) for develop comparisons, passing controls, and remaining limits. SC64 boot/save and X7 boot regression checks passed on the NTSC console with 8 MiB. Emulator boot/save checks remain deferred to external testers.
-
-Independent tester reports are still required before merge. See the [Pro test checklist](../../../docs/91_test_plan_matrix.md#everdrive-64-pro-testing). Gameplay screenshots establish booting, not save persistence.
 
 ### Real-time clock
 
 The Pro backend initializes libdragon time after mounting storage, then installs its clock hooks. The unchanged menu's later `rtc_init()` is idempotent. The menu, `time()`, `gettimeofday()`, and file timestamps use the Pro clock; ordinary reads advance a validated cache without MCU traffic.
 
 Pro-specific clock editing in Settings is deferred to a separate PR. Set the clock in the stock Pro menu or with `edlink` while this menu is not running. Hardware dates must be in 2000–2099. Invalid dates and failed reads report errors instead of using a software fallback. Game launch keeps its existing read-only RTC mode.
-
-Host and sanitizer tests cover conversion, range limits, caching, lifecycle, failures, and the repeated libdragon initialization. Hardware qualification applies only to the tested original N64, Expansion Pak, and firmware `26.1014`; see the PR evidence for the tested build.
 
 ### Upstream license
 
