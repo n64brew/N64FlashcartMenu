@@ -451,7 +451,7 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
                 uint8_t *data = NULL;
                 size_t size = 0;
                 if (!is_memory_expanded()) {
-                    ui_components_background_image_free_only();
+                    ui_components_background_release_decode_buffer();
                 }
                 if (rom_info_extract_metadata_image(
                         &menu->load.rom_info,
@@ -504,7 +504,7 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
                 uint8_t *data = NULL;
                 size_t size = 0;
                 if (!is_memory_expanded()) {
-                    ui_components_background_image_free_only();
+                    ui_components_background_release_decode_buffer();
                 }
                 if (rom_info_extract_metadata_image(
                         &menu->load.rom_info,
@@ -1070,7 +1070,7 @@ void view_load_rom_init (menu_t *menu) {
             uint8_t *data = NULL;
             size_t size = 0;
             if (!is_memory_expanded()) {
-                ui_components_background_image_free_only();
+                ui_components_background_release_decode_buffer();
             }
             if (rom_info_extract_metadata_image(&menu->load.rom_info, metadata_image_names[0], &data, &size)) {
                 boxart = ui_components_boxart_init_mem(

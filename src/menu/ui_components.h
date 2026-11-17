@@ -235,6 +235,11 @@ void ui_components_background_image_free_only(void);
 surface_t *ui_components_background_get_decode_buffer(void);
 
 /**
+ * @brief Free the background image and its reserved decode buffer.
+ */
+void ui_components_background_release_decode_buffer(void);
+
+/**
  * @brief Draw the file list component.
  * 
  * @param list List of entries.

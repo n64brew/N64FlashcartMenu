@@ -313,6 +313,13 @@ void ui_components_background_reload(void) {
     if (!background || !background->cache_location) {
         return;
     }
+    if (background->decode_buffer.buffer == NULL) {
+        background->decode_buffer = surface_alloc(FMT_RGBA16, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        if (background->decode_buffer.buffer == NULL) {
+            debugf("[Background] Unable to reserve decode buffer\n");
+            return;
+        }
+    }
     if (!background->image) {
         load_from_cache(background);
         prepare_background(background);
@@ -341,4 +348,12 @@ surface_t *ui_components_background_get_decode_buffer(void) {
         return NULL;
     }
     return &background->decode_buffer;
+}
+
+void ui_components_background_release_decode_buffer(void) {
+    if (!background) {
+        return;
+    }
+    ui_components_background_image_free_only();
+    surface_free(&background->decode_buffer);
 }
