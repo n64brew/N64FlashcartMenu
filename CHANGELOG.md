@@ -13,6 +13,7 @@ Files are made available:
 
 - **Bug Fixes**
 	- Fix: Long nested folder names cause the menu path buffer to grow, pointing to freed memory.
+	- Fix: Memory allocation issues with background images on consoles using a Jumper Pak. 
 
 - **Documentation**
 	- None.
