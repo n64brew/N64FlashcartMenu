@@ -5,8 +5,8 @@
 
 /* Include the production unit to reset ROM-lifetime state between power-on fixtures.
  * No reset or alternate transport implementation is compiled into the ROM. */
-#include "../src/flashcart/ed64_pro/ed64_pro.c"
-#include "../src/flashcart/ed64_pro/ed64_pro_ll.c"
+#include "../../src/flashcart/ed64_pro/ed64_pro.c"
+#include "../../src/flashcart/ed64_pro/ed64_pro_ll.c"
 
 /** @brief Treat an unexpected production boot halt as a transport test failure. */
 void debug_assert_func_f (const char *file, int line, const char *func, const char *expression, const char *format, ...) {

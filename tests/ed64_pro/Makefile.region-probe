@@ -1,7 +1,7 @@
 # Standalone test ROM; no production menu or input wrapper is linked.
 .DEFAULT_GOAL := all
 
-PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 BUILD_DIR ?= $(PROJECT_ROOT)/build/ed64-pro-region-probe
 OUTPUT_DIR ?= $(PROJECT_ROOT)/output/ed64-pro-region/probe
 
@@ -10,7 +10,7 @@ ifneq ($(ED64_PRO_REGION_PROBE_INNER),1)
 .PHONY: all
 all:
 	@mkdir -p "$(OUTPUT_DIR)"
-	$(MAKE) --no-print-directory -C "$(OUTPUT_DIR)" -f "$(PROJECT_ROOT)/tests/Makefile.region-probe" \
+	$(MAKE) --no-print-directory -C "$(OUTPUT_DIR)" -f "$(PROJECT_ROOT)/tests/ed64_pro/Makefile.region-probe" \
 		ED64_PRO_REGION_PROBE_INNER=1 BUILD_DIR="$(abspath $(BUILD_DIR))"
 
 else
@@ -33,7 +33,7 @@ N64_CFLAGS += -Wall -Wextra -Werror -DED64_PRO_REGION_PROBE_TEST
 
 .PHONY: all
 all: $(ROMNAME).z64
-$(BUILD_DIR)/$(ROMNAME).elf: $(BUILD_DIR)/tests/ed64_pro_region_probe.o
--include $(BUILD_DIR)/tests/ed64_pro_region_probe.d
+$(BUILD_DIR)/$(ROMNAME).elf: $(BUILD_DIR)/tests/ed64_pro/ed64_pro_region_probe.o
+-include $(BUILD_DIR)/tests/ed64_pro/ed64_pro_region_probe.d
 
 endif

@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := all
 
-PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
+PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 BUILD_DIR ?= $(PROJECT_ROOT)/build/ed64-pro-test
 OUTPUT_DIR ?= $(PROJECT_ROOT)/output/ed64-pro-test
 # Modes: -DED64_PRO_TEST_INFO, -DED64_PRO_TEST_LOAD, or -DED64_PRO_TEST_STORAGE with the host fixture CRC.
@@ -14,7 +14,7 @@ ifneq ($(ED64_PRO_HARDWARE_INNER),1)
 .PHONY: all
 all:
 	@mkdir -p "$(OUTPUT_DIR)"
-	$(MAKE) --no-print-directory -C "$(OUTPUT_DIR)" -f "$(PROJECT_ROOT)/tests/Makefile.n64" \
+	$(MAKE) --no-print-directory -C "$(OUTPUT_DIR)" -f "$(PROJECT_ROOT)/tests/ed64_pro/Makefile.n64" \
 		ED64_PRO_HARDWARE_INNER=1 BUILD_DIR="$(abspath $(BUILD_DIR))"
 
 else
@@ -33,7 +33,7 @@ N64_ROM_REGIONFREE := 1
 N64_ROM_EXPANSIONPAK := unused
 N64_CFLAGS += -I$(PROJECT_ROOT)/src -Wall -Wextra -Werror $(TEST_FLAGS)
 
-SOURCES := tests/ed64_pro_hardware.c src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro_ll.c \
+SOURCES := tests/ed64_pro/ed64_pro_hardware.c src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro_ll.c \
 	src/flashcart/ed64_pro/ed64_pro_rtc.c src/utils/fs.c src/flashcart/flashcart_utils.c
 OBJS := $(addprefix $(BUILD_DIR)/,$(SOURCES:.c=.o))
 BUILD_ID := $(shell git -C "$(PROJECT_ROOT)" describe --always --dirty)
@@ -43,8 +43,8 @@ all: $(ROMNAME).z64
 
 $(BUILD_DIR)/$(ROMNAME).elf: $(OBJS)
 $(BUILD_DIR)/src/utils/fs.o: N64_CFLAGS+=-Wno-error=sign-compare
-$(BUILD_DIR)/tests/ed64_pro_hardware.o: FORCE
-$(BUILD_DIR)/tests/ed64_pro_hardware.o: N64_CFLAGS+=-DED64_PRO_TEST_BUILD_ID=\"$(BUILD_ID)\"
+$(BUILD_DIR)/tests/ed64_pro/ed64_pro_hardware.o: FORCE
+$(BUILD_DIR)/tests/ed64_pro/ed64_pro_hardware.o: N64_CFLAGS+=-DED64_PRO_TEST_BUILD_ID=\"$(BUILD_ID)\"
 
 -include $(OBJS:.o=.d)
 

@@ -3,7 +3,7 @@
 #include <setjmp.h>
 #include <stdarg.h>
 
-#include "../src/flashcart/ed64_pro/ed64_pro.c"
+#include "../../src/flashcart/ed64_pro/ed64_pro.c"
 
 /* Compare the adapter's mapping with the table used by actual shared save allocation. */
 #undef ALIGN
@@ -12,7 +12,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wsign-compare"
-#include "../src/flashcart/flashcart.c"
+#include "../../src/flashcart/flashcart.c"
 #pragma GCC diagnostic pop
 
 static jmp_buf handoff_halt;

@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #ifndef ED64_PRO_REGION_PROBE_TEST
-#error Build this ROM with tests/Makefile.region-probe
+#error Build this ROM with tests/ed64_pro/Makefile.region-probe
 #endif
 
 /** @brief Name the startup TV value without changing it. */

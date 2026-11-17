@@ -14,7 +14,7 @@
 #include "flashcart/ed64_pro/ed64_pro.h"
 
 #ifndef ED64_PRO_TEST_BUILD_ID
-#error Build this ROM with tests/Makefile.n64
+#error Build this ROM with tests/ed64_pro/Makefile.n64
 #endif
 
 #if (defined(ED64_PRO_TEST_INFO) + defined(ED64_PRO_TEST_STORAGE) + defined(ED64_PRO_TEST_LOAD)) > 1

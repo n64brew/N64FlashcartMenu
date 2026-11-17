@@ -10,7 +10,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #pragma GCC diagnostic ignored "-Wsign-compare"
-#include "../src/flashcart/flashcart.c"
+#include "../../src/flashcart/flashcart.c"
 #pragma GCC diagnostic pop
 
 int cart_type;

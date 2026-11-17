@@ -11,7 +11,7 @@ ifneq ($(ED64_PRO_REGION_INNER),1)
 
 .PHONY: all
 all:
-	$(MAKE) --no-print-directory -f tests/Makefile.region ED64_PRO_REGION_INNER=1 \
+	$(MAKE) --no-print-directory -f tests/ed64_pro/Makefile.region ED64_PRO_REGION_INNER=1 \
 		BUILD_DIR="$(BUILD_DIR)" OUTPUT_DIR="$(OUTPUT_DIR)" "$(OUTPUT_DIR)/N64FlashcartMenu.n64"
 
 else
@@ -29,7 +29,7 @@ $(BUILD_DIR)/ed64_pro_region_input.o: $(REGION_TEST_CONFIG)
 endif
 
 $(BUILD_DIR)/$(PROJECT_NAME).elf: $(BUILD_DIR)/ed64_pro_region_input.o
-$(BUILD_DIR)/ed64_pro_region_input.o: tests/ed64_pro_region_input.c tests/Makefile.region
+$(BUILD_DIR)/ed64_pro_region_input.o: tests/ed64_pro/ed64_pro_region_input.c tests/ed64_pro/Makefile.region
 	@mkdir -p $(dir $@)
 	@echo "    [CC] $<"
 	$(CC) -c $(CFLAGS) -o $@ $<

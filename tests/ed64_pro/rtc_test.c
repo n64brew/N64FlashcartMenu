@@ -2,7 +2,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "../src/flashcart/ed64_pro/ed64_pro_rtc.c"
+#include "../../src/flashcart/ed64_pro/ed64_pro_rtc.c"
 
 static struct {
     ed64_pro_diagnostics_t diagnostics;

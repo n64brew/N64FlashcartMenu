@@ -2,7 +2,7 @@
  * @file ed64_pro_region_input.c
  * @brief Test-only controller actions for capturing normal ROM detection and launch.
  *
- * Build only with tests/Makefile.region. Set the normal menu default_directory
+ * Build only with tests/ed64_pro/Makefile.region. Set the normal menu default_directory
  * to the fixture directory, disable autoload/Grid/first-run, and define
  * ED64_PRO_REGION_TEST_ROM as the fixture basename in REGION_TEST_CONFIG.
  * Any real menu action cancels automation until the next menu launch.
@@ -14,7 +14,7 @@
 #include "menu/menu_state.h"
 
 #ifndef ED64_PRO_REGION_INPUT_TEST
-#error Build this helper with tests/Makefile.region
+#error Build this helper with tests/ed64_pro/Makefile.region
 #endif
 
 #ifndef ED64_PRO_REGION_TEST_ROM
