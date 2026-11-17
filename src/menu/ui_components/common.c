@@ -348,19 +348,21 @@ void ui_components_tabs_draw(const char **text, int count, int selected, float w
     // first draw the tabs that are not selected
     for(int i=0;i< count;i++) {
         if(i != selected) {
+            float tab_y = y + BORDER_THICKNESS;
+            float tab_height = height - BORDER_THICKNESS;
             ui_components_box_draw(
                 x,
-                y,
+                tab_y,
                 x + width,
-                y + height,
+                tab_y + tab_height,
                 TAB_INACTIVE_BACKGROUND_COLOR
             );
 
             ui_components_border_draw_internal(
                 x,
-                y,
+                tab_y,
                 x + width,
-                y + height,
+                tab_y + tab_height,
                 TAB_INACTIVE_BORDER_COLOR
             );
         }
@@ -397,11 +399,12 @@ void ui_components_tabs_draw(const char **text, int count, int selected, float w
     };
     x = starting_x;
     for(int i=0;i< count;i++) {
+        float text_y = y + (i == selected ? 0 : BORDER_THICKNESS / 2.0f);
         rdpq_text_print(
             &tab_textparms,
             FNT_DEFAULT,
             x,
-            y,
+            text_y,
             text[i]
         );
         x += width;
