@@ -167,6 +167,10 @@ static jpeg_err_t jpeg_decoder_setup (int max_width, int max_height) {
         for (uint8_t scale = 3;; scale--) {
             int decoded_w = decoder->jd.width >> scale;
             int decoded_h = decoder->jd.height >> scale;
+            if (decoded_w == 0 || decoded_h == 0) {
+                if (scale == 0) break;
+                continue;
+            }
             if (decoded_w < 1) decoded_w = 1;
             if (decoded_h < 1) decoded_h = 1;
             if (decoded_w >= decoder->dst_w && decoded_h >= decoder->dst_h) {
