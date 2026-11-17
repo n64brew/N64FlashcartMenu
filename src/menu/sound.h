@@ -13,6 +13,7 @@
 #define SOUND_BGM_CHANNEL           (8) /**< First Channel for background music 8-9 (2 in total [stereo]) */
 #define SOUND_MP3_PLAYER_CHANNEL    (10) /**< First Channel for MP3 player sound 10-15 (6 in total [surround sound possible]) */
 
+#include "settings.h"
 
 /**
  * @brief Enumeration of available sound effects for menu interactions.
@@ -66,6 +67,13 @@ void sound_use_sfx(bool enable);
  * necessary resources and configurations for playing background music.
  */
 void sound_init_bgm(void);
+
+/**
+ * @brief Select the background music track.
+ *
+ * @param track The selected built-in background music track.
+ */
+void sound_set_bgm_track(bgm_track_t track);
 
 
 /**

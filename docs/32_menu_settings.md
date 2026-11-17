@@ -66,6 +66,10 @@ OFF: ROM saves are saved alongside the ROM file.
 
 The menu has default sound effects to improve the user experience. See the [sound documentation](./40_sound.md) for details. This setting is OFF by default.
 
+### Background Music
+
+Background Music turns menu music on or off and is OFF by default. Background Music Track selects between Flying Dreams, Warm Waves, Blue Horizon, and White Stones; Flying Dreams is selected by default.
+
 ### Fast ROM reboots
 
 Certain flashcarts support the ability to use the N64 `RESET` button for re-loading the last game, rather than returning to the menu. When enabled (and if supported by your flashcart), the power switch must be toggled to return to the menu.

@@ -22,6 +22,7 @@ static settings_t init = {
     .show_rom_configuration_files = false,
     .soundfx_enabled = false,
     .bgm_enabled = false,
+    .bgm_track = BGM_TRACK_FLYING_DREAMS,
 #ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     .rom_autoload_enabled = false,
     .rom_autoload_path = "",
@@ -66,6 +67,12 @@ void settings_load (settings_t *settings) {
     settings->show_rom_configuration_files = ini_get_bool(ini, "menu", "show_rom_configuration_files", init.show_rom_configuration_files);
     settings->soundfx_enabled = ini_get_bool(ini, "menu", "soundfx_enabled", init.soundfx_enabled);
     settings->bgm_enabled = ini_get_bool(ini, "menu", "bgm_enabled", init.bgm_enabled);
+    int bgm_track = ini_get_int(ini, "menu", "bgm_track",
+        ini_get_bool(ini, "menu", "bgm_alternative", false) ? BGM_TRACK_WARM_WAVES : BGM_TRACK_FLYING_DREAMS);
+    if (bgm_track < BGM_TRACK_FLYING_DREAMS || bgm_track >= BGM_TRACK_AVAILABLE_COUNT) {
+        bgm_track = BGM_TRACK_FLYING_DREAMS;
+    }
+    settings->bgm_track = (bgm_track_t)bgm_track;
 
 #ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     settings->rom_autoload_enabled = ini_get_bool(ini, "menu", "autoload_rom_enabled", init.rom_autoload_enabled);
@@ -102,6 +109,7 @@ void settings_save (settings_t *settings) {
     ini_set_bool(ini, "menu", "show_rom_configuration_files", settings->show_rom_configuration_files);
     ini_set_bool(ini, "menu", "soundfx_enabled", settings->soundfx_enabled);
     ini_set_bool(ini, "menu", "bgm_enabled", settings->bgm_enabled);
+    ini_set_int(ini, "menu", "bgm_track", settings->bgm_track);
 #ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     ini_set_bool(ini, "menu", "autoload_rom_enabled", settings->rom_autoload_enabled);
     ini_set_string(ini, "autoload", "rom_path", settings->rom_autoload_path);

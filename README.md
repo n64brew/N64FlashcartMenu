@@ -102,7 +102,10 @@ See [License](https://pixabay.com/en/service/license-summary/) for the following
 * [Error sound](https://pixabay.com/en/sound-effects/error-call-to-attention-129258/) by Universfield (Free to use)
 
 See [License](https://creativecommons.org/licenses/by/4.0/) for the following sounds:
-* [Background Music](https://www.playonloop.com/2017-music-loops/flying-dreams/) POL-flying-dreams-short
+* [Flying Dreams](https://www.playonloop.com/2017-music-loops/flying-dreams/) POL-flying-dreams-short
+* [Warm Waves](https://www.playonloop.com/2011-music-loops/warm-waves/) POL-warm-waves-short
+* [Blue Horizon](https://www.playonloop.com/2010-music-loops/blue-horizon/) by PlayOnLoop.com - POL-blue-horizon-short
+* [White Stones](https://www.playonloop.com/2010-music-loops/white-stones/) by PlayOnLoop.com - POL-white-stones-short
 
 ## Emulators
 * [neon64v2](https://github.com/hcs64/neon64v2) by *hcs64* - [ISC License](https://github.com/hcs64/neon64v2/blob/master/LICENSE.txt)
