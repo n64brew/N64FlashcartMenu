@@ -157,7 +157,7 @@ static void test_supported_years (void) {
     for (int year = 2096; year <= 2099; year++) {
         mock.now = date(year, 12, 31, 23, 59, 59);
         settings_pane_time.enter(&menu);
-        char expected[8];
+        char expected[12];
         snprintf(expected, sizeof(expected), "%d", year);
         draw(&menu, true);
         TEST_CHECK(strcmp(mock.text[1], expected) == 0);
