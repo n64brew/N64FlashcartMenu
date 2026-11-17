@@ -1035,10 +1035,21 @@ static char *pro_get_error_message (flashcart_err_t error) {
     return ed64_pro_get_error_message();
 }
 
+/** @brief Stop a failed game handoff before the menu returns to the boot code. */
+static flashcart_err_t pro_deinit_or_halt (void) {
+    flashcart_err_t error = pro_deinit();
+#if !defined(ED64_PRO_TEST_HALT_AFTER_RELEASE) && !defined(ED64_PRO_TEST_STORAGE)
+    if (error != FLASHCART_OK) {
+        debug_assert_func_f(__FILE__, __LINE__, __func__, "error == FLASHCART_OK", "%s", ed64_pro_get_error_message());
+    }
+#endif
+    return error;
+}
+
 /** @brief Supply the Pro backend through the shared flashcart interface. */
 static flashcart_t flashcart_ed64_pro = {
     .init = pro_init,
-    .deinit = pro_deinit,
+    .deinit = pro_deinit_or_halt,
     .has_feature = pro_has_feature,
     .get_firmware_version = pro_get_firmware_version,
     .get_name = pro_get_name,

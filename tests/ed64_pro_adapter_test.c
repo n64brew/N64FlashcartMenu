@@ -1,5 +1,7 @@
 #include <acutest.h>
 #include <string.h>
+#include <setjmp.h>
+#include <stdarg.h>
 
 #include "../src/flashcart/ed64_pro/ed64_pro.c"
 
@@ -12,6 +14,24 @@
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #include "../src/flashcart/flashcart.c"
 #pragma GCC diagnostic pop
+
+static jmp_buf handoff_halt;
+static bool handoff_halt_expected;
+static unsigned handoff_halt_calls;
+static char handoff_halt_message[256];
+
+/** @brief Capture the production fatal handoff path in debug and NDEBUG host builds. */
+void debug_assert_func_f (const char *file, int line, const char *func, const char *expression, const char *format, ...) {
+    (void)file; (void)line; (void)func;
+    TEST_ASSERT(handoff_halt_expected);
+    TEST_CHECK(strcmp(expression, "error == FLASHCART_OK") == 0);
+    va_list args;
+    va_start(args, format);
+    vsnprintf(handoff_halt_message, sizeof(handoff_halt_message), format, args);
+    va_end(args);
+    handoff_halt_calls++;
+    longjmp(handoff_halt, 1);
+}
 
 int cart_type;
 
@@ -1048,6 +1068,32 @@ static void test_game_handoff (void) {
     }
 }
 
+/** @brief Exercise the actual backend callback: success returns, failed handoff cannot boot. */
+static void test_game_handoff_callback (void) {
+    staged_game_fixture(false);
+    handoff_halt_calls = 0;
+    TEST_CHECK(ed64_pro_get_flashcart()->deinit() == FLASHCART_OK);
+    TEST_CHECK(handoff_halt_calls == 0 && strcmp(mock.events, "UFPGS") == 0);
+
+    for (unsigned failure = 0; failure < 2; failure++) {
+        staged_game_fixture(true);
+        if (failure == 0) {
+            pro_diagnostics.unsynced = true;
+        } else {
+            mock.fail_command = 2;
+        }
+        handoff_halt_expected = true;
+        if (setjmp(handoff_halt) == 0) {
+            ed64_pro_get_flashcart()->deinit();
+            TEST_CHECK(false);
+        }
+        handoff_halt_expected = false;
+        TEST_CHECK(handoff_halt_calls == failure + 1);
+        TEST_CHECK(strstr(handoff_halt_message, failure == 0 ? "unclosed write" : "Save path") != NULL);
+        TEST_CHECK(strchr(mock.events, 'S') == NULL);
+    }
+}
+
 /**
  * @brief Verify each launch command failure blocks retries and retains diagnostics.
  */
@@ -1298,6 +1344,7 @@ TEST_LIST = {
     {"path metadata requires mounted FatFs ownership", test_path_metadata_requires_ownership},
     {"Unicode auxiliary reads stay entirely in FatFs", test_unicode_auxiliary_uses_fatfs_only},
     {"game handoff command order and exact configuration", test_game_handoff},
+    {"game handoff callback halts failures and returns only on success", test_game_handoff_callback},
     {"each game handoff fault is terminal", test_game_handoff_failures},
     {"incomplete launch and unsynced writes block handoff", test_launch_preflight},
     {"save mappings stage without MCU traffic", test_save_mapping},

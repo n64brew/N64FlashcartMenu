@@ -12,9 +12,6 @@
 #endif
 
 #include "flashcart/ed64_pro/ed64_pro.h"
-#ifdef ED64_PRO_TEST_STORAGE_FAIL_WRITE
-#include "menu/views/views.h"
-#endif
 
 #ifndef ED64_PRO_TEST_BUILD_ID
 #error Build this ROM with tests/Makefile.n64
@@ -502,13 +499,6 @@ static bool write_scratch (void) {
 #endif
 
 #ifdef ED64_PRO_TEST_STORAGE_FAIL_WRITE
-/**
- * @brief Resolve fault-view error text through the real Pro adapter callback.
- */
-char *flashcart_convert_error_message (flashcart_err_t error) {
-    return ed64_pro_get_flashcart()->get_error_message(error);
-}
-
 static void run_storage_fail_write (void) __attribute__((noreturn));
 /**
  * @brief Verify an injected write fault invalidates handles and refuses handoff without I/O.
@@ -567,22 +557,11 @@ static void run_storage_fail_write (void) {
         printf("H5.7 FAILED: latched write did not refuse handoff without I/O.\n");
         terminal();
     }
-    static menu_t fault_menu;
-    fault_menu.mode = fault_menu.next_mode = MENU_MODE_FAULT;
-    fault_menu.flashcart_err = handoff_error;
-    console_clear();
-    view_fault_init(&fault_menu);
-    if (ed64_pro_ll_get_metrics()->submissions != submissions) {
-        printf("H5.7 FAILED: fault initialization submitted PI I/O.\n");
-        terminal();
-    }
     printf("\nH5.7 hardware refusal PASS\n");
     printf("Old handles invalid; deinit refused; PI count unchanged.\n");
     printf("No START or game boot attempted.\n");
     printf("Power-cycle console and USB before host verification.\n");
-    for (;;) {
-        view_fault_display(&fault_menu, NULL);
-    }
+    terminal();
 }
 #endif
 

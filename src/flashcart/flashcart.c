@@ -172,7 +172,7 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
          * registers and save memory. Never pass this sentinel to cart_exit or
          * cart_card_*; only the non-Pro debug_init_sdfs path uses those APIs. */
         cart_type = CART_MAX;
-        *storage_prefix = NULL;
+        *storage_prefix = "sd:/";
         /* The Pro handler also quarantines an indeterminate probe: no other
          * cartridge is safe to try, and retained diagnostics explain the failure. */
         flashcart = ed64_pro_get_flashcart();
@@ -182,9 +182,7 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         if ((err = flashcart->init()) != FLASHCART_OK) {
             return err;
         }
-        *storage_prefix = "sd:/";
         if (!ed64_pro_init_sdfs(*storage_prefix, -1)) {
-            *storage_prefix = NULL;
             return FLASHCART_ERR_SD_CARD;
         }
         return FLASHCART_OK;

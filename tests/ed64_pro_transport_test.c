@@ -2255,7 +2255,7 @@ static void test_rtc_adapter_cache (void) {
     TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(1794832499));
     int (*saved_gettime)(time_t *) = test_rtc_hooks.gettime;
     enqueues = mock.enqueues;
-    TEST_CHECK(adapter->deinit() == FLASHCART_ERR_LOAD);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD);
     TEST_CHECK(test_rtc_hooks.gettime == NULL && test_rtc_hooks.settime == NULL);
     TEST_CHECK(saved_gettime(&timestamp) == RTC_ENOCLOCK && mock.enqueues == enqueues);
 }

@@ -346,7 +346,7 @@ static void require_terminal_result (bool identified) {
     const char *prefix = "sd:/";
     flashcart_err_t expected = FLASHCART_ERR_INT;
     TEST_CHECK(flashcart_init(&prefix) == expected);
-    TEST_CHECK(prefix == NULL && flashcart == &pro_backend);
+    TEST_CHECK(prefix && strcmp(prefix, "sd:/") == 0 && flashcart == &pro_backend);
     TEST_CHECK(cart_type == CART_MAX);
     TEST_CHECK(strcmp(flashcart_get_name(), "EverDrive-64 Pro") == 0);
     TEST_CHECK(spy.probes == 1 && spy.pro_inits == (unsigned)identified && spy.pro_getters == 1);
@@ -372,7 +372,7 @@ static void test_pro_storage_mount (void) {
         spy.daisy = true;
         const char *prefix = "previous:/";
         TEST_CHECK(flashcart_init(&prefix) == (fail ? FLASHCART_ERR_SD_CARD : FLASHCART_OK));
-        TEST_CHECK(fail ? prefix == NULL : prefix && strcmp(prefix, "sd:/") == 0);
+        TEST_CHECK(prefix && strcmp(prefix, "sd:/") == 0);
         TEST_CHECK(flashcart == &pro_backend && cart_type == CART_MAX);
         TEST_CHECK(spy.probes == 1 && spy.pro_inits == 1 && spy.pro_mounts == 1);
         TEST_CHECK(spy.daisy_detects == 0 && spy.sdfs == 0 && spy.usb == 0 && spy.isviewer == 0);
@@ -384,7 +384,7 @@ static void test_pro_storage_mount (void) {
     spy.backend_result = FLASHCART_ERR_OUTDATED;
     const char *prefix = NULL;
     TEST_CHECK(flashcart_init(&prefix) == FLASHCART_ERR_OUTDATED);
-    TEST_CHECK(prefix == NULL && spy.pro_mounts == 0);
+    TEST_CHECK(prefix && strcmp(prefix, "sd:/") == 0 && spy.pro_mounts == 0);
 }
 
 /**
