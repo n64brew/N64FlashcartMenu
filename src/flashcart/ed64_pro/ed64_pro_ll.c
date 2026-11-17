@@ -189,7 +189,7 @@ ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, u
 }
 
 /**
- * @brief Release the owner token without clearing faults or cancelling an outstanding DMA.
+ * @brief Finish queued PI work, then release ownership without clearing transport faults.
  */
 ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
     if (!transaction) {
@@ -201,6 +201,7 @@ ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
     if (pro_ll.owner != transaction) {
         return ED64_PRO_LL_BUSY;
     }
+    dma_wait();
     pro_ll.owner = NULL;
     return ED64_PRO_LL_OK;
 }

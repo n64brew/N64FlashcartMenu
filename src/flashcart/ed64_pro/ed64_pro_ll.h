@@ -162,7 +162,7 @@ uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t timeout_ms);
  */
 ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, uint32_t deadline);
 /**
- * @brief Release transport ownership without clearing faults or cancelling DMA.
+ * @brief Wait for queued PI work, then release ownership without clearing faults.
  */
 ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction);
 /**

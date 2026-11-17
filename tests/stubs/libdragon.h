@@ -78,9 +78,13 @@ int dma_busy (void);
 uint64_t dma_read_raw_async (void *ram, pi_addr_t pi, unsigned long length);
 uint64_t dma_write_raw_async (const void *ram, pi_addr_t pi, unsigned long length);
 bool dma_finished (uint64_t ticket);
+void dma_wait (void);
 void data_cache_hit_writeback_invalidate (volatile void *ram, unsigned long length);
 void data_cache_hit_writeback (const volatile void *ram, unsigned long length);
 void data_cache_hit_invalidate (volatile void *ram, unsigned long length);
+
+void debug_assert_func_f (const char *file, int line, const char *func, const char *expression, const char *format, ...)
+    __attribute__((noreturn, format(printf, 5, 6)));
 
 bool sys_bbplayer (void);
 int bbfs_init (void);

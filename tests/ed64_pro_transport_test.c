@@ -8,6 +8,13 @@
 #include "../src/flashcart/ed64_pro/ed64_pro.c"
 #include "../src/flashcart/ed64_pro/ed64_pro_ll.c"
 
+/** @brief Treat an unexpected production boot halt as a transport test failure. */
+void debug_assert_func_f (const char *file, int line, const char *func, const char *expression, const char *format, ...) {
+    (void)file; (void)line; (void)func; (void)expression; (void)format;
+    TEST_ASSERT(false);
+    abort();
+}
+
 volatile uint32_t mock_pi_status;
 
 int get_memory_size (void) {
@@ -34,6 +41,7 @@ static struct {
     bool race_armed;
     unsigned busy_rechecks;
     unsigned enqueues;
+    unsigned waits;
     unsigned polls;
     unsigned finish_after;
     bool never_finish;
@@ -627,6 +635,20 @@ bool dma_finished (uint64_t ticket) {
 }
 
 /**
+ * @brief Model the SDK wait completing pending PI work, independent of timeout injection.
+ */
+void dma_wait (void) {
+    TEST_ASSERT(mock.irq_depth == 0 && pro_ll.owner != NULL);
+    mock.waits++;
+    if (mock.active) {
+        finish_pending();
+    }
+    mock.force_busy = false;
+    mock.busy_checks = 0;
+    mock_pi_status &= ~(PI_STATUS_DMA_BUSY | PI_STATUS_IO_BUSY);
+}
+
+/**
  * @brief Enforce staging alignment, exclusive cache-line ownership, and no active DMA during cache work.
  */
 static void check_cache (const volatile void *ram, unsigned long length) {
@@ -844,11 +866,13 @@ static void test_queue_timeouts (void) {
         TEST_CHECK(mock.enqueues == 0 && output == 42);
         TEST_CHECK(!ed64_pro_ll_get_failure()->poisoned);
         end(&transaction);
+        TEST_CHECK(mock.waits == 1 && dma_busy() == 0);
+        TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_PI_ACQUIRE_TIMEOUT);
     }
 }
 
 /**
- * @brief Preserve caller output and staging quarantine after timeout and late DMA completion.
+ * @brief Preserve caller output and staging quarantine while end waits for late DMA completion.
  */
 static void test_completion_timeout (void) {
     power_on();
@@ -866,12 +890,14 @@ static void test_completion_timeout (void) {
     TEST_CHECK(mock.enqueues == 1 && output == 42);
     TEST_CHECK(strcmp(mock.events, "BR") == 0);
     TEST_CHECK(ed64_pro_ll_get_failure()->poisoned && ed64_pro_ll_get_failure()->ticket == mock.ticket);
-    end(&transaction);
-
+    ed64_pro_ll_failure_t failure = *ed64_pro_ll_get_failure();
     uint32_t staging_snapshot[ED64_PRO_FIFO_CHUNK];
     memcpy(staging_snapshot, pro_staging, sizeof(staging_snapshot));
-    finish_pending();
+    end(&transaction);
+    TEST_CHECK(mock.waits == 1 && !mock.active && dma_busy() == 0);
+    TEST_CHECK(pro_ll.owner == NULL && strcmp(mock.events, "BRF") == 0);
     TEST_CHECK(output == 42 && memcmp(staging_snapshot, pro_staging, sizeof(staging_snapshot)) == 0);
+    TEST_CHECK(memcmp(&failure, ed64_pro_ll_get_failure(), sizeof(failure)) == 0);
     size_t events = mock.event_count;
     TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == ED64_PRO_LL_PI_TIMEOUT);
     TEST_CHECK(mock.event_count == events && mock.enqueues == 1);
@@ -975,7 +1001,8 @@ static void test_write_quarantine (void) {
     TEST_CHECK(ed64_pro_ll_write_reg(&transaction, ED64_PRO_REG_MBX, 0, deadline_ms(1000)) == ED64_PRO_LL_PI_ERROR);
     TEST_CHECK(memcmp(snapshot, pro_staging, sizeof(snapshot)) == 0 && mock.enqueues == 1);
     end(&transaction);
-    finish_pending();
+    TEST_CHECK(!mock.active && dma_busy() == 0);
+    TEST_CHECK(ed64_pro_ll_get_failure()->poisoned && ed64_pro_ll_get_failure()->code == ED64_PRO_LL_PI_ERROR);
     TEST_CHECK(memcmp(snapshot, pro_staging, sizeof(snapshot)) == 0);
     TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == ED64_PRO_LL_PI_ERROR);
 }
@@ -1457,7 +1484,8 @@ static void test_partial_dma_failure (void) {
     TEST_CHECK(ed64_pro_ll_get_failure()->transferred == 128 && ed64_pro_ll_get_failure()->poisoned);
     TEST_CHECK(mock.active && mock.rx_consumed == 128 && output[128] == 0xCD);
     end(&transaction);
-    finish_pending();
+    TEST_CHECK(!mock.active && dma_busy() == 0);
+    TEST_CHECK(ed64_pro_ll_get_failure()->transferred == 128 && ed64_pro_ll_get_failure()->poisoned);
     TEST_CHECK(output[128] == 0xCD && mock.rx_consumed == 129);
     unsigned enqueues = mock.enqueues;
     TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == ED64_PRO_LL_PI_ERROR);
@@ -1578,7 +1606,7 @@ static void test_init_transcript (void) {
 /**
  * @brief Inject timeout at every startup DMA and verify sticky phase, evidence, and quarantine.
  *
- * Late completion must not alter staging, retained diagnostics, or retry behavior.
+ * End waits for completion without publishing data or changing retained diagnostics or retry behavior.
  */
 static void test_init_failure_boundaries (void) {
     for (size_t i = 0; i < sizeof(init_trace) / sizeof(init_trace[0]); i++) {
@@ -1589,7 +1617,7 @@ static void test_init_failure_boundaries (void) {
         const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
         TEST_CHECK(diagnostics->state == ED64_PRO_POISONED && diagnostics->phase == init_trace[i].phase);
         TEST_CHECK(diagnostics->failure.code == ED64_PRO_LL_PI_TIMEOUT && diagnostics->failure.poisoned);
-        TEST_CHECK(diagnostics->failure.ticket == mock.ticket && mock.active);
+        TEST_CHECK(diagnostics->failure.ticket == mock.ticket && !mock.active && dma_busy() == 0);
         TEST_CHECK(diagnostics->probe.id_valid == (i != 0));
         TEST_CHECK(diagnostics->inherited_status_valid == (i >= 9));
         TEST_CHECK(mock.bus_count == i + 1 && mock.irq_depth == 0 && pro_ll.owner == NULL);
@@ -1608,7 +1636,6 @@ static void test_init_failure_boundaries (void) {
         memcpy(staging, pro_staging, sizeof(staging));
         TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_PI_TIMEOUT);
         TEST_CHECK(mock.bus_count == i + 1 && memcmp(staging, pro_staging, sizeof(staging)) == 0);
-        finish_pending();
         TEST_CHECK(memcmp(staging, pro_staging, sizeof(staging)) == 0);
         TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_PI_TIMEOUT && mock.bus_count == i + 1);
         TEST_CHECK(memcmp(&before, diagnostics, sizeof(before)) == 0);
@@ -3055,7 +3082,7 @@ TEST_LIST = {
     {"invalid input never submits DMA", test_invalid_input},
     {"queue acquisition and interrupt race", test_queue_race},
     {"queue and hardware busy deadlines wrap", test_queue_timeouts},
-    {"DMA timeout quarantines late completion", test_completion_timeout},
+    {"DMA timeout drains PI without publishing late completion", test_completion_timeout},
     {"exact deadline is expired", test_exact_deadline},
     {"PI errors before and after submission", test_pi_errors},
     {"completion at exact deadline is not published", test_completion_at_deadline},
