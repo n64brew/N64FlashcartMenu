@@ -17,7 +17,6 @@ typedef enum {
     ED64_PRO_INITIALIZING,
     ED64_PRO_READY,
     ED64_PRO_FAILED,
-    ED64_PRO_POISONED,
 } ed64_pro_state_t;
 
 typedef enum {

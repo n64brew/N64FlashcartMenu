@@ -53,12 +53,6 @@ typedef struct {
 int fat_mount (const char *prefix, const fat_disk_t *disk, int flags);
 int fat_unmount (int volume_id);
 
-#define PI_STATUS_DMA_BUSY 1u
-#define PI_STATUS_IO_BUSY 2u
-#define PI_STATUS_ERROR 4u
-#define PI_STATUS (&mock_pi_status)
-
-extern volatile uint32_t mock_pi_status;
 uint32_t mock_cp0_status (void);
 uint32_t mock_ticks_read (void);
 void mock_memory_barrier (void);
@@ -66,10 +60,10 @@ void disable_interrupts (void);
 void enable_interrupts (void);
 interrupt_state_t get_interrupts_state (void);
 kthread_t *kthread_current (void);
-int dma_busy (void);
-uint64_t dma_read_raw_async (void *ram, pi_addr_t pi, unsigned long length);
-uint64_t dma_write_raw_async (const void *ram, pi_addr_t pi, unsigned long length);
-bool dma_finished (uint64_t ticket);
+void dma_read (void *ram, pi_addr_t pi, unsigned long length);
+void dma_write (const void *ram, pi_addr_t pi, unsigned long length);
+uint32_t io_read (pi_addr_t pi);
+void io_write (pi_addr_t pi, uint32_t value);
 void dma_wait (void);
 void data_cache_hit_writeback_invalidate (volatile void *ram, unsigned long length);
 void data_cache_hit_writeback (const volatile void *ram, unsigned long length);

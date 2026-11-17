@@ -391,9 +391,6 @@ static void test_pro_storage_mount (void) {
  */
 static void test_identified_failures (void) {
     const ed64_pro_ll_error_t failures[] = {
-        ED64_PRO_LL_PI_ACQUIRE_TIMEOUT,
-        ED64_PRO_LL_PI_TIMEOUT,
-        ED64_PRO_LL_PI_ERROR,
         ED64_PRO_LL_TIMEOUT,
         ED64_PRO_LL_FIFO_COUNT,
         ED64_PRO_LL_DRAIN_LIMIT,
@@ -420,16 +417,14 @@ static void test_identified_failures (void) {
  */
 static void test_failed_probe_never_falls_back (void) {
     const ed64_pro_ll_error_t failures[] = {
-        ED64_PRO_LL_PI_ACQUIRE_TIMEOUT,
-        ED64_PRO_LL_PI_TIMEOUT,
-        ED64_PRO_LL_PI_ERROR,
         ED64_PRO_LL_BUSY,
         ED64_PRO_LL_CONTEXT,
+        ED64_PRO_LL_TIMEOUT,
     };
     for (size_t i = 0; i < sizeof(failures) / sizeof(failures[0]); i++) {
         power_on();
         spy.probe = (ed64_pro_probe_t){.outcome = ED64_PRO_PROBE_IO_ERROR, .error = failures[i]};
-        spy.message = "Cartridge identity unknown: retained PI probe failure.";
+        spy.message = "Cartridge identity unknown: retained transport probe failure.";
         require_terminal_result(false);
     }
 }

@@ -1,6 +1,6 @@
 /**
  * @file ed64_pro_ll.h
- * @brief Bounded, foreground-only EverDrive-64 Pro transport.
+ * @brief Foreground-only EverDrive-64 Pro transport with protocol deadlines.
  */
 
 #ifndef FLASHCART_ED64_PRO_LL_H__
@@ -26,9 +26,6 @@ typedef enum {
     ED64_PRO_LL_CONTEXT,
     ED64_PRO_LL_BUSY,
     ED64_PRO_LL_TIMEOUT,
-    ED64_PRO_LL_PI_ACQUIRE_TIMEOUT,
-    ED64_PRO_LL_PI_TIMEOUT,
-    ED64_PRO_LL_PI_ERROR,
     ED64_PRO_LL_NOT_IDENTIFIED,
     ED64_PRO_LL_FIFO_COUNT,
     ED64_PRO_LL_DRAIN_LIMIT,
@@ -39,7 +36,6 @@ typedef enum {
 } ed64_pro_ll_error_t;
 
 enum {
-    ED64_PRO_PI_TIMEOUT_MS = 10,
     ED64_PRO_DRAIN_TIMEOUT_MS = 100,
     ED64_PRO_STATUS_TIMEOUT_MS = 1000,
     ED64_PRO_STOP_TIMEOUT_MS = 5000,
@@ -117,33 +113,14 @@ typedef struct {
 typedef struct {
     ed64_pro_ll_error_t code;
     size_t transferred;
-    uint64_t ticket;
-    bool poisoned;
     bool status_valid;
     uint8_t status;
     bool nresp_valid;
     uint8_t nresp;
-    /* Valid only for an attempted PI operation active when this fault latched.
-     * Protocol-only faults do not identify the last completed PI access as failed.
-     * Length is bus bytes (FIFO payload bytes use one 32-bit word each).
-     */
-    bool pi_context_valid;
-    uint32_t pi_address;
-    size_t pi_length;
-    bool pi_write;
-    bool pi_submitted;
-    /* Effective budget and existing PI timer measurement, in CP0 ticks.
-     * phase_limited means the phase/transaction deadline shortened the PI cap.
-     */
-    uint32_t pi_budget_ticks;
-    uint32_t pi_elapsed_ticks;
-    bool pi_phase_limited;
 } ed64_pro_ll_failure_t;
 
 typedef struct {
-    uint32_t max_pi_ticks;
     uint32_t rx_peak;
-    uint32_t submissions;
 } ed64_pro_ll_metrics_t;
 
 /**
@@ -158,11 +135,11 @@ uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t timeout_ms);
  *
  * The transaction's address is its ownership token. Keep it alive and unchanged
  * until end; never pass it to another caller. Interrupts must be enabled and the
- * libdragon kernel must not be running. No ISR may produce competing PI work.
+ * libdragon kernel must not be running. No ISR may call the Pro transport.
  */
 ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, uint32_t deadline);
 /**
- * @brief Wait for queued PI work, then release ownership without clearing faults.
+ * @brief Release ownership after completed SDK accesses without clearing faults.
  */
 ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction);
 /**
@@ -170,7 +147,7 @@ ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction);
  */
 const ed64_pro_ll_failure_t *ed64_pro_ll_get_failure (void);
 /**
- * @brief Return cumulative PI timing, submission, and FIFO usage metrics.
+ * @brief Return the peak observed FIFO receive count.
  */
 const ed64_pro_ll_metrics_t *ed64_pro_ll_get_metrics (void);
 

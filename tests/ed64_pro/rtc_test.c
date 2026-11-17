@@ -235,7 +235,7 @@ static void test_resync_failures (void) {
         fixture();
         sync_clock();
         switch (failure) {
-            case 0: mock.begin_error = ED64_PRO_LL_PI_TIMEOUT; break;
+            case 0: mock.begin_error = ED64_PRO_LL_TIMEOUT; break;
             case 1: mock.get_error = ED64_PRO_LL_TIMEOUT; break;
             case 2: mock.end_error = ED64_PRO_LL_FRAME; break;
             case 3: mock.raw[1] = 0x13; break;
@@ -255,8 +255,8 @@ static void test_write_failures (void) {
         fixture();
         sync_clock();
         switch (failure) {
-            case 0: mock.begin_error = ED64_PRO_LL_PI_TIMEOUT; break;
-            case 1: mock.set_error = ED64_PRO_LL_PI_TIMEOUT; break;
+            case 0: mock.begin_error = ED64_PRO_LL_TIMEOUT; break;
+            case 1: mock.set_error = ED64_PRO_LL_TIMEOUT; break;
             case 2: mock.get_error = ED64_PRO_LL_TIMEOUT; break;
             case 3: mock.end_error = ED64_PRO_LL_FRAME; break;
             case 4: mock.raw[2] = 0x32; break;
@@ -291,7 +291,7 @@ static void test_ownership (void) {
         fixture();
         switch (failure) {
             case 0: mock.diagnostics.state = ED64_PRO_COLD; break;
-            case 1: mock.diagnostics.state = ED64_PRO_POISONED; break;
+            case 1: mock.diagnostics.state = ED64_PRO_FAILED; break;
             case 2: mock.diagnostics.storage_failed = true; break;
             case 3: mock.diagnostics.storage_state = ED64_PRO_STORAGE_MCU_OWNED; break;
         }

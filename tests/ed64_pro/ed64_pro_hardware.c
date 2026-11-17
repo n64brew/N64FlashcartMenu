@@ -137,7 +137,7 @@ static void print_identity (void) {
 }
 
 /**
- * @brief Report valid inherited status, cleanup counts, and measured phase/PI timing.
+ * @brief Report valid inherited status, cleanup counts, and measured protocol phase timing.
  */
 static void print_init_metrics (void) {
     const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
@@ -161,11 +161,7 @@ static void print_init_metrics (void) {
     for (ed64_pro_phase_t phase = ED64_PRO_PHASE_PROBE; phase < ED64_PRO_PHASE_READY; phase++) {
         printf("%s: %" PRIu32 " ms\n", ed64_pro_phase_name(phase), TICKS_TO_MS(diagnostics->phase_ticks[phase]));
     }
-    printf(
-        "Attempt: %" PRIu32 " ms; max PI: %" PRIu64 " us\n",
-        TICKS_TO_MS(diagnostics->attempt_ticks),
-        (uint64_t)metrics->max_pi_ticks * 1000000 / TICKS_PER_SECOND
-    );
+    printf("Attempt: %" PRIu32 " ms\n", TICKS_TO_MS(diagnostics->attempt_ticks));
 }
 
 static void terminal (void) __attribute__((noreturn));
@@ -259,7 +255,7 @@ static void run_stress (void) {
         printf(
             "FAILED: %s operation, transport error %u\n", (completed & 1u) == 0 ? "status" : "EDID", (unsigned)error
         );
-        printf("Confirmed RX: %zu; reserved DMA ticket: %" PRIu64 "\n", failure->transferred, failure->ticket);
+        printf("Confirmed RX: %zu\n", failure->transferred);
         if (error == ED64_PRO_LL_MCU_ERROR) {
             printf("Fresh MCU status: 0x%02X\n", (unsigned)status_line.value.mcu_status);
         }
@@ -501,7 +497,7 @@ static bool write_scratch (void) {
 #ifdef ED64_PRO_TEST_STORAGE_FAIL_WRITE
 static void run_storage_fail_write (void) __attribute__((noreturn));
 /**
- * @brief Verify an injected write fault invalidates handles and refuses handoff without I/O.
+ * @brief Verify an injected protocol write fault invalidates handles and refuses handoff.
  */
 static void run_storage_fail_write (void) {
     FIL writer;
@@ -536,29 +532,28 @@ static void run_storage_fail_write (void) {
     const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
     if (write_result != FR_DISK_ERR || !diagnostics->storage_failed ||
         diagnostics->storage_failure.code != ED64_PRO_LL_TIMEOUT || diagnostics->storage_failure.transferred != 1 ||
-        diagnostics->storage_failure.pi_context_valid || !diagnostics->storage_operation ||
+        !diagnostics->storage_operation ||
         strcmp(diagnostics->storage_operation, "Write") != 0) {
         printf("FAIL-WRITE FAILED: expected latched write fault (%u, %u bytes).\n", (unsigned)write_result, written);
         terminal();
     }
-    uint32_t submissions = ed64_pro_ll_get_metrics()->submissions;
     UINT read = 0;
     FRESULT read_result = f_read(&reader, storage_buffer, 512, &read);
     FRESULT reader_close = f_close(&reader);
     FRESULT writer_close = f_close(&writer);
     if (read_result != FR_INVALID_OBJECT || reader_close != FR_INVALID_OBJECT || writer_close != FR_INVALID_OBJECT ||
-        read != 0 || ed64_pro_ll_get_metrics()->submissions != submissions) {
+        read != 0) {
         printf("FAIL-WRITE FAILED: old handles were not inert.\n");
         terminal();
     }
     flashcart_err_t handoff_error = ed64_pro_get_flashcart()->deinit();
     if (handoff_error != FLASHCART_ERR_SD_CARD || diagnostics->storage_state != ED64_PRO_STORAGE_FAILED ||
-        !diagnostics->storage_failed || ed64_pro_ll_get_metrics()->submissions != submissions) {
-        printf("H5.7 FAILED: latched write did not refuse handoff without I/O.\n");
+        !diagnostics->storage_failed) {
+        printf("H5.7 FAILED: latched write did not refuse handoff.\n");
         terminal();
     }
     printf("\nH5.7 hardware refusal PASS\n");
-    printf("Old handles invalid; deinit refused; PI count unchanged.\n");
+    printf("Old handles invalid; deinit refused.\n");
     printf("No START or game boot attempted.\n");
     printf("Power-cycle console and USB before host verification.\n");
     terminal();
@@ -739,16 +734,11 @@ static bool load_rom_fixture (flashcart_t *adapter, char *path, bool normalize_v
     cart_card_byteswap = normalize_v64;
     load_progress_percent = 0;
     load_progress_valid = true;
-    uint32_t submissions = ed64_pro_ll_get_metrics()->submissions;
     uint32_t start = TICKS_READ();
     flashcart_err_t error = adapter->load_rom(path, load_progress);
     uint32_t elapsed = TICKS_READ() - start;
     cart_card_byteswap = 0;
-    printf(
-        "\nLoad: %" PRIu32 " ms, PI submissions %" PRIu32 "\n",
-        TICKS_TO_MS(elapsed),
-        ed64_pro_ll_get_metrics()->submissions - submissions
-    );
+    printf("\nLoad: %" PRIu32 " ms\n", TICKS_TO_MS(elapsed));
     if (error != FLASHCART_OK) {
         printf("Load FAILED (%u): %s\n", (unsigned)error, ed64_pro_get_error_message());
         return false;

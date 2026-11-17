@@ -1,6 +1,6 @@
 /**
  * @file ed64_pro_ll.c
- * @brief Cache-owned, bounded PI access for the EverDrive-64 Pro.
+ * @brief Foreground EverDrive-64 Pro protocol over libdragon PI access.
  *
  * Register layout and selected wire protocol: krikzz/ed64-pro-pub.
  * See README.md for the pinned revision, adaptations, and upstream MIT notice.
@@ -16,7 +16,6 @@ static uint32_t pro_staging[ED64_PRO_FIFO_CHUNK] __attribute__((aligned(512)));
 static struct {
     ed64_pro_ll_transaction_t *owner;
     ed64_pro_ll_failure_t failure;
-    uint64_t ticket;
     size_t transferred;
     uint32_t id;
     bool probed;
@@ -29,16 +28,6 @@ static struct {
     unsigned raw_writes;
 #endif
     ed64_pro_ll_metrics_t metrics;
-    uint32_t pi_started;
-    bool pi_active;
-    bool pi_context_valid;
-    uint32_t pi_address;
-    size_t pi_length;
-    bool pi_write;
-    bool pi_submitted;
-    uint32_t pi_budget_ticks;
-    uint32_t pi_elapsed_ticks;
-    bool pi_phase_limited;
 } pro_ll;
 
 _Static_assert(sizeof(pro_staging) == 512, "Pro staging must own complete cache lines");
@@ -72,17 +61,6 @@ static bool pro_expired (uint32_t deadline) {
     return (int32_t)(TICKS_READ() - deadline) >= 0;
 }
 
-/* The SDK's suggested replacement, dma_wait, cannot honor a deadline. */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-/**
- * @brief Check whether the PI has an active DMA transfer.
- */
-static bool pro_pi_busy (void) {
-    return dma_busy() != 0;
-}
-#pragma GCC diagnostic pop
-
 /**
  * @brief Cap an absolute deadline by a local timeout using wrap-safe signed comparison.
  *
@@ -101,45 +79,17 @@ static uint32_t pro_deadline (const ed64_pro_ll_transaction_t *transaction, uint
 }
 
 /**
- * @brief Finish timing an active PI operation and retain the largest observed duration.
- */
-static void pro_measure_pi (void) {
-    if (pro_ll.pi_active) {
-        uint32_t elapsed = TICKS_READ() - pro_ll.pi_started;
-        pro_ll.pi_elapsed_ticks = elapsed;
-        if (elapsed > pro_ll.metrics.max_pi_ticks) {
-            pro_ll.metrics.max_pi_ticks = elapsed;
-        }
-        pro_ll.pi_active = false;
-    }
-}
-
-/**
- * @brief Latch the first transport fault with confirmed RX progress and DMA ownership.
- *
- * A retained ticket poisons the transport: its staging buffer must remain
- * quarantined even if the outstanding DMA completes later.
+ * @brief Latch the first protocol fault with confirmed RX progress and MCU status.
  */
 static ed64_pro_ll_error_t pro_fail (ed64_pro_ll_error_t error) {
-    pro_measure_pi();
     if (pro_ll.failure.code == ED64_PRO_LL_OK) {
         pro_ll.failure = (ed64_pro_ll_failure_t){
             .code = error,
             .transferred = pro_ll.transferred,
-            .ticket = pro_ll.ticket,
-            .poisoned = pro_ll.ticket != 0,
             .status_valid = pro_ll.status_valid,
             .status = pro_ll.status,
             .nresp_valid = pro_ll.nresp_valid,
             .nresp = pro_ll.nresp,
-            .pi_context_valid = pro_ll.pi_context_valid,
-            .pi_address = pro_ll.pi_context_valid ? pro_ll.pi_address : 0,
-            .pi_length = pro_ll.pi_context_valid ? pro_ll.pi_length : 0,
-            .pi_write = pro_ll.pi_context_valid && pro_ll.pi_write,
-            .pi_submitted = pro_ll.pi_context_valid && pro_ll.pi_submitted,
-            .pi_budget_ticks = pro_ll.pi_context_valid ? pro_ll.pi_budget_ticks : 0,
-            .pi_elapsed_ticks = pro_ll.pi_context_valid ? pro_ll.pi_elapsed_ticks : 0,
-            .pi_phase_limited = pro_ll.pi_context_valid && pro_ll.pi_phase_limited,
         };
     }
     return pro_ll.failure.code;
@@ -175,7 +125,6 @@ ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, u
         return ED64_PRO_LL_CONTEXT;
     }
 
-    disable_interrupts();
     ed64_pro_ll_error_t error = pro_ll.failure.code;
     if (pro_ll.owner) {
         error = ED64_PRO_LL_BUSY;
@@ -184,12 +133,11 @@ ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, u
         pro_ll.owner = transaction;
         pro_ll.transferred = 0;
     }
-    enable_interrupts();
     return error;
 }
 
 /**
- * @brief Finish queued PI work, then release ownership without clearing transport faults.
+ * @brief Release ownership without clearing transport faults; all accesses have completed.
  */
 ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
     if (!transaction) {
@@ -201,7 +149,6 @@ ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
     if (pro_ll.owner != transaction) {
         return ED64_PRO_LL_BUSY;
     }
-    dma_wait();
     pro_ll.owner = NULL;
     return ED64_PRO_LL_OK;
 }
@@ -214,7 +161,7 @@ const ed64_pro_ll_failure_t *ed64_pro_ll_get_failure (void) {
 }
 
 /**
- * @brief Return cumulative PI timing, submission, and FIFO usage metrics.
+ * @brief Return the peak observed FIFO receive count.
  */
 const ed64_pro_ll_metrics_t *ed64_pro_ll_get_metrics (void) {
     return &pro_ll.metrics;
@@ -236,15 +183,14 @@ static bool pro_readable_reg (ed64_pro_reg_t reg) {
 }
 
 /**
- * @brief Transfer an exact bus length through cache-owned staging within bounded deadlines.
+ * @brief Transfer exact FIFO bus words through cache-owned staging.
  *
- * PI acquisition is rechecked under IRQ exclusion. Reads become visible only
- * after confirmed completion; an issued DMA fault retains its ticket and buffer
- * rather than resetting PI or pretending the transfer was cancelled.
+ * Aligned staging and word-multiple lengths keep dma_read on its aligned path,
+ * with no CPU alignment fixups or extra side-effectful FIFO reads. The SDK waits
+ * for completion; protocol deadlines cannot interrupt that hardware wait.
  */
-static ed64_pro_ll_error_t pro_transfer (
+static ed64_pro_ll_error_t pro_fifo_transfer (
     ed64_pro_ll_transaction_t *transaction,
-    ed64_pro_reg_t reg,
     size_t length,
     bool write,
     uint32_t deadline
@@ -253,113 +199,34 @@ static ed64_pro_ll_error_t pro_transfer (
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    if (length == 0 || length > sizeof(pro_staging) || length % sizeof(uint32_t) != 0 ||
-        (reg != ED64_PRO_REG_FIFO && (!pro_readable_reg(reg) || length != sizeof(uint32_t))) ||
-        (write && reg != ED64_PRO_REG_FIFO && reg != ED64_PRO_REG_MBX)) {
+    if (length == 0 || length > sizeof(pro_staging) || length % sizeof(uint32_t) != 0) {
         return ED64_PRO_LL_ARGUMENT;
     }
-
-    if (!pro_ll.identified && (pro_ll.probed || write || reg != ED64_PRO_REG_EDID)) {
+    if (!pro_ll.identified) {
         return ED64_PRO_LL_NOT_IDENTIFIED;
     }
     deadline = pro_deadline(transaction, deadline);
-    /* Record the attempt before acquisition; this performs no additional PI I/O. */
-    pro_ll.pi_context_valid = true;
-    pro_ll.pi_address = (uint32_t)reg;
-    pro_ll.pi_length = length;
-    pro_ll.pi_write = write;
-    pro_ll.pi_submitted = false;
-    pro_ll.pi_started = TICKS_READ();
-    pro_ll.pi_active = true;
-    uint32_t pi_deadline = pro_ll.pi_started + TICKS_FROM_MS(ED64_PRO_PI_TIMEOUT_MS);
-    pro_ll.pi_phase_limited = (int32_t)(deadline - pi_deadline) < 0;
-    if ((int32_t)(pi_deadline - deadline) < 0) {
-        deadline = pi_deadline;
-    }
-    pro_ll.pi_budget_ticks = (int32_t)(deadline - pro_ll.pi_started) > 0 ? deadline - pro_ll.pi_started : 0;
-    pro_ll.pi_elapsed_ticks = 0;
     if (pro_expired(deadline)) {
-        return pro_fail(ED64_PRO_LL_PI_ACQUIRE_TIMEOUT);
+        return pro_fail(ED64_PRO_LL_TIMEOUT);
     }
 
     size_t cache_length = (length + ED64_PRO_CACHE_LINE - 1) & ~(size_t)(ED64_PRO_CACHE_LINE - 1);
     if (write) {
         data_cache_hit_writeback(pro_staging, cache_length);
+        MEMORY_BARRIER();
+        dma_write(pro_staging, ED64_PRO_REG_FIFO, length);
     } else {
         data_cache_hit_writeback_invalidate(pro_staging, cache_length);
-    }
-    MEMORY_BARRIER();
-
-    for (;;) {
-        if (pro_expired(deadline)) {
-            return pro_fail(ED64_PRO_LL_PI_ACQUIRE_TIMEOUT);
-        }
-        if (*PI_STATUS & PI_STATUS_ERROR) {
-            return pro_fail(ED64_PRO_LL_PI_ERROR);
-        }
-        if (pro_pi_busy()) {
-            continue;
-        }
-
-        /* An idle recheck under IRQ exclusion makes pi_enqueue's full-queue wait unreachable. */
-        disable_interrupts();
-        bool busy = pro_pi_busy();
-        bool expired = pro_expired(deadline);
-        bool pi_error = (*PI_STATUS & PI_STATUS_ERROR) != 0;
-        if (!busy && !expired && !pi_error) {
-            pro_ll.ticket =
-                write ? dma_write_raw_async(pro_staging, reg, length) : dma_read_raw_async(pro_staging, reg, length);
-            pro_ll.pi_submitted = true;
-            pro_ll.metrics.submissions++;
-        }
-        enable_interrupts();
-        if (pi_error) {
-            return pro_fail(ED64_PRO_LL_PI_ERROR);
-        }
-        if (expired) {
-            return pro_fail(ED64_PRO_LL_PI_ACQUIRE_TIMEOUT);
-        }
-        if (!busy) {
-            break;
-        }
-    }
-    MEMORY_BARRIER();
-
-    for (;;) {
-        if (pro_expired(deadline)) {
-            return pro_fail(ED64_PRO_LL_PI_TIMEOUT);
-        }
-        if (*PI_STATUS & PI_STATUS_ERROR) {
-            return pro_fail(ED64_PRO_LL_PI_ERROR);
-        }
-        bool finished = dma_finished(pro_ll.ticket);
-#ifdef ED64_PRO_TEST_FORCE_TIMEOUT
-        /* Software-only fault injection; never reset PI or pretend DMA was cancelled. */
-        finished = false;
-#endif
-        if (*PI_STATUS & PI_STATUS_ERROR) {
-            return pro_fail(ED64_PRO_LL_PI_ERROR);
-        }
-        if (pro_expired(deadline)) {
-            return pro_fail(ED64_PRO_LL_PI_TIMEOUT);
-        }
-        if (finished) {
-            break;
-        }
-    }
-
-    pro_ll.ticket = 0;
-    if (!write) {
+        MEMORY_BARRIER();
+        dma_read(pro_staging, ED64_PRO_REG_FIFO, length);
         data_cache_hit_invalidate(pro_staging, cache_length);
     }
     MEMORY_BARRIER();
-    pro_measure_pi();
-    pro_ll.pi_context_valid = false;
     return ED64_PRO_LL_OK;
 }
 
 /**
- * @brief Read one whitelisted register and publish its value only after successful DMA.
+ * @brief Read one whitelisted register through libdragon's serialized PI access.
  *
  * The first completed EDID read caches the Pro family/device identification.
  */
@@ -368,16 +235,25 @@ ed64_pro_ll_read_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg
     if (!value || !pro_readable_reg(reg)) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    ed64_pro_ll_error_t error = pro_transfer(transaction, reg, sizeof(uint32_t), false, deadline);
-    if (error == ED64_PRO_LL_OK) {
-        if (reg == ED64_PRO_REG_EDID && !pro_ll.probed) {
-            pro_ll.id = pro_staging[0];
-            pro_ll.probed = true;
-            pro_ll.identified = (pro_ll.id & 0xFFFF00FFu) == 0xED640027u;
-        }
-        memcpy(value, pro_staging, sizeof(*value));
+    ed64_pro_ll_error_t error = pro_owned(transaction);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
     }
-    return error;
+    if (!pro_ll.identified && (pro_ll.probed || reg != ED64_PRO_REG_EDID)) {
+        return ED64_PRO_LL_NOT_IDENTIFIED;
+    }
+    deadline = pro_deadline(transaction, deadline);
+    if (pro_expired(deadline)) {
+        return pro_fail(ED64_PRO_LL_TIMEOUT);
+    }
+    uint32_t result = io_read(reg);
+    if (reg == ED64_PRO_REG_EDID && !pro_ll.probed) {
+        pro_ll.id = result;
+        pro_ll.probed = true;
+        pro_ll.identified = (pro_ll.id & 0xFFFF00FFu) == 0xED640027u;
+    }
+    *value = result;
+    return ED64_PRO_LL_OK;
 }
 
 /**
@@ -392,8 +268,17 @@ ed64_pro_ll_write_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t re
     if (reg != ED64_PRO_REG_MBX || value != 0) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    pro_staging[0] = value;
-    return pro_transfer(transaction, reg, sizeof(uint32_t), true, deadline);
+    if (!pro_ll.identified) {
+        return ED64_PRO_LL_NOT_IDENTIFIED;
+    }
+    deadline = pro_deadline(transaction, deadline);
+    if (pro_expired(deadline)) {
+        return pro_fail(ED64_PRO_LL_TIMEOUT);
+    }
+    io_write(reg, value);
+    /* io_write serializes access but returns before the bus write completes. */
+    dma_wait();
+    return ED64_PRO_LL_OK;
 }
 
 /**
@@ -478,7 +363,7 @@ pro_fifo_read (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size_t l
         if (chunk > ED64_PRO_FIFO_CHUNK) {
             chunk = ED64_PRO_FIFO_CHUNK;
         }
-        error = pro_transfer(transaction, ED64_PRO_REG_FIFO, chunk * sizeof(uint32_t), false, deadline);
+        error = pro_fifo_transfer(transaction, chunk * sizeof(uint32_t), false, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -523,7 +408,7 @@ ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, s
             return pro_fail(ED64_PRO_LL_DRAIN_LIMIT);
         }
         size_t chunk = available < ED64_PRO_FIFO_CHUNK ? available : ED64_PRO_FIFO_CHUNK;
-        error = pro_transfer(transaction, ED64_PRO_REG_FIFO, chunk * sizeof(uint32_t), false, deadline);
+        error = pro_fifo_transfer(transaction, chunk * sizeof(uint32_t), false, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -577,7 +462,7 @@ static ed64_pro_ll_error_t pro_send_frame (
             size_t index = offset + i;
             pro_staging[i] = index < header_length ? header[index] : bytes[index - header_length];
         }
-        error = pro_transfer(transaction, ED64_PRO_REG_FIFO, chunk * sizeof(uint32_t), true, deadline);
+        error = pro_fifo_transfer(transaction, chunk * sizeof(uint32_t), true, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -617,7 +502,7 @@ pro_fifo_write (ed64_pro_ll_transaction_t *transaction, const uint8_t *input, si
         for (size_t i = 0; i < chunk; i++) {
             pro_staging[i] = input[offset + i];
         }
-        error = pro_transfer(transaction, ED64_PRO_REG_FIFO, chunk * sizeof(uint32_t), true, deadline);
+        error = pro_fifo_transfer(transaction, chunk * sizeof(uint32_t), true, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }

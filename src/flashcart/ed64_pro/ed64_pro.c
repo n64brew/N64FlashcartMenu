@@ -45,7 +45,7 @@ static void pro_set_phase (ed64_pro_phase_t phase) {
 }
 
 /**
- * @brief Latch the first startup failure with its phase, elapsed time, and DMA evidence.
+ * @brief Latch the first startup failure with its phase, elapsed time, and protocol diagnostics.
  *
  * Later calls return the original failure without replacing its diagnostics.
  */
@@ -57,7 +57,7 @@ static ed64_pro_ll_error_t pro_init_fail (ed64_pro_ll_error_t error) {
         }
         pro_diagnostics.failure = *ed64_pro_ll_get_failure();
         pro_diagnostics.failure.code = error;
-        pro_diagnostics.state = pro_diagnostics.failure.poisoned ? ED64_PRO_POISONED : ED64_PRO_FAILED;
+        pro_diagnostics.state = ED64_PRO_FAILED;
         pro_diagnostics.attempt_ticks = now - pro_attempt_start;
     }
     return pro_diagnostics.failure.code;
@@ -215,9 +215,6 @@ static const char *pro_error_name (ed64_pro_ll_error_t error) {
     case ED64_PRO_LL_CONTEXT: return "Unsupported interrupt/thread context";
     case ED64_PRO_LL_BUSY: return "Transport already in use";
     case ED64_PRO_LL_TIMEOUT: return "Protocol deadline expired";
-    case ED64_PRO_LL_PI_ACQUIRE_TIMEOUT: return "PI queue acquisition timed out";
-    case ED64_PRO_LL_PI_TIMEOUT: return "PI DMA completion timed out";
-    case ED64_PRO_LL_PI_ERROR: return "PI controller error";
     case ED64_PRO_LL_NOT_IDENTIFIED: return "Pro not identified";
     case ED64_PRO_LL_FIFO_COUNT: return "Implausible RX FIFO count";
     case ED64_PRO_LL_DRAIN_LIMIT: return "RX FIFO cleanup limit exceeded";
