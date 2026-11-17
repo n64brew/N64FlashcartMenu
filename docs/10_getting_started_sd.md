@@ -26,7 +26,7 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 > [!IMPORTANT]
 > USB tools such as `edlink` should only be used with the console powered off or in the stock Pro menu.
 
-Automatic CIC, save writeback, and menu RTC are enabled. Set the clock in Settings → Time (2000–2095). 64DD, fast reboot, and USB debugging are not yet implemented.
+Automatic CIC, save writeback, and clock reads are enabled. Set the clock in the stock Pro menu or with `edlink` while this menu is not running. Pro-specific clock editing in Settings is deferred. 64DD, fast reboot, and USB debugging are not yet implemented.
 
 Use an Expansion Pak (8 MiB) for now. Jumper Pak (4 MiB) setups have unresolved navigation, artwork, and file-open failures.
 

@@ -698,6 +698,7 @@ void data_cache_hit_invalidate (volatile void *ram, unsigned long length) {
 static void power_on (void) {
     ed64_pro_rtc_close();
     test_rtc_hooks = (rtc_hooks_t){0};
+    test_rtc_init_calls = 0;
     memset(&mock, 0, sizeof(mock));
     memset(&pro_ll, 0, sizeof(pro_ll));
     memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
@@ -2094,6 +2095,7 @@ static void test_adapter_unavailable_operations (void) {
     }
 }
 
+int cart_type;
 char cart_card_byteswap;
 
 /**
@@ -2233,9 +2235,13 @@ static flashcart_t *rtc_mounted_fixture (void) {
  * @brief Exercise adapter resync through real RTC framing, cache ticks, and clock-hook removal.
  */
 static void test_rtc_adapter_cache (void) {
-    flashcart_t *adapter = rtc_mounted_fixture();
-    TEST_ASSERT(adapter->resync_rtc() == FLASHCART_OK);
+    (void)rtc_mounted_fixture();
+    TEST_CHECK(test_rtc_init_calls == 1 && mock.rtc_get_commands == 1 && cart_type == CART_MAX);
     TEST_ASSERT(test_rtc_hooks.gettime && test_rtc_hooks.settime);
+    rtc_hooks_t installed = test_rtc_hooks;
+    rtc_init();
+    TEST_CHECK(test_rtc_init_calls == 2 && test_rtc_hooks.gettime == installed.gettime &&
+        test_rtc_hooks.settime == installed.settime && mock.rtc_get_commands == 1);
     time_t timestamp = 0;
     TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS);
     TEST_CHECK(timestamp == INT64_C(1794832496));
@@ -2251,7 +2257,7 @@ static void test_rtc_adapter_cache (void) {
     TEST_CHECK(pro_disk.disk_read(sector, 3, 1) == RES_OK);
     TEST_CHECK(memcmp(sector, mock.sectors + 3 * 512, sizeof(sector)) == 0);
     mock.rtc_bytes[5] = 0x59;
-    TEST_CHECK(adapter->resync_rtc() == FLASHCART_OK && mock.rtc_get_commands == 2);
+    TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_OK && mock.rtc_get_commands == 2);
     TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(1794832499));
     int (*saved_gettime)(time_t *) = test_rtc_hooks.gettime;
     enqueues = mock.enqueues;
@@ -2265,7 +2271,6 @@ static void test_rtc_adapter_cache (void) {
  */
 static void test_rtc_adapter_set (void) {
     flashcart_t *adapter = rtc_mounted_fixture();
-    TEST_ASSERT(adapter->resync_rtc() == FLASHCART_OK);
     TEST_ASSERT(test_rtc_hooks.settime != NULL);
     time_t target = INT64_C(951868798);
     TEST_CHECK(test_rtc_hooks.settime(target) == RTC_ESUCCESS);
@@ -2282,7 +2287,7 @@ static void test_rtc_adapter_set (void) {
     enqueues = mock.enqueues;
     TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_EBADCLOCK && mock.enqueues == enqueues);
     TEST_CHECK(strstr(adapter->get_error_message(FLASHCART_ERR_INT), "readback did not match") != NULL);
-    TEST_CHECK(adapter->resync_rtc() == FLASHCART_OK);
+    TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_OK);
     TEST_CHECK(mock.rtc_set_commands == 2 && mock.rtc_get_commands == 4);
     TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == target);
 }
@@ -2293,14 +2298,14 @@ static void test_rtc_adapter_set (void) {
 static void test_rtc_adapter_invalid_date (void) {
     flashcart_t *adapter = rtc_mounted_fixture();
     mock.rtc_bytes[1] = 0x1A;
-    TEST_CHECK(adapter->resync_rtc() == FLASHCART_ERR_INT);
+    TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_ERR_INT);
     TEST_ASSERT(test_rtc_hooks.gettime && test_rtc_hooks.settime);
     time_t timestamp = 42;
     TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_EBADTIME && timestamp == 42);
     TEST_CHECK(pro_ll.failure.code == ED64_PRO_LL_OK && adapter->has_feature(FLASHCART_FEATURE_RTC));
     TEST_CHECK(strstr(adapter->get_error_message(FLASHCART_ERR_INT), "hardware date is invalid") != NULL);
     TEST_CHECK(test_rtc_hooks.settime(INT64_C(946684800)) == RTC_ESUCCESS);
-    TEST_CHECK(mock.rtc_set_commands == 1 && mock.rtc_get_commands == 2);
+    TEST_CHECK(mock.rtc_set_commands == 1 && mock.rtc_get_commands == 3);
     TEST_CHECK(test_rtc_hooks.gettime(&timestamp) == RTC_ESUCCESS && timestamp == INT64_C(946684800));
     TEST_CHECK(ed64_pro_rtc_get_error_message() == NULL);
 }

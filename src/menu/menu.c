@@ -68,7 +68,7 @@ static void menu_init (boot_params_t *boot_params) {
 
     joypad_init();
     timer_init();
-    flashcart_init_rtc();
+    rtc_init();
     rspq_init();
     rdpq_init();
     dfs_init(DFS_DEFAULT_LOCATION);

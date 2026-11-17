@@ -42,11 +42,11 @@ Independent tester reports are still required before merge. See the [Pro test ch
 
 ### Real-time clock
 
-Settings → Time uses the existing editor; Pro writes accept 2000–2095 within its 1996–2095 year limits. The hardware clock supports 2000–2099. The menu, `time()`, `gettimeofday()`, `settimeofday()`, and file timestamps share that clock. Startup and Time-pane entry resync from hardware; ordinary reads advance a validated cache without MCU traffic.
+The Pro backend initializes libdragon time after mounting storage, then installs its clock hooks. The unchanged menu's later `rtc_init()` is idempotent. The menu, `time()`, `gettimeofday()`, and file timestamps use the Pro clock; ordinary reads advance a validated cache without MCU traffic.
 
-Invalid hardware dates and failed reads or write confirmation report errors instead of using the software fallback. Repair an invalid date with the stock Pro menu or `edlink` before using the Time pane. RTC capability is independent of clock availability. Game launch keeps its existing read-only RTC mode.
+Pro-specific clock editing in Settings is deferred to a separate PR. Set the clock in the stock Pro menu or with `edlink` while this menu is not running. Hardware dates must be in 2000–2099. Invalid dates and failed reads report errors instead of using a software fallback. Game launch keeps its existing read-only RTC mode.
 
-Verified on an original N64 with firmware `26.1014`: advancing time, Time-pane editing/readback/reentry, console restart, five seconds with console and USB power off, persisted FAT timestamps, and a Super Mario 64 launch. The original clock was restored with elapsed time, and menu settings were restored. RTC behavior on other hardware has not been tested. Host and sanitizer tests cover conversion, range limits, caching, lifecycle, and failures.
+Host and sanitizer tests cover conversion, range limits, caching, lifecycle, failures, and the repeated libdragon initialization. Hardware qualification applies only to the tested original N64, Expansion Pak, and firmware `26.1014`; see the PR evidence for the tested build.
 
 ### Upstream license
 

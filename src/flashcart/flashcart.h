@@ -111,8 +111,6 @@ typedef struct {
     flashcart_err_t (*set_save_writeback) (char *save_path);
     /** @brief The flashcart set boot mode function */
     flashcart_err_t (*set_next_boot_mode) (flashcart_reboot_mode_t boot_mode);
-    /** @brief Install writable system clock hooks and resync in the foreground, if supplied. */
-    flashcart_err_t (*resync_rtc)(void);
     /** @brief Optional error detail from retained state; NULL uses the generic message. Must not perform I/O. */
     char *(*get_error_message)(flashcart_err_t err);
 } flashcart_t;
@@ -139,15 +137,6 @@ flashcart_err_t flashcart_init (const char **storage_prefix);
  * @return flashcart_err_t Error code.
  */
 flashcart_err_t flashcart_deinit (void);
-
-/** @brief Initialize libdragon time, then activate any backend clock hooks. */
-void flashcart_init_rtc (void);
-
-/** @brief Resync the active system clock from hardware in the foreground. */
-flashcart_err_t flashcart_resync_rtc (void);
-
-/** @brief Whether the active hardware clock supports menu writes. */
-bool flashcart_rtc_is_writable (void);
 
 /**
  * @brief Check if the flashcart has a specific feature.

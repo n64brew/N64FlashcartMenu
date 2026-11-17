@@ -64,7 +64,7 @@ static void adjust_rtc_time (struct tm *t, int incr) {
  * @brief Write the RTC time back to the hardware clock.
  */
 static void save_rtc_time (void) {
-    if (!flashcart_rtc_is_writable()) {
+    if (rtc_get_source() != RTC_SOURCE_JOYBUS || !rtc_is_source_available(RTC_SOURCE_JOYBUS)) {
         snprintf(status_message, sizeof(status_message), "RTC is not writable");
         sound_play_effect(SFX_ERROR);
         return;
@@ -83,7 +83,7 @@ static void save_rtc_time (void) {
 
 static void pane_enter (menu_t *menu) {
     /* Resync the time from the hardware RTC */
-    flashcart_resync_rtc();
+    rtc_set_source(rtc_get_source());
     menu->current_time = time(NULL);
 
     editing_field_type = RTC_EDIT_YEAR;

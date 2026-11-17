@@ -10,7 +10,7 @@ PRO_RTC_SOURCE := src/flashcart/ed64_pro/ed64_pro_rtc.c
 RTC_STUB_SOURCE := tests/stubs/rtc.c
 FATFS_UNICODE_SOURCE := libdragon/src/fatfs/ffunicode.c
 FATFS_UNICODE_DEPS := $(FATFS_UNICODE_SOURCE) libdragon/src/fatfs/ff.h libdragon/src/fatfs/ffconf.h
-PRO_DEPS := $(PRO_SOURCE) $(PRO_RTC_SOURCE) src/flashcart/ed64_pro/ed64_pro_rtc.h $(RTC_STUB_SOURCE) tests/stubs/rtc.h tests/stubs/system.h $(FATFS_UNICODE_DEPS) tests/stubs/libdragon.h tests/stubs/fatfs/ff.h tests/stubs/fatfs/diskio.h \
+PRO_DEPS := $(PRO_SOURCE) $(PRO_RTC_SOURCE) src/flashcart/ed64_pro/ed64_pro_rtc.h $(RTC_STUB_SOURCE) tests/stubs/system.h $(FATFS_UNICODE_DEPS) tests/stubs/libdragon.h tests/stubs/fatfs/ff.h tests/stubs/fatfs/diskio.h \
 	tests/stubs/libcart/cart.h src/utils/fs.h src/flashcart/flashcart_utils.h \
 	src/flashcart/ed64_pro/ed64_pro_ll.c src/flashcart/ed64_pro/ed64_pro_ll.h \
 	src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro.h src/flashcart/flashcart.h \
@@ -20,7 +20,7 @@ LIFECYCLE_RELEASE := $(HOST_BUILD_DIR)/ed64_pro_lifecycle_test_release
 LIFECYCLE_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_lifecycle_test_sanitize
 LIFECYCLE_RELEASE_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_lifecycle_test_release_sanitize
 LIFECYCLE_SOURCE := tests/ed64_pro_lifecycle_test.c
-LIFECYCLE_DEPS := $(LIFECYCLE_SOURCE) $(RTC_STUB_SOURCE) tests/stubs/rtc.h tests/stubs/system.h tests/stubs/libdragon.h tests/stubs/libcart/cart.h \
+LIFECYCLE_DEPS := $(LIFECYCLE_SOURCE) tests/stubs/system.h tests/stubs/libdragon.h tests/stubs/libcart/cart.h \
 	tests/stubs/usb.h tests/stubs/fatfs/ff.h src/flashcart/flashcart.c src/flashcart/flashcart.h \
 	src/flashcart/flashcart_utils.h src/flashcart/ed64_pro/ed64_pro.h src/flashcart/ed64_pro/ed64_pro_ll.h \
 	src/flashcart/64drive/64drive.h src/flashcart/ed64/ed64_vseries.h src/flashcart/ed64/ed64_xseries.h \
@@ -67,11 +67,11 @@ $(LIFECYCLE_RELEASE) $(LIFECYCLE_RELEASE_SANITIZE): HOST_MODE_FLAGS=-DNDEBUG
 
 $(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE): $(LIFECYCLE_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(HOST_MODE_FLAGS) -O2 $(LIFECYCLE_SOURCE) $(RTC_STUB_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(HOST_MODE_FLAGS) -O2 $(LIFECYCLE_SOURCE) $(LDFLAGS) -o $@
 
 $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE): $(LIFECYCLE_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(HOST_MODE_FLAGS) -O1 $(SANITIZE_FLAGS) $(LIFECYCLE_SOURCE) $(RTC_STUB_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(HOST_MODE_FLAGS) -O1 $(SANITIZE_FLAGS) $(LIFECYCLE_SOURCE) $(LDFLAGS) -o $@
 
 $(ADAPTER_TEST): $(ADAPTER_DEPS)
 	@mkdir -p $(dir $@)
@@ -136,28 +136,3 @@ $(RTC_TEST): $(RTC_DEPS)
 $(RTC_SANITIZE): $(RTC_DEPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/rtc_test.c $(LDFLAGS) -o $@
-
-RTC_VIEW_TEST := $(HOST_BUILD_DIR)/rtc_view_test
-RTC_VIEW_SANITIZE := $(HOST_BUILD_DIR)/rtc_view_test_sanitize
-RTC_VIEW_DEPS := tests/rtc_view_test.c src/menu/views/rtc.c src/menu/views/views.h \
-	src/menu/sound.h src/menu/ui_components/constants.h src/utils/utils.h \
-	src/flashcart/flashcart.h tests/stubs/libdragon.h tests/stubs/rtc.h \
-	src/libs/acutest/acutest.h tests/Makefile
-
-.PHONY: test-rtc-view test-rtc-view-sanitize
-test-rtc-view: $(RTC_VIEW_TEST)
-	$(RTC_VIEW_TEST)
-
-test-rtc-view-sanitize: $(RTC_VIEW_SANITIZE)
-	$(RTC_VIEW_SANITIZE)
-
-test-ed64-pro: test-rtc-view
-test-ed64-pro-sanitize: test-rtc-view-sanitize
-
-$(RTC_VIEW_TEST): $(RTC_VIEW_DEPS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 tests/rtc_view_test.c $(LDFLAGS) -o $@
-
-$(RTC_VIEW_SANITIZE): $(RTC_VIEW_DEPS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/rtc_view_test.c $(LDFLAGS) -o $@

@@ -564,6 +564,11 @@ bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
     }
     pro_diagnostics.volume_id = volume_id;
     pro_diagnostics.storage_state = ED64_PRO_STORAGE_FATFS_OWNED;
+    /* Initialize libdragon before installing Pro hooks. Later rtc_init calls
+     * are idempotent. Skip libcart's overlapping legacy-cart probes here too. */
+    cart_type = CART_MAX;
+    rtc_init();
+    ed64_pro_rtc_resync();
     return true;
 }
 
@@ -1065,7 +1070,6 @@ static flashcart_t flashcart_ed64_pro = {
     .set_save_writeback = NULL,
     .set_next_boot_mode = NULL,
     .get_error_message = pro_get_error_message,
-    .resync_rtc = ed64_pro_rtc_resync,
 };
 
 /** @brief Return the Pro adapter without accessing the cartridge. */

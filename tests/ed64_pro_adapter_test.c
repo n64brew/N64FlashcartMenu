@@ -621,6 +621,9 @@ static uint32_t fat_date (unsigned year, unsigned month, unsigned day) {
  * @brief Reset adapter state and configure successful mock defaults.
  */
 static void fixture (void) {
+    ed64_pro_rtc_close();
+    test_rtc_init_calls = 0;
+    test_rtc_hooks = (rtc_hooks_t){0};
     memset(&mock, 0, sizeof(mock));
     mock.memory_size = 8 * 1024 * 1024;
     memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
@@ -1371,9 +1374,11 @@ TEST_LIST = {
 
 /* RTC protocol framing is exercised by the transport suite. */
 ed64_pro_ll_error_t ed64_pro_ll_rtc_get (ed64_pro_ll_transaction_t *tx, uint8_t out[ED64_PRO_RTC_SIZE], uint32_t deadline) {
-    (void)tx; (void)out; (void)deadline;
-    TEST_CHECK(false);
-    return ED64_PRO_LL_CONTEXT;
+    (void)tx; (void)deadline;
+    TEST_CHECK(test_rtc_init_calls == 1 && cart_type == CART_MAX);
+    const uint8_t value[] = {0x26, 0x11, 0x16, 0x12, 0x34, 0x56, 0x02, 0};
+    memcpy(out, value, sizeof(value));
+    return ED64_PRO_LL_OK;
 }
 ed64_pro_ll_error_t ed64_pro_ll_rtc_set (ed64_pro_ll_transaction_t *tx, const uint8_t in[ED64_PRO_RTC_SIZE], uint32_t deadline) {
     (void)tx; (void)in; (void)deadline;
