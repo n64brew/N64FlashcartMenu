@@ -34,7 +34,7 @@ N64_ROM_EXPANSIONPAK := unused
 N64_CFLAGS += -I$(PROJECT_ROOT)/src -Wall -Wextra -Werror $(TEST_FLAGS)
 
 SOURCES := tests/ed64_pro_hardware.c src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro_ll.c \
-	src/utils/fs.c src/flashcart/flashcart_utils.c
+	src/flashcart/ed64_pro/ed64_pro_rtc.c src/utils/fs.c src/flashcart/flashcart_utils.c
 ifneq ($(filter -DED64_PRO_TEST_STORAGE_FAIL_WRITE -DED64_PRO_TEST_STORAGE_FAIL_WRITE=%,$(TEST_FLAGS)),)
 N64_CFLAGS += -I$(PROJECT_ROOT)/src/libs -isystem $(PROJECT_ROOT)/src/libs/miniz
 SOURCES += src/menu/views/fault.c
