@@ -95,7 +95,6 @@ Other compatible or commercial license options may be available upon request wit
 * [minimp3](https://github.com/lieff/minimp3) - [CC0 1.0 Universal](https://github.com/lieff/minimp3/blob/master/LICENSE)
 * [dr_flac](https://github.com/mackron/dr_libs) - [MIT License](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 * [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
-* [Krikzz EverDrive-64 Pro API](https://github.com/krikzz/ed64-pro-pub) - [MIT License](https://github.com/krikzz/ed64-pro-pub/blob/43014e290f85140d4c5ca84fbf5ae48ac755a23d/LICENSE)
 
 
 ## Sounds
