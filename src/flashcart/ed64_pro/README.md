@@ -36,7 +36,7 @@ Idle RESET returned to the stock menu on the tested setup. SM64 EEPROM settings 
 
 Local synthetic tests passed EEPROM (4/16 Kbit) and SRAM (32/96 KiB) persistence under orderly MCU-stop power cycles. The 128 KiB SRAM, FlashRAM, and PKST2 fixtures had mismatches confined to the final four bytes. Retail SRAM/FlashRAM save-and-reload, emulator saves, and uncontrolled power-loss timing still need qualification.
 
-With Jumper Pak (4 MiB), SM64 booted and restored saved settings, and both cheat actions were correctly refused. Intermittent navigation, artwork, and file-open failures remain unresolved; use an Expansion Pak (8 MiB) for now. SC64 boot/save and X7 boot regression checks passed on the NTSC console with 8 MiB. Emulator boot/save checks remain deferred to external testers.
+With Jumper Pak (4 MiB), SM64 booted and restored saved settings, and both cheat actions were correctly refused. Re-testing fixed the shared missing-artwork error and long-name ticker assertion, but intermittent memory corruption, startup exceptions, navigation freezes, and historical file-open failures remain unresolved or unclassified; use an Expansion Pak (8 MiB) for now. See the [navigation qualification report](../../../docs/ed64_pro_navigation_qualification.md) for develop comparisons, passing controls, and remaining limits. SC64 boot/save and X7 boot regression checks passed on the NTSC console with 8 MiB. Emulator boot/save checks remain deferred to external testers.
 
 Independent tester reports are still required before merge. See the [Pro test checklist](../../../docs/91_test_plan_matrix.md#everdrive-64-pro-testing). Gameplay screenshots establish booting, not save persistence.
 
