@@ -96,6 +96,54 @@ ed64_pro_probe_t ed64_pro_probe (void) {
     return result;
 }
 
+/** @brief Run the MCU/SD startup phases within an active transaction. */
+static ed64_pro_ll_error_t pro_prepare_transport (ed64_pro_ll_transaction_t *transaction) {
+    pro_set_phase(ED64_PRO_PHASE_INITIAL_DRAIN);
+    ed64_pro_ll_error_t error = ed64_pro_ll_drain(transaction, &pro_diagnostics.initial_drained, pro_attempt_deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+
+    pro_set_phase(ED64_PRO_PHASE_INHERITED_STATUS);
+    error = ed64_pro_ll_read_status(
+        transaction,
+        &pro_diagnostics.inherited_status,
+        ed64_pro_ll_limit_deadline(pro_attempt_deadline, ED64_PRO_STATUS_TIMEOUT_MS)
+    );
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    pro_diagnostics.inherited_status_valid = true;
+
+    pro_set_phase(ED64_PRO_PHASE_STOP);
+    error = ed64_pro_ll_stop(transaction, pro_attempt_deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+
+    pro_set_phase(ED64_PRO_PHASE_POST_STOP_DRAIN);
+    error = ed64_pro_ll_drain(transaction, &pro_diagnostics.post_stop_drained, pro_attempt_deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+    pro_set_phase(ED64_PRO_PHASE_STOP_STATUS);
+    error = ed64_pro_ll_check_status(
+        transaction,
+        &pro_diagnostics.status,
+        ed64_pro_ll_limit_deadline(pro_attempt_deadline, ED64_PRO_STATUS_TIMEOUT_MS)
+    );
+    pro_diagnostics.status_valid = error == ED64_PRO_LL_OK || error == ED64_PRO_LL_MCU_ERROR;
+    if (error != ED64_PRO_LL_OK) {
+        return error;
+    }
+
+    pro_set_phase(ED64_PRO_PHASE_SD_INIT);
+    pro_diagnostics.status_valid = false;
+    error = ed64_pro_ll_init_sd(transaction, &pro_diagnostics.status, pro_attempt_deadline);
+    pro_diagnostics.status_valid = error == ED64_PRO_LL_OK || error == ED64_PRO_LL_MCU_ERROR;
+    return error;
+}
+
 /**
  * @brief Perform the bounded MCU/SD handoff, reusing cached readiness or the first failure.
  *
@@ -124,51 +172,7 @@ ed64_pro_ll_error_t ed64_pro_init_transport (void) {
         return error;
     }
     pro_diagnostics.state = ED64_PRO_INITIALIZING;
-    pro_set_phase(ED64_PRO_PHASE_INITIAL_DRAIN);
-    error = ed64_pro_ll_drain(&transaction, &pro_diagnostics.initial_drained, pro_attempt_deadline);
-    if (error != ED64_PRO_LL_OK) {
-        goto done;
-    }
-
-    pro_set_phase(ED64_PRO_PHASE_INHERITED_STATUS);
-    error = ed64_pro_ll_read_status(
-        &transaction,
-        &pro_diagnostics.inherited_status,
-        ed64_pro_ll_limit_deadline(pro_attempt_deadline, ED64_PRO_STATUS_TIMEOUT_MS)
-    );
-    if (error != ED64_PRO_LL_OK) {
-        goto done;
-    }
-    pro_diagnostics.inherited_status_valid = true;
-
-    pro_set_phase(ED64_PRO_PHASE_STOP);
-    error = ed64_pro_ll_stop(&transaction, pro_attempt_deadline);
-    if (error != ED64_PRO_LL_OK) {
-        goto done;
-    }
-
-    pro_set_phase(ED64_PRO_PHASE_POST_STOP_DRAIN);
-    error = ed64_pro_ll_drain(&transaction, &pro_diagnostics.post_stop_drained, pro_attempt_deadline);
-    if (error != ED64_PRO_LL_OK) {
-        goto done;
-    }
-    pro_set_phase(ED64_PRO_PHASE_STOP_STATUS);
-    error = ed64_pro_ll_check_status(
-        &transaction,
-        &pro_diagnostics.status,
-        ed64_pro_ll_limit_deadline(pro_attempt_deadline, ED64_PRO_STATUS_TIMEOUT_MS)
-    );
-    pro_diagnostics.status_valid = error == ED64_PRO_LL_OK || error == ED64_PRO_LL_MCU_ERROR;
-    if (error != ED64_PRO_LL_OK) {
-        goto done;
-    }
-
-    pro_set_phase(ED64_PRO_PHASE_SD_INIT);
-    pro_diagnostics.status_valid = false;
-    error = ed64_pro_ll_init_sd(&transaction, &pro_diagnostics.status, pro_attempt_deadline);
-    pro_diagnostics.status_valid = error == ED64_PRO_LL_OK || error == ED64_PRO_LL_MCU_ERROR;
-
-done:;
+    error = pro_prepare_transport(&transaction);
     ed64_pro_ll_error_t release_error = ed64_pro_ll_end(&transaction);
     if (error != ED64_PRO_LL_OK) {
         return pro_init_fail(error);
@@ -838,6 +842,34 @@ failed:
     return result;
 }
 
+/** @brief Validate and read an open ROM into cartridge memory. */
+static flashcart_err_t pro_read_rom (FIL *file, flashcart_progress_callback_t *progress) {
+    if (!file->obj.fs || file->obj.fs->wflag || f_size(file) == 0 || f_size(file) > pro_diagnostics.rom_capacity) {
+        return FLASHCART_ERR_LOAD;
+    }
+    fatfs_fix_file_size(file);
+    if (f_size(file) > pro_diagnostics.rom_capacity) {
+        return FLASHCART_ERR_LOAD;
+    }
+    uint32_t size = f_size(file);
+    pro_diagnostics.load_byte_swap = cart_card_byteswap != 0;
+    for (uint32_t offset = 0; offset < size;) {
+        UINT chunk = size - offset > 128 * 1024u ? 128 * 1024u : size - offset;
+        UINT read = 0;
+        if (f_read(file, (void *)(uintptr_t)(0x10000000u + offset), chunk, &read) != FR_OK || read != chunk) {
+            return FLASHCART_ERR_LOAD;
+        }
+        offset += chunk;
+        if (progress) {
+            progress(f_tell(file) / (float)size);
+        }
+    }
+    if (f_tell(file) != size) {
+        return FLASHCART_ERR_LOAD;
+    }
+    return FLASHCART_OK;
+}
+
 /** @brief Load a ROM into cartridge memory and stage its MCU launch path. */
 static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback_t *progress) {
     pro_diagnostics.path_error = NULL;
@@ -864,33 +896,7 @@ static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback
         pro_diagnostics.rom_path[0] = '\0';
         return FLASHCART_ERR_LOAD;
     }
-    result = FLASHCART_ERR_LOAD;
-    if (!file.obj.fs || file.obj.fs->wflag || f_size(&file) == 0 || f_size(&file) > pro_diagnostics.rom_capacity) {
-        goto done;
-    }
-    fatfs_fix_file_size(&file);
-    if (f_size(&file) > pro_diagnostics.rom_capacity) {
-        goto done;
-    }
-    uint32_t size = f_size(&file);
-    pro_diagnostics.load_byte_swap = cart_card_byteswap != 0;
-    for (uint32_t offset = 0; offset < size;) {
-        UINT chunk = size - offset > 128 * 1024u ? 128 * 1024u : size - offset;
-        UINT read = 0;
-        if (f_read(&file, (void *)(uintptr_t)(0x10000000u + offset), chunk, &read) != FR_OK || read != chunk) {
-            goto done;
-        }
-        offset += chunk;
-        if (progress) {
-            progress(f_tell(&file) / (float)size);
-        }
-    }
-    if (f_tell(&file) != size) {
-        goto done;
-    }
-    result = FLASHCART_OK;
-
-done:
+    result = pro_read_rom(&file, progress);
     pro_diagnostics.load_byte_swap = false;
     if (f_close(&file) != FR_OK) {
         result = FLASHCART_ERR_LOAD;
@@ -902,6 +908,37 @@ done:
         pro_diagnostics.rom_path[0] = '\0';
     }
     return result;
+}
+
+/** @brief Validate and read an open auxiliary file into cartridge ROM memory. */
+static flashcart_err_t pro_read_file (FIL *file, uint32_t rom_offset, uint32_t file_offset) {
+    if (file_offset > f_size(file) || f_size(file) - file_offset > pro_diagnostics.rom_capacity - rom_offset) {
+        return FLASHCART_ERR_ARGS;
+    }
+    if (!file->obj.fs || file->obj.fs->wflag) {
+        return FLASHCART_ERR_LOAD;
+    }
+    fatfs_fix_file_size(file);
+    if (f_size(file) < file_offset || f_size(file) - file_offset > pro_diagnostics.rom_capacity - rom_offset) {
+        return FLASHCART_ERR_ARGS;
+    }
+    if (f_lseek(file, file_offset) != FR_OK || f_tell(file) != file_offset) {
+        return FLASHCART_ERR_LOAD;
+    }
+    uint32_t size = f_size(file) - file_offset;
+    for (uint32_t offset = 0; offset < size;) {
+        UINT chunk = size - offset > 128 * 1024u ? 128 * 1024u : size - offset;
+        UINT read = 0;
+        if (f_read(file, (void *)(uintptr_t)(0x10000000u + rom_offset + offset), chunk, &read) != FR_OK ||
+            read != chunk) {
+            return FLASHCART_ERR_LOAD;
+        }
+        offset += chunk;
+    }
+    if (f_tell(file) != f_size(file)) {
+        return FLASHCART_ERR_LOAD;
+    }
+    return FLASHCART_OK;
 }
 
 /** @brief Load a file from the given offset into cartridge ROM memory. */
@@ -920,38 +957,7 @@ static flashcart_err_t pro_load_file (char *file_path, uint32_t rom_offset, uint
     if (f_open(&file, utf8_path, FA_READ) != FR_OK) {
         return FLASHCART_ERR_LOAD;
     }
-    flashcart_err_t result = FLASHCART_ERR_LOAD;
-    if (file_offset > f_size(&file) || f_size(&file) - file_offset > pro_diagnostics.rom_capacity - rom_offset) {
-        result = FLASHCART_ERR_ARGS;
-        goto done;
-    }
-    if (!file.obj.fs || file.obj.fs->wflag) {
-        goto done;
-    }
-    fatfs_fix_file_size(&file);
-    if (f_size(&file) < file_offset || f_size(&file) - file_offset > pro_diagnostics.rom_capacity - rom_offset) {
-        result = FLASHCART_ERR_ARGS;
-        goto done;
-    }
-    if (f_lseek(&file, file_offset) != FR_OK || f_tell(&file) != file_offset) {
-        goto done;
-    }
-    uint32_t size = f_size(&file) - file_offset;
-    for (uint32_t offset = 0; offset < size;) {
-        UINT chunk = size - offset > 128 * 1024u ? 128 * 1024u : size - offset;
-        UINT read = 0;
-        if (f_read(&file, (void *)(uintptr_t)(0x10000000u + rom_offset + offset), chunk, &read) != FR_OK ||
-            read != chunk) {
-            goto done;
-        }
-        offset += chunk;
-    }
-    if (f_tell(&file) != f_size(&file)) {
-        goto done;
-    }
-    result = FLASHCART_OK;
-
-done:
+    flashcart_err_t result = pro_read_file(&file, rom_offset, file_offset);
     if (f_close(&file) != FR_OK) {
         result = FLASHCART_ERR_LOAD;
     }
