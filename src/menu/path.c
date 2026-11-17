@@ -20,6 +20,7 @@
  * @param min_length Minimum length to accommodate.
  */
 static void path_resize (path_t *path, size_t min_length) {
+    size_t root_offset = path->buffer && path->root ? (size_t)(path->root - path->buffer) : 0;
     path->capacity = min_length > PATH_CAPACITY_INITIAL ? min_length : PATH_CAPACITY_INITIAL;
     size_t alignment = path->capacity % PATH_CAPACITY_ALIGNMENT;
     if (alignment != (PATH_CAPACITY_ALIGNMENT - 1)) {
@@ -27,6 +28,7 @@ static void path_resize (path_t *path, size_t min_length) {
     }
     path->buffer = realloc(path->buffer, (path->capacity + 1) * sizeof(char));
     assert(path->buffer != NULL);
+    path->root = path->buffer + root_offset;
 }
 
 /**
