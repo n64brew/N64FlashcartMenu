@@ -8,7 +8,6 @@ Run host tests from the repository root:
 
 ```sh
 make -f tests/Makefile test-rom-info test-rom-info-sanitize
-make -f tests/Makefile test-rtc-view test-rtc-view-sanitize
 make -f tests/Makefile test-ed64-pro test-ed64-pro-sanitize
 ```
 

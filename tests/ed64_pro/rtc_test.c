@@ -304,21 +304,6 @@ static void test_ownership (void) {
     }
 }
 
-static void test_write_range (void) {
-    fixture();
-    time_t minimum = 0, maximum = 0;
-    TEST_CHECK(!ed64_pro_rtc_get_write_range(&minimum, &maximum));
-    mock.raw[1] = 0;
-    TEST_CHECK(ed64_pro_rtc_resync() == FLASHCART_ERR_INT);
-    TEST_CHECK(ed64_pro_rtc_get_write_range(&minimum, &maximum));
-    TEST_CHECK(minimum == PRO_RTC_MIN && maximum == PRO_RTC_MAX);
-    TEST_CHECK(mock.gets == 1 && mock.sets == 0);
-    mock.diagnostics.storage_state = ED64_PRO_STORAGE_MCU_OWNED;
-    TEST_CHECK(!ed64_pro_rtc_get_write_range(&minimum, &maximum));
-    ed64_pro_rtc_close();
-    TEST_CHECK(!ed64_pro_rtc_get_write_range(&minimum, &maximum));
-}
-
 static void test_lifecycle (void) {
     fixture();
     mock.hook_failed = true;
@@ -349,7 +334,6 @@ TEST_LIST = {
     {"RTC failed writes never retry or publish success", test_write_failures},
     {"RTC invalid hardware date can be repaired", test_invalid_repair},
     {"RTC hardware operations require menu ownership", test_ownership},
-    {"RTC write range requires hooks and ownership but permits invalid dates", test_write_range},
     {"RTC hooks close and reinstall without stale cached time", test_lifecycle},
     {NULL, NULL},
 };

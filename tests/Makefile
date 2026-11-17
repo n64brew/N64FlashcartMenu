@@ -7,7 +7,6 @@ HOST_FLAGS := -std=gnu11 -Wall -Wextra -Werror -g -Itests/stubs -Isrc -isystem s
 SANITIZE_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
 include tests/ed64_pro/host.mk
-include tests/rtc_view.mk
 
 ROM_INFO_TEST := $(HOST_BUILD_DIR)/rom_info_test
 ROM_INFO_SANITIZE := $(HOST_BUILD_DIR)/rom_info_test_sanitize

@@ -1067,7 +1067,6 @@ static flashcart_t flashcart_ed64_pro = {
     .set_save_writeback = NULL,
     .set_next_boot_mode = NULL,
     .get_error_message = pro_get_error_message,
-    .get_rtc_write_range = ed64_pro_rtc_get_write_range,
 };
 
 /** @brief Return the Pro adapter without accessing the cartridge. */

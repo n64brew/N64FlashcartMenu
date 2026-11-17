@@ -44,7 +44,7 @@ Local synthetic tests passed EEPROM (4/16 Kbit) and SRAM (32/96 KiB) persistence
 
 The Pro backend initializes libdragon time after mounting storage, then installs its clock hooks. The unchanged menu's later `rtc_init()` is idempotent. The menu, `time()`, `gettimeofday()`, and file timestamps use the Pro clock; ordinary reads advance a validated cache without MCU traffic.
 
-Settings → Time can write and verify the Pro clock, including initializing an invalid hardware date. Supported dates are 2000–2099. Only use `edlink` to set the clock while this menu is not running. Invalid dates and failed reads report errors instead of using a software fallback. Game launch keeps its existing read-only RTC mode.
+Pro-specific clock editing in Settings is deferred to a separate PR. Set the clock in the stock Pro menu or with `edlink` while this menu is not running. Hardware dates must be in 2000–2099. Invalid dates and failed reads report errors instead of using a software fallback. Game launch keeps its existing read-only RTC mode.
 
 ### Upstream license
 

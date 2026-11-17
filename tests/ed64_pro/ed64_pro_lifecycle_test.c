@@ -541,8 +541,6 @@ static void test_non_pro_callbacks (void) {
     TEST_ASSERT(flashcart_init(&prefix) == FLASHCART_OK);
     TEST_CHECK(flashcart_has_feature(FLASHCART_FEATURE_USB));
     TEST_CHECK(!flashcart_has_feature(FLASHCART_FEATURE_64DD));
-    time_t minimum, maximum;
-    TEST_CHECK(!flashcart_get_rtc_write_range(&minimum, &maximum));
     flashcart_firmware_version_t version = flashcart_get_firmware_version();
     TEST_CHECK(version.major == 1 && version.minor == 2 && version.revision == 3);
     TEST_CHECK(flashcart_load_rom("sd:/test.z64", true, NULL) == FLASHCART_OK);
