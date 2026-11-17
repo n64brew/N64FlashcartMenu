@@ -83,8 +83,8 @@ typedef struct {
     /** @brief The flashcart feature function */
     bool (*has_feature) (flashcart_features_t feature);
     /**
-     * @brief Optional cartridge display name; NULL keeps the legacy libcart name.
-     * ED64-Pro detection bypasses libcart, which has no Pro cartridge type.
+     * @brief Optional display name for cartridges detected outside libcart.
+     * NULL keeps the display name based on libcart's cartridge type.
      */
     const char *(*get_name)(void);
     /** @brief The flashcart firmware version function */
@@ -154,10 +154,10 @@ bool flashcart_has_feature (flashcart_features_t feature);
 flashcart_firmware_version_t flashcart_get_firmware_version (void);
 
 /**
- * @brief Return the optional cartridge display name, or NULL for legacy backends.
+ * @brief Return the backend's cartridge display name, or NULL if none is provided.
  *
- * The bundled libcart has no EverDrive-64 Pro cartridge type. Pro is detected
- * separately, so the "Settings" screen uses this name to identify it correctly.
+ * Backends detected outside libcart can provide a name for display in Settings.
+ * Callers can fall back to libcart's cartridge type when no name is provided.
  */
 const char *flashcart_get_name (void);
 
