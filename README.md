@@ -25,7 +25,7 @@ The current state of support is:
 ### Help wanted (Work in Progress)
 * EverDrive-64 (X and V series)
 * DaisyDrive
-* EverDrive-64 Pro
+* EverDrive-64 Pro series
 * ED64P (clones)
 
 ### Not yet planned
