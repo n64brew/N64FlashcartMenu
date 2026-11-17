@@ -35,12 +35,12 @@ intermittent runtime results. [Embedded-program audit](../output/unresolved-qual
 
 ## Method and evidence accounting
 
-[`menu_stress.py`](../tests/menu_stress.py) records scripts, commands, timings,
+The historical menu-stress recorder retained scripts, commands, timings,
 return codes and a PNG after each transition. The schedule enters six nested
 directories, opens a Unicode-named ROM, changes red/green artwork both ways and
 returns. The final 8 MiB check instead uses the ASCII leaf `mario.z64`.
 Separate cases exercise absent artwork, text and long ZIP entry names.
-See [reproduction instructions](../tests/README.menu-stress.md).
+The generic recorder and console diagnostics are deferred to separate PRs.
 
 [Evidence](../output/unresolved-qualification/20261116/) is ignored by Git and
 must accompany external reports. Earlier passing controls include screen checks
