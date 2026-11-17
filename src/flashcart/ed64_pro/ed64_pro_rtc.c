@@ -192,10 +192,6 @@ void ed64_pro_rtc_close (void) {
     pro_rtc_error = NULL;
 }
 
-rtc_range_t ed64_pro_rtc_get_range (void) {
-    return (rtc_range_t){.min = PRO_RTC_MIN, .max = PRO_RTC_MAX};
-}
-
 const char *ed64_pro_rtc_get_error_message (void) {
     return pro_rtc_error;
 }

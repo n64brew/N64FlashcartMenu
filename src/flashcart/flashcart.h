@@ -9,7 +9,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <rtc.h>
 
 /** @brief Flashcart error enumeration */
 typedef enum {
@@ -114,8 +113,6 @@ typedef struct {
     flashcart_err_t (*set_next_boot_mode) (flashcart_reboot_mode_t boot_mode);
     /** @brief Install writable system clock hooks and resync in the foreground, if supplied. */
     flashcart_err_t (*resync_rtc)(void);
-    /** @brief Optional supported range for the cartridge clock. */
-    rtc_range_t (*get_rtc_range)(void);
     /** @brief Optional error detail from retained state; NULL uses the generic message. Must not perform I/O. */
     char *(*get_error_message)(flashcart_err_t err);
 } flashcart_t;
@@ -151,9 +148,6 @@ flashcart_err_t flashcart_resync_rtc (void);
 
 /** @brief Whether the active hardware clock supports menu writes. */
 bool flashcart_rtc_is_writable (void);
-
-/** @brief Return the clock editing range; legacy clocks keep the existing menu limits. */
-rtc_range_t flashcart_get_rtc_range (void);
 
 /**
  * @brief Check if the flashcart has a specific feature.

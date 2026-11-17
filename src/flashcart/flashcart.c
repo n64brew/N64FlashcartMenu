@@ -274,11 +274,6 @@ bool flashcart_rtc_is_writable (void) {
         (rtc_get_source() == RTC_SOURCE_JOYBUS && rtc_is_source_available(RTC_SOURCE_JOYBUS));
 }
 
-rtc_range_t flashcart_get_rtc_range (void) {
-    return flashcart->get_rtc_range ? flashcart->get_rtc_range() :
-        (rtc_range_t){ .min = 820454400, .max = 3976214399LL };
-}
-
 /**
  * @brief Check if the flashcart has a specific feature.
  * 

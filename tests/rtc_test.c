@@ -111,10 +111,8 @@ static void sync_clock (void) {
 
 static void test_calendar (void) {
     fixture();
-    rtc_range_t range = ed64_pro_rtc_get_range();
-    TEST_CHECK(range.min == INT64_C(946684800));
-    TEST_CHECK(range.max == INT64_C(4102444799));
-    for (time_t timestamp = range.min; timestamp <= range.max; timestamp += 86400) {
+    const time_t minimum = INT64_C(946684800), maximum = INT64_C(4102444799);
+    for (time_t timestamp = minimum; timestamp <= maximum; timestamp += 86400) {
         struct tm expected = *gmtime(&timestamp);
         uint8_t raw[ED64_PRO_RTC_SIZE];
         TEST_ASSERT(pro_rtc_encode(timestamp + 86399, raw));
@@ -132,8 +130,8 @@ static void test_calendar (void) {
         TEST_CHECK(decoded == timestamp + 86399);
     }
     uint8_t raw[ED64_PRO_RTC_SIZE];
-    TEST_CHECK(!pro_rtc_encode(range.min - 1, raw));
-    TEST_CHECK(!pro_rtc_encode(range.max + 1, raw));
+    TEST_CHECK(!pro_rtc_encode(minimum - 1, raw));
+    TEST_CHECK(!pro_rtc_encode(maximum + 1, raw));
     TEST_CHECK(!pro_rtc_encode(-1, raw));
 }
 
