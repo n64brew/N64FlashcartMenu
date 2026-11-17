@@ -12,7 +12,7 @@ Files are made available:
 	- None.
 
 - **Bug Fixes**
-	- None.
+	- Fix: Long nested folder names cause the menu path buffer to grow, pointing to freed memory.
 
 - **Documentation**
 	- None.
