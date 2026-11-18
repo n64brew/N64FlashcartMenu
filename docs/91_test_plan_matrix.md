@@ -73,6 +73,7 @@ Before starting a full test cycle, document the current baseline status to track
 - ED64 V3: Limited USB support (older revision)
 - ED64 V3: Requires manual CIC/region setting
 - ED64 Pro: Firmware `26.1014` has a bug that corrupts the last four bytes of 128 KiB FlashRAM and 128 KiB SRAM saves. This does not affect known retail games; homebrew using those bytes needs a firmware fix.
+- ED64 Pro memory: tested on an original NTSC-U console with an 8 MiB Expansion Pak; intermittent menu preview/startup faults with a 4 MiB Jumper Pak remain unresolved.
 - ED64 Pro Diagnostics: cartridge button and 3.3 V supply supported; the cartridge has no temperature reading. See [diagnostics](ed64_pro_diagnostics.md).
 - SummerCart64: Most feature-complete (includes diagnostics & BIOS updates)
 

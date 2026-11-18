@@ -13,6 +13,13 @@ debugging are not implemented.
 N64FlashcartMenu retains its AGPL license; the adapted driver retains the
 upstream copyright and MIT notice [below](#upstream-license).
 
+### Support limits
+
+The tested configuration is an original NTSC-U console with an 8 MiB Expansion
+Pak. Intermittent menu preview/startup faults with a 4 MiB Jumper Pak remain
+unresolved. Use an Expansion Pak; native DD requires one independently of this
+menu limitation.
+
 ### Transport and storage ownership
 
 The cartridge-local driver handles register/FIFO access, command framing,
@@ -81,9 +88,6 @@ cartridge button to advance disks. The menu's three-slot preview does not limit
 the firmware's swap group. DD launches use STD RTC; ordinary ROM launches use
 RDO. Set the clock in Settings > Time before launching a disk: firmware
 `26.1014` does not apply native DD RTC SET commands.
-
-Intermittent preview/startup faults can occur with a 4 MiB Jumper Pak. Use an
-Expansion Pak if affected; native DD always requires one.
 
 ### Real-time clock
 
