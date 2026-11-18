@@ -37,6 +37,14 @@
 #error Injected-write test requires ED64_PRO_TEST_FAIL_WRITE_N=1
 #endif
 
+#if (defined(ED64_PRO_TEST_DIAGNOSTICS) || defined(ED64_PRO_TEST_IPL)) && !defined(ED64_PRO_TEST_STORAGE)
+#error Read-only diagnostics and IPL staging require storage mode
+#endif
+#if (defined(ED64_PRO_TEST_DIAGNOSTICS) || defined(ED64_PRO_TEST_IPL)) && \
+    (defined(ED64_PRO_TEST_RAW_WRITE) || defined(ED64_PRO_TEST_STORAGE_FAIL_WRITE))
+#error Read-only tests cannot enable writes
+#endif
+
 #if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO) && !defined(ED64_PRO_TEST_LOAD)
 enum {
     STRESS_OPERATIONS = 100000,
@@ -316,16 +324,65 @@ static uint32_t fixture_crc32 (uint32_t crc, const uint8_t *data, size_t length)
     return crc;
 }
 
+#ifdef ED64_PRO_TEST_DIAGNOSTICS
+static struct {
+    uint32_t samples;
+    uint32_t first_ticks;
+    uint32_t last_ticks;
+    uint32_t min_interval;
+    uint32_t max_interval;
+    uint16_t minimum_mv;
+    uint16_t maximum_mv;
+    uint32_t pressed_samples;
+} diagnostic_samples;
+
+/** @brief Poll the real callbacks between read chunks, spanning the voltage cache period. */
+static bool sample_diagnostics (void) {
+    uint32_t now = TICKS_READ();
+    if (diagnostic_samples.samples && now - diagnostic_samples.last_ticks < TICKS_FROM_MS(250)) {
+        return true;
+    }
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    uint16_t voltage_mv = 0;
+    bool pressed = false;
+    if (!adapter->get_voltage || !adapter->get_button_state ||
+        adapter->get_voltage(&voltage_mv) != FLASHCART_OK || adapter->get_button_state(&pressed) != FLASHCART_OK) {
+        printf("Diagnostics FAILED: voltage/button callback.\n");
+        return false;
+    }
+    /* Check encoding invariants, not an invented voltage calibration band. */
+    if (!voltage_mv || voltage_mv % 10u) {
+        printf("Diagnostics FAILED: invalid voltage %u mV.\n", voltage_mv);
+        return false;
+    }
+    if (!diagnostic_samples.samples) {
+        diagnostic_samples.first_ticks = now;
+        diagnostic_samples.minimum_mv = diagnostic_samples.maximum_mv = voltage_mv;
+        diagnostic_samples.min_interval = UINT32_MAX;
+    } else {
+        uint32_t interval = now - diagnostic_samples.last_ticks;
+        if (interval < diagnostic_samples.min_interval) diagnostic_samples.min_interval = interval;
+        if (interval > diagnostic_samples.max_interval) diagnostic_samples.max_interval = interval;
+        if (voltage_mv < diagnostic_samples.minimum_mv) diagnostic_samples.minimum_mv = voltage_mv;
+        if (voltage_mv > diagnostic_samples.maximum_mv) diagnostic_samples.maximum_mv = voltage_mv;
+    }
+    diagnostic_samples.last_ticks = now;
+    diagnostic_samples.samples++;
+    diagnostic_samples.pressed_samples += pressed;
+    return true;
+}
+#endif
+
 /**
  * @brief Read and time the storage fixture, then verify its size and configured CRC32.
  */
-static bool read_fixture (void) {
+static bool read_fixture (bool report) {
     FIL file;
     if (f_open(&file, ED64_PRO_TEST_FIXTURE_PATH, FA_READ) != FR_OK) {
         printf("Storage read FAILED: cannot open read.bin\n");
         return false;
     }
-    print_volume(&file);
+    if (report) print_volume(&file);
     bool valid = f_size(&file) == STORAGE_FIXTURE_SIZE;
     uint32_t crc = UINT32_MAX;
     uint32_t bytes = 0;
@@ -340,6 +397,12 @@ static bool read_fixture (void) {
             crc = fixture_crc32(crc, storage_buffer, count);
             bytes += count;
         }
+#ifdef ED64_PRO_TEST_DIAGNOSTICS
+        if (valid && !sample_diagnostics()) {
+            f_close(&file);
+            return false;
+        }
+#endif
     }
     if (!valid) {
         printf("Storage read FAILED: size/read at %" PRIu32 " bytes\n", bytes);
@@ -350,19 +413,82 @@ static bool read_fixture (void) {
         return false;
     }
     crc ^= UINT32_MAX;
-    printf("Storage read: %" PRIu32 " bytes, CRC32 %08" PRIX32 "\n", bytes, crc);
-    printf(
-        "Read I/O: %" PRIu32 " ms, %" PRIu64 " KiB/s\n",
-        TICKS_TO_MS(read_ticks),
-        read_ticks ? (uint64_t)bytes * TICKS_PER_SECOND / read_ticks / 1024 : 0
-    );
+    if (report) {
+        printf("Storage read: %" PRIu32 " bytes, CRC32 %08" PRIX32 "\n", bytes, crc);
+        printf(
+            "Read I/O: %" PRIu32 " ms, %" PRIu64 " KiB/s\n",
+            TICKS_TO_MS(read_ticks),
+            read_ticks ? (uint64_t)bytes * TICKS_PER_SECOND / read_ticks / 1024 : 0
+        );
+    }
     if (crc != (uint32_t)ED64_PRO_TEST_FIXTURE_CRC32) {
         printf("Storage read FAILED: expected %08" PRIX32 "\n", (uint32_t)ED64_PRO_TEST_FIXTURE_CRC32);
         return false;
     }
-    printf("Storage read PASS.\n");
+    if (report) printf("Storage read PASS.\n");
     return true;
 }
+
+#ifdef ED64_PRO_TEST_DIAGNOSTICS
+/** @brief Repeat complete CRC-checked reads for at least five seconds with live diagnostics. */
+static bool run_readonly_diagnostics (void) {
+    uint32_t passes = 0;
+    do {
+        if (!read_fixture(false)) return false;
+        passes++;
+    } while (diagnostic_samples.last_ticks - diagnostic_samples.first_ticks < TICKS_FROM_MS(5000));
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    uint32_t sample_span = diagnostic_samples.last_ticks - diagnostic_samples.first_ticks;
+    if (diagnostic_samples.samples < 5 || sample_span < TICKS_FROM_MS(5000) ||
+        diagnostics->state != ED64_PRO_READY || diagnostics->storage_state != ED64_PRO_STORAGE_FATFS_OWNED ||
+        diagnostics->storage_failed || ed64_pro_ll_get_failure()->code != ED64_PRO_LL_OK) {
+        printf("Diagnostics FAILED: sample duration or retained storage/transport fault.\n");
+        return false;
+    }
+    printf("Read-only diagnostics PASS.\n");
+    printf("Read passes: %" PRIu32 ", CRC32 %08" PRIX32 " each\n", passes, (uint32_t)ED64_PRO_TEST_FIXTURE_CRC32);
+    printf("Samples: %" PRIu32 " over %" PRIu32 " ms\n", diagnostic_samples.samples, TICKS_TO_MS(sample_span));
+    printf("Sample intervals: %" PRIu32 "..%" PRIu32 " ms\n",
+           TICKS_TO_MS(diagnostic_samples.min_interval), TICKS_TO_MS(diagnostic_samples.max_interval));
+    printf("Voltage: %u..%u mV; pressed samples: %" PRIu32 "\n",
+           diagnostic_samples.minimum_mv, diagnostic_samples.maximum_mv, diagnostic_samples.pressed_samples);
+    if (diagnostic_samples.minimum_mv < 3000) printf("Low-voltage warning: sample below 3000 mV.\n");
+    return true;
+}
+#endif
+
+#ifdef ED64_PRO_TEST_IPL
+#ifndef ED64_PRO_TEST_IPL_PATH
+#define ED64_PRO_TEST_IPL_PATH "/ed64pro-test/NDDJ2.n64"
+#endif
+static unsigned ipl_progress_calls;
+static float ipl_progress_last;
+static bool ipl_progress_valid = true;
+
+static void ipl_progress (float progress) {
+    if (!(progress >= ipl_progress_last && progress <= 1.0f)) ipl_progress_valid = false;
+    ipl_progress_last = progress;
+    ipl_progress_calls++;
+}
+
+/** @brief Stage the canonical native IPL without configuring or starting DD services. */
+static bool stage_readonly_ipl (void) {
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    flashcart_err_t error = adapter->load_64dd_ipl(ED64_PRO_TEST_IPL_PATH, ipl_progress);
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    if (error != FLASHCART_OK || !ipl_progress_valid || ipl_progress_last != 1.0f || !ipl_progress_calls ||
+        !diagnostics->dd_requested || !diagnostics->ipl_ready || diagnostics->disk_ready || diagnostics->loading_ipl ||
+        diagnostics->state != ED64_PRO_READY || diagnostics->storage_state != ED64_PRO_STORAGE_FATFS_OWNED ||
+        diagnostics->storage_failed || ed64_pro_ll_get_failure()->code != ED64_PRO_LL_OK) {
+        printf("Read-only IPL staging FAILED (%u): %s\n", (unsigned)error, ed64_pro_get_error_message());
+        return false;
+    }
+    printf("Read-only IPL staging PASS: 4 MiB, %u progress callbacks.\n", ipl_progress_calls);
+    printf("Header: %08" PRIX32 ", code: %08" PRIX32 "\n", diagnostics->ipl_header[0], diagnostics->ipl_code);
+    printf("IPL copied to FCI; mapped readback was not tested.\n");
+    return true;
+}
+#endif
 
 #ifdef ED64_PRO_TEST_RAW_WRITE
 /**
@@ -577,9 +703,18 @@ static void run_storage (void) {
     }
     printf("Mounted; host tools must remain idle.\n");
     console_render();
-    if (!read_fixture()) {
-        terminal();
-    }
+#ifdef ED64_PRO_TEST_DIAGNOSTICS
+    if (!run_readonly_diagnostics()) terminal();
+#else
+    if (!read_fixture(true)) terminal();
+#endif
+#ifdef ED64_PRO_TEST_IPL
+    if (!stage_readonly_ipl()) terminal();
+#endif
+#if defined(ED64_PRO_TEST_DIAGNOSTICS) || defined(ED64_PRO_TEST_IPL)
+    printf("No writes, release or START. Power off before host access.\n");
+    terminal();
+#endif
 #ifdef ED64_PRO_TEST_STORAGE_FAIL_WRITE
     run_storage_fail_write();
 #endif

@@ -51,11 +51,28 @@ Additional modes use the same Makefile and separate build/output directories:
 
 | Check | `TEST_FLAGS` |
 | --- | --- |
+| Read-only voltage/button polling during CRC-checked SD reads | `-DED64_PRO_TEST_STORAGE -DED64_PRO_TEST_DIAGNOSTICS` |
+| Read-only 4 MiB IPL staging | `-DED64_PRO_TEST_STORAGE -DED64_PRO_TEST_IPL` |
 | Raw-sector writes to `scratch.bin` | `-DED64_PRO_TEST_STORAGE -DED64_PRO_TEST_RAW_WRITE` |
 | Injected write failure and refused handoff | `-DED64_PRO_TEST_STORAGE -DED64_PRO_TEST_STORAGE_FAIL_WRITE -DED64_PRO_TEST_FAIL_WRITE_N=1` |
 | Oversized ROM rejection | `-DED64_PRO_TEST_LOAD -DED64_PRO_TEST_OVERSIZE` |
 | 8/32/64 MiB load timing | `-DED64_PRO_TEST_LOAD -DED64_PRO_TEST_LOAD_TIMING` |
 | Injected PI timeout | `-DED64_PRO_TEST_FORCE_TIMEOUT` |
+
+Diagnostics mode repeats complete `read.bin` checks for at least five seconds
+while polling the actual voltage and button callbacks between read chunks. It
+reports read passes, sample count/span, sampling intervals, voltage min/max and
+pressed samples. A stable voltage is valid; the test checks nonzero, 10 mV
+encoding and reports the existing low-voltage warning separately. It does not
+verify physical button transitions or calibrate the voltage reading.
+
+IPL mode requires a user-supplied 4 MiB native IPL at
+`/ed64pro-test/NDDJ2.n64`; override `ED64_PRO_TEST_IPL_PATH` for another location,
+keeping the canonical `NDDJ2.n64`, `NDDE0.n64` or `NDXJ0.n64` filename. It checks
+the production callback's progress and retained readiness after staging to FCI.
+It does not start DD services or verify the mapped IPL contents. Diagnostics and
+IPL modes may be combined; both halt without writes, storage release or START,
+and cannot be combined with write modes. Power off before host access.
 
 Use `--extended` when preparing fixtures for the oversize or timing modes.
 Timing mode reports durations without comparing contents. Write modes modify
