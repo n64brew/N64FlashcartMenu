@@ -61,7 +61,7 @@ and a one-second cache; a failed refresh returns an error. Startup uses the same
 reading for its low-voltage warning below 3000 mV.
 
 See [diagnostics](../../../docs/ed64_pro_diagnostics.md) for controls and manual
-checks.
+checks, and the [shared voltage rationale and regression checks](../../../tests/flashcart_diagnostics.md).
 
 ### Native 64DD
 
@@ -107,7 +107,9 @@ second. Native DD RTC SET is affected by the firmware limitation above; writing
 through Settings > Time works.
 
 Run the [host tests](../../../tests/README.md) for transport, lifecycle,
-adapter, diagnostics, RTC, and DD loading coverage.
+adapter, diagnostics, RTC, and DD loading coverage. See the
+[build-specific hardware results](../../../tests/ed64_pro/VALIDATION.md) for
+measured RTC/save outcomes and remaining merge evidence.
 
 ### Upstream license
 
