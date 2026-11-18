@@ -652,6 +652,7 @@ static void power_on (void) {
     memset(&mock, 0, sizeof(mock));
     memset(&pro_ll, 0, sizeof(pro_ll));
     memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
+    memset(&pro_runtime, 0, sizeof(pro_runtime));
     memset(&pro_voltage, 0, sizeof(pro_voltage));
     mock.voltage_bcd = 0x0330;
     memset(pro_error_message, 0, sizeof(pro_error_message));

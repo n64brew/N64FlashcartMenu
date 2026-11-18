@@ -556,7 +556,7 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     uint32_t deadline
 ) {
     (void)deadline;
-    TEST_CHECK(mock.flags == (pro_diagnostics.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0));
+    TEST_CHECK(mock.flags == (pro_runtime.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0));
     mock.fci[mock.operations] = fci;
     mock.events[mock.events_count++] = 'R';
     return sector_transfer(lba, count, false);
@@ -652,7 +652,7 @@ static void progress_callback (float progress) {
  */
 int fat_mount (const char *prefix, const fat_disk_t *disk, int flags) {
     TEST_CHECK(strcmp(prefix, "sd:/") == 0 && flags == 0);
-    TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_MOUNTING);
+    TEST_CHECK(pro_runtime.storage_state == ED64_PRO_STORAGE_MOUNTING);
     mock.mounts++;
     mock.disk = disk;
     uint8_t sector[512];
@@ -700,6 +700,7 @@ static void fixture (void) {
     memset(&mock, 0, sizeof(mock));
     mock.memory_size = 8 * 1024 * 1024;
     memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
+    memset(&pro_runtime, 0, sizeof(pro_runtime));
     memset(&pro_voltage, 0, sizeof(pro_voltage));
     mock.voltage_bcd = 0x0330;
     pro_diagnostics.state = ED64_PRO_READY;
@@ -715,7 +716,7 @@ static void fixture (void) {
  */
 static void observe_native_init (void) {
     TEST_CHECK(mock.mounts == 1 && mock.rtc_starts == 1 && mock.rtc_running);
-    TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_FATFS_OWNED);
+    TEST_CHECK(pro_runtime.storage_state == ED64_PRO_STORAGE_FATFS_OWNED);
     TEST_CHECK(cart_type == CART_MAX);
 }
 
@@ -875,7 +876,7 @@ static void test_firmware_query_failure (void) {
 static void test_mount (void) {
     mounted_fixture();
     TEST_CHECK(mock.mounts == 1 && mock.disk == &pro_disk);
-    TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_FATFS_OWNED);
+    TEST_CHECK(pro_runtime.storage_state == ED64_PRO_STORAGE_FATFS_OWNED);
     TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4) && mock.mounts == 1);
     TEST_CHECK(pro_disk.disk_status() == 0);
     TEST_CHECK(mock.rtc_starts == 1 && test_rtc_init_calls == 1);
@@ -947,10 +948,10 @@ static void test_sector_chunks (void) {
     TEST_CHECK(mock.lbas[0] == 100 && mock.lbas[1] == 164 && mock.lbas[2] == 228);
     TEST_CHECK(mock.counts[0] == 64 && mock.counts[1] == 64 && mock.counts[2] == 1);
     TEST_CHECK(data[0] == 0xA5 && data[sizeof(data) - 1] == 0xA5);
-    TEST_CHECK(!pro_diagnostics.unsynced);
+    TEST_CHECK(!pro_runtime.unsynced);
     TEST_CHECK(pro_disk.disk_write(data, 200, 65) == RES_OK);
-    TEST_CHECK(mock.writes == 2 && pro_diagnostics.unsynced);
-    TEST_CHECK(pro_disk.disk_ioctl(CTRL_SYNC, NULL) == RES_OK && !pro_diagnostics.unsynced);
+    TEST_CHECK(mock.writes == 2 && pro_runtime.unsynced);
+    TEST_CHECK(pro_disk.disk_ioctl(CTRL_SYNC, NULL) == RES_OK && !pro_runtime.unsynced);
     TEST_CHECK(pro_disk.disk_ioctl(GET_SECTOR_COUNT, NULL) == RES_PARERR);
 }
 
@@ -1020,7 +1021,7 @@ static void test_storage_latch (void) {
     mock.failure.nresp_valid = true;
     mock.failure.nresp = 0xA3;
     TEST_CHECK(pro_disk.disk_write(data, 123, 65) == RES_ERROR);
-    TEST_CHECK(pro_diagnostics.unsynced && pro_diagnostics.storage_failed);
+    TEST_CHECK(pro_runtime.unsynced && pro_diagnostics.storage_failed);
     TEST_CHECK(pro_diagnostics.storage_lba == 187 && pro_diagnostics.storage_count == 1);
     TEST_CHECK(pro_disk.disk_status() == STA_NOINIT);
     TEST_CHECK(pro_disk.disk_read(data, 0, 1) == RES_NOTRDY);
@@ -1042,7 +1043,7 @@ static void test_release (void) {
     TEST_CHECK(pro_release_storage() == FLASHCART_OK);
     TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 1);
     TEST_CHECK(mock.events[0] == 'U' && mock.events[1] == 'F');
-    TEST_CHECK(pro_diagnostics.storage_state == ED64_PRO_STORAGE_MCU_OWNED);
+    TEST_CHECK(pro_runtime.storage_state == ED64_PRO_STORAGE_MCU_OWNED);
     TEST_CHECK(pro_disk.disk_status() == STA_NOINIT);
 }
 
@@ -1086,9 +1087,9 @@ static void test_rom_loading (void) {
     TEST_CHECK(mock.flag_calls == 6 && mock.flags == 0);
     TEST_CHECK(memcmp(mock.events, "SRCSRCSRC", 9) == 0);
     TEST_CHECK(mock.progress_calls == 3 && mock.progress[0] > 0 && mock.progress[2] == 1.0f);
-    TEST_CHECK(pro_diagnostics.launch_ready && pro_diagnostics.launch_extent == 300 * 1024);
-    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/games/test.v64") == 0);
-    TEST_CHECK(!pro_diagnostics.load_byte_swap);
+    TEST_CHECK(pro_runtime.launch_ready && pro_runtime.launch_extent == 300 * 1024);
+    TEST_CHECK(strcmp(pro_runtime.rom_path, "/games/test.v64") == 0);
+    TEST_CHECK(!pro_runtime.load_byte_swap);
 }
 
 /**
@@ -1098,7 +1099,7 @@ static void test_rom_load_refusals (void) {
     mounted_fixture();
     mock.file_size = (uint64_t)pro_diagnostics.rom_capacity + 1;
     TEST_CHECK(pro_load_rom("sd:/too-big.z64", NULL) == FLASHCART_ERR_LOAD);
-    TEST_CHECK(mock.file_reads == 0 && mock.closes == 1 && !pro_diagnostics.launch_ready);
+    TEST_CHECK(mock.file_reads == 0 && mock.closes == 1 && !pro_runtime.launch_ready);
     TEST_CHECK(pro_get_error_message(FLASHCART_ERR_LOAD) == NULL);
     mounted_fixture();
     mock.fs.wflag = 1;
@@ -1107,11 +1108,11 @@ static void test_rom_load_refusals (void) {
     mounted_fixture();
     mock.short_read = 512;
     TEST_CHECK(pro_load_rom("sd:/short.z64", NULL) == FLASHCART_ERR_LOAD);
-    TEST_CHECK(mock.closes == 1 && !pro_diagnostics.launch_ready);
+    TEST_CHECK(mock.closes == 1 && !pro_runtime.launch_ready);
     mounted_fixture();
     mock.close_result = FR_DISK_ERR;
     TEST_CHECK(pro_load_rom("sd:/close.z64", NULL) == FLASHCART_ERR_LOAD);
-    TEST_CHECK(!pro_diagnostics.launch_ready);
+    TEST_CHECK(!pro_runtime.launch_ready);
     mounted_fixture();
     mock.fail_flag_call = 2;
     cart_card_byteswap = 1;
@@ -1130,8 +1131,8 @@ static void test_auxiliary_loading (void) {
     mock.operations = 0;
     TEST_CHECK(pro_load_file("sd:/rom.smc", 0x80000, 512) == FLASHCART_OK);
     TEST_CHECK(mock.seeks == 1 && mock.destinations[0] == 0x10080000u && mock.read_sizes[0] == 4096);
-    TEST_CHECK(pro_diagnostics.launch_ready && pro_diagnostics.launch_extent == 0x81000);
-    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/emulator.z64") == 0);
+    TEST_CHECK(pro_runtime.launch_ready && pro_runtime.launch_extent == 0x81000);
+    TEST_CHECK(strcmp(pro_runtime.rom_path, "/emulator.z64") == 0);
 }
 
 /**
@@ -1155,7 +1156,7 @@ static void test_load_arguments (void) {
     TEST_CHECK(pro_load_file("sd:/rom.smc", 0, 1536) == FLASHCART_ERR_ARGS && mock.file_reads == reads);
     TEST_ASSERT(pro_load_rom("sd:/emulator.z64", NULL) == FLASHCART_OK);
     TEST_CHECK(pro_load_file("sd:/rom.smc", pro_diagnostics.rom_capacity, 0) == FLASHCART_ERR_ARGS);
-    TEST_CHECK(!pro_diagnostics.launch_ready);
+    TEST_CHECK(!pro_runtime.launch_ready);
     TEST_CHECK(pro_disk_read((void *)0x10000001u, 0, 1) == RES_PARERR);
     TEST_CHECK(pro_disk_read((void *)(uintptr_t)(0x10000000u + pro_diagnostics.rom_capacity), 0, 1) == RES_PARERR);
     TEST_CHECK(pro_disk_write((void *)0x10000000u, 0, 1) == RES_PARERR);
@@ -1179,19 +1180,19 @@ static void test_save_mapping (void) {
     unsigned traffic = mock.transport_calls;
     for (unsigned type = 0; type < __FLASHCART_SAVE_TYPE_END; type++) {
         TEST_CHECK(pro_set_save_type(type) == FLASHCART_OK);
-        TEST_CHECK(pro_diagnostics.brm_type == types[type] && pro_diagnostics.brm_size == SAVE_SIZE[type]);
+        TEST_CHECK(pro_runtime.brm_type == types[type] && pro_runtime.brm_size == SAVE_SIZE[type]);
         if (type != FLASHCART_SAVE_TYPE_NONE) {
-            TEST_CHECK(!pro_diagnostics.save_ready);
+            TEST_CHECK(!pro_runtime.save_ready);
             TEST_CHECK(pro_load_save("sd:/saves/test.sav") == FLASHCART_OK);
-            TEST_CHECK(strcmp(pro_diagnostics.save_path, "/saves/test.sav") == 0 && pro_diagnostics.save_ready);
+            TEST_CHECK(strcmp(pro_runtime.save_path, "/saves/test.sav") == 0 && pro_runtime.save_ready);
         } else {
-            TEST_CHECK(pro_diagnostics.save_ready && pro_diagnostics.save_path[0] == '\0');
+            TEST_CHECK(pro_runtime.save_ready && pro_runtime.save_path[0] == '\0');
         }
     }
     TEST_CHECK(mock.transport_calls == traffic && mock.opens == 0);
     TEST_CHECK(pro_set_save_type(__FLASHCART_SAVE_TYPE_END) == FLASHCART_ERR_ARGS);
     TEST_CHECK(pro_set_save_type((flashcart_save_type_t)-1) == FLASHCART_ERR_ARGS);
-    TEST_CHECK(!pro_diagnostics.save_ready);
+    TEST_CHECK(!pro_runtime.save_ready);
 }
 
 /**
@@ -1201,15 +1202,15 @@ static void test_save_staging_reset (void) {
     mounted_fixture();
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_SRAM_1MBIT) == FLASHCART_OK);
     TEST_ASSERT(pro_load_save("sd:/save.sav") == FLASHCART_OK);
-    TEST_CHECK(pro_load_save(NULL) == FLASHCART_ERR_ARGS && !pro_diagnostics.save_ready);
+    TEST_CHECK(pro_load_save(NULL) == FLASHCART_ERR_ARGS && !pro_runtime.save_ready);
     TEST_ASSERT(pro_load_save("sd:/save.sav") == FLASHCART_OK);
     TEST_CHECK(pro_set_save_type(FLASHCART_SAVE_TYPE_NONE) == FLASHCART_OK);
-    TEST_CHECK(pro_diagnostics.save_path[0] == '\0' && pro_diagnostics.brm_size == 0);
+    TEST_CHECK(pro_runtime.save_path[0] == '\0' && pro_runtime.brm_size == 0);
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
     TEST_ASSERT(pro_load_save("sd:/save.eep") == FLASHCART_OK);
     TEST_ASSERT(pro_load_rom("sd:/another.z64", NULL) == FLASHCART_OK);
-    TEST_CHECK(pro_diagnostics.brm_type == ED64_PRO_BRM_OFF && !pro_diagnostics.save_ready);
-    TEST_CHECK(pro_diagnostics.save_path[0] == '\0');
+    TEST_CHECK(pro_runtime.brm_type == ED64_PRO_BRM_OFF && !pro_runtime.save_ready);
+    TEST_CHECK(pro_runtime.save_path[0] == '\0');
 }
 
 /**
@@ -1261,7 +1262,7 @@ static void test_game_handoff_callback (void) {
     for (unsigned failure = 0; failure < 2; failure++) {
         staged_game_fixture(true);
         if (failure == 0) {
-            pro_diagnostics.unsynced = true;
+            pro_runtime.unsynced = true;
         } else {
             mock.fail_command = 2;
         }
@@ -1317,7 +1318,7 @@ static void test_launch_preflight (void) {
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0);
     TEST_ASSERT(pro_load_save("sd:/game.eep") == FLASHCART_OK);
-    pro_diagnostics.unsynced = true;
+    pro_runtime.unsynced = true;
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD);
     TEST_CHECK(mock.unmounts == 0 && mock.fs_inits == 0 && mock.command_calls == 0);
 }
@@ -1330,12 +1331,12 @@ static void test_cp437_paths (void) {
     char rom[] = "sd:/Caf\xC3\xA9/\xC3\xA9.z64";
     TEST_CHECK(pro_load_rom(rom, NULL) == FLASHCART_OK);
     TEST_CHECK(strcmp(mock.opened_path, "/Caf\xC3\xA9/\xC3\xA9.z64") == 0);
-    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/Caf\x82/\x82.z64") == 0);
+    TEST_CHECK(strcmp(pro_runtime.rom_path, "/Caf\x82/\x82.z64") == 0);
     TEST_CHECK(strcmp(rom, "sd:/Caf\xC3\xA9/\xC3\xA9.z64") == 0);
     TEST_CHECK(mock.stats == 0);
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
     TEST_CHECK(pro_load_save("sd:/Caf\xC3\xA9/saves/\xC3\xA9.sav") == FLASHCART_OK);
-    TEST_CHECK(strcmp(pro_diagnostics.save_path, "/Caf\x82/saves/\x82.sav") == 0);
+    TEST_CHECK(strcmp(pro_runtime.save_path, "/Caf\x82/saves/\x82.sav") == 0);
     TEST_CHECK(mock.stats == 0);
     TEST_CHECK(pro_deinit() == FLASHCART_OK);
     TEST_CHECK(strcmp(mock.launch_paths[0], "/Caf\x82/\x82.z64") == 0);
@@ -1344,7 +1345,7 @@ static void test_cp437_paths (void) {
     mounted_fixture();
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
     TEST_CHECK(pro_load_save("/µùÑµ£¼Φ¬₧-├⌐.sav") == FLASHCART_OK);
-    TEST_CHECK(strcmp(pro_diagnostics.save_path, "/\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E-\xC3\xA9.sav") == 0);
+    TEST_CHECK(strcmp(pro_runtime.save_path, "/\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E-\xC3\xA9.sav") == 0);
     TEST_CHECK(mock.stats == 0);
 }
 
@@ -1362,14 +1363,14 @@ static void test_unicode_short_aliases (void) {
     mock.alias_count = 3;
     TEST_CHECK(pro_load_rom("sd:/日本語/Café/雪-😀.z64", NULL) == FLASHCART_OK);
     TEST_CHECK(strcmp(mock.opened_path, "/日本語/Café/雪-😀.z64") == 0);
-    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/NIPPON~1/Caf\x82/CAF\x90~2.Z64") == 0);
+    TEST_CHECK(strcmp(pro_runtime.rom_path, "/NIPPON~1/Caf\x82/CAF\x90~2.Z64") == 0);
     TEST_CHECK(mock.stats == 2);
     TEST_CHECK(strcmp(mock.stat_paths[0], "/日本語") == 0);
     TEST_CHECK(strcmp(mock.stat_paths[1], "/日本語/Café/雪-😀.z64") == 0);
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
     TEST_CHECK(mock.stats == 2);
     TEST_CHECK(pro_load_save("sd:/日本語/Café/雪-😀.sav") == FLASHCART_OK);
-    TEST_CHECK(strcmp(pro_diagnostics.save_path, "/NIPPON~1/Caf\x82/\x90T\x90~1.SAV") == 0);
+    TEST_CHECK(strcmp(pro_runtime.save_path, "/NIPPON~1/Caf\x82/\x90T\x90~1.SAV") == 0);
     TEST_CHECK(mock.stats == 4 && strcmp(mock.stat_paths[3], "/日本語/Café/雪-😀.sav") == 0);
     TEST_CHECK(pro_deinit() == FLASHCART_OK);
     TEST_CHECK(mock.stats == 4);
@@ -1401,7 +1402,7 @@ static void test_invalid_utf8_paths (void) {
         unsigned reads = mock.file_reads;
         unsigned io = mock.transport_calls;
         TEST_CHECK(pro_load_rom((char *)paths[i], NULL) == FLASHCART_ERR_ARGS);
-        TEST_CHECK(!pro_diagnostics.launch_ready && !pro_diagnostics.save_ready && pro_diagnostics.rom_path[0] == '\0');
+        TEST_CHECK(!pro_runtime.launch_ready && !pro_runtime.save_ready && pro_runtime.rom_path[0] == '\0');
         TEST_CHECK(mock.opens == opens && mock.file_reads == reads && mock.stats == 0 && mock.transport_calls == io);
         TEST_CHECK(strstr(pro_get_error_message(FLASHCART_ERR_ARGS), "invalid UTF-8") != NULL);
         TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
@@ -1418,7 +1419,7 @@ static void test_invalid_utf8_save_path (void) {
     TEST_ASSERT(pro_load_save("/old.sav") == FLASHCART_OK);
     unsigned io = mock.transport_calls;
     TEST_CHECK(pro_load_save("/日本語/\xED\xA0\x80.sav") == FLASHCART_ERR_ARGS);
-    TEST_CHECK(!pro_diagnostics.save_ready && pro_diagnostics.save_path[0] == '\0');
+    TEST_CHECK(!pro_runtime.save_ready && pro_runtime.save_path[0] == '\0');
     TEST_CHECK(mock.stats == 0 && mock.transport_calls == io);
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
 }
@@ -1454,7 +1455,7 @@ static void test_missing_or_invalid_alias (void) {
         flashcart_err_t expected = cases[i].result == FR_OK ? FLASHCART_ERR_ARGS : FLASHCART_ERR_LOAD;
         unsigned io = mock.transport_calls;
         TEST_CHECK(pro_load_save("/日本語.sav") == expected);
-        TEST_CHECK(pro_diagnostics.save_path[0] == '\0' && !pro_diagnostics.save_ready);
+        TEST_CHECK(pro_runtime.save_path[0] == '\0' && !pro_runtime.save_ready);
         TEST_CHECK(mock.stats == 1 && mock.transport_calls == io);
         TEST_CHECK(pro_get_error_message(expected) != NULL);
         TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
@@ -1462,8 +1463,8 @@ static void test_missing_or_invalid_alias (void) {
     }
     mounted_fixture();
     TEST_CHECK(pro_load_rom("/日本語.z64", NULL) == FLASHCART_ERR_LOAD);
-    TEST_CHECK(mock.opens == 0 && mock.file_reads == 0 && !pro_diagnostics.launch_ready);
-    TEST_CHECK(pro_diagnostics.rom_path[0] == '\0');
+    TEST_CHECK(mock.opens == 0 && mock.file_reads == 0 && !pro_runtime.launch_ready);
+    TEST_CHECK(pro_runtime.rom_path[0] == '\0');
 }
 
 /**
@@ -1479,7 +1480,7 @@ static void test_encoded_path_bounds (void) {
     }
     path[ED64_PRO_PATH_MAX] = '\0';
     TEST_CHECK(pro_load_rom(path, NULL) == FLASHCART_OK);
-    TEST_CHECK(strlen(pro_diagnostics.rom_path) == ED64_PRO_PATH_MAX && mock.stats == 0);
+    TEST_CHECK(strlen(pro_runtime.rom_path) == ED64_PRO_PATH_MAX && mock.stats == 0);
     unsigned opens = mock.opens;
     path[ED64_PRO_PATH_MAX] = 'a';
     path[ED64_PRO_PATH_MAX + 1] = '\0';
@@ -1493,10 +1494,10 @@ static void test_encoded_path_bounds (void) {
     mock.aliases[0].alias = "WATER~1";
     mock.alias_count = 1;
     TEST_CHECK(pro_load_rom(path, NULL) == FLASHCART_ERR_ARGS);
-    TEST_CHECK(mock.stats == 1 && mock.opens == 0 && pro_diagnostics.rom_path[0] == '\0');
+    TEST_CHECK(mock.stats == 1 && mock.opens == 0 && pro_runtime.rom_path[0] == '\0');
     mock.aliases[0].alias = "W";
     TEST_CHECK(pro_load_rom(path, NULL) == FLASHCART_OK);
-    TEST_CHECK(strlen(pro_diagnostics.rom_path) == ED64_PRO_PATH_MAX - 2);
+    TEST_CHECK(strlen(pro_runtime.rom_path) == ED64_PRO_PATH_MAX - 2);
 }
 
 /**
@@ -1505,14 +1506,14 @@ static void test_encoded_path_bounds (void) {
 static void test_path_metadata_requires_ownership (void) {
     mounted_fixture();
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
-    pro_diagnostics.storage_state = ED64_PRO_STORAGE_MOUNTING;
+    pro_runtime.storage_state = ED64_PRO_STORAGE_MOUNTING;
     TEST_CHECK(pro_load_save("/日本語.sav") == FLASHCART_ERR_LOAD);
-    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && !pro_diagnostics.save_ready);
+    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && !pro_runtime.save_ready);
     TEST_CHECK(pro_load_rom("/日本語.z64", NULL) == FLASHCART_ERR_LOAD);
-    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && !pro_diagnostics.launch_ready);
-    pro_diagnostics.launch_ready = true;
+    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && !pro_runtime.launch_ready);
+    pro_runtime.launch_ready = true;
     TEST_CHECK(pro_load_file("/日本語.gb", 0x80000, 0) == FLASHCART_ERR_LOAD);
-    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && mock.transport_calls == 0 && !pro_diagnostics.launch_ready);
+    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && mock.transport_calls == 0 && !pro_runtime.launch_ready);
 }
 
 /**
@@ -1525,7 +1526,7 @@ static void test_unicode_auxiliary_uses_fatfs_only (void) {
     mock.file_reads = 0;
     TEST_CHECK(pro_load_file("sd:/日本語/雪.gb", 0x80000, 0) == FLASHCART_OK);
     TEST_CHECK(strcmp(mock.opened_path, "/日本語/雪.gb") == 0 && mock.stats == 0);
-    TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/emulator.z64") == 0);
+    TEST_CHECK(strcmp(pro_runtime.rom_path, "/emulator.z64") == 0);
 }
 
 /** @brief Load a fresh, structurally valid native IPL using the production callback. */
@@ -1547,16 +1548,16 @@ static void test_dd_standalone (void) {
     mounted_fixture();
     stage_ipl();
     TEST_CHECK(mock.operations == 32 && mock.progress_calls == 32 && mock.progress[31] == 1.0f);
-    TEST_CHECK(mock.file_reads == 34 && !pro_diagnostics.loading_ipl);
+    TEST_CHECK(mock.file_reads == 34 && !pro_runtime.loading_ipl);
     for (unsigned i = 0; i < 32; i++) {
         TEST_CHECK(mock.fci[i] == ED64_PRO_FCI_IPL + i * 128 * 1024u);
         TEST_CHECK(mock.destinations[i + 2] == mock.fci[i] && mock.fci[i] != 0x1F800000u);
     }
-    TEST_CHECK(pro_diagnostics.ipl_ready && !pro_diagnostics.disk_ready && !pro_diagnostics.save_ready);
+    TEST_CHECK(pro_runtime.ipl_ready && !pro_runtime.disk_ready && !pro_runtime.save_ready);
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.rtc_running);
     stage_disk();
     TEST_CHECK(mock.open_mode == (FA_READ | FA_WRITE) && mock.writes == 0);
-    TEST_CHECK(strcmp(pro_diagnostics.disk_path, "/DD/Caf\x82.ndd") == 0);
+    TEST_CHECK(strcmp(pro_runtime.disk_path, "/DD/Caf\x82.ndd") == 0);
     mock.events_count = mock.command_calls = 0;
     memset(mock.events, 0, sizeof(mock.events));
     TEST_CHECK(pro_deinit() == FLASHCART_OK);
@@ -1572,7 +1573,7 @@ static void test_dd_combo_and_reset (void) {
     staged_game_fixture(true);
     stage_ipl();
     stage_disk();
-    TEST_CHECK(pro_diagnostics.launch_extent == 1024 && pro_diagnostics.save_ready);
+    TEST_CHECK(pro_runtime.launch_extent == 1024 && pro_runtime.save_ready);
     mock.events_count = mock.command_calls = 0;
     memset(mock.events, 0, sizeof(mock.events));
     TEST_CHECK(pro_deinit() == FLASHCART_OK);
@@ -1587,8 +1588,8 @@ static void test_dd_combo_and_reset (void) {
     mock.file_reads = mock.operations = mock.progress_calls = 0;
     mock.file_size = 1024;
     TEST_CHECK(pro_load_rom("sd:/ordinary.z64", NULL) == FLASHCART_OK);
-    TEST_CHECK(!pro_diagnostics.dd_requested && !pro_diagnostics.ipl_ready && !pro_diagnostics.disk_ready);
-    TEST_CHECK(pro_diagnostics.disk_path[0] == '\0');
+    TEST_CHECK(!pro_runtime.dd_requested && !pro_runtime.ipl_ready && !pro_runtime.disk_ready);
+    TEST_CHECK(pro_runtime.disk_path[0] == '\0');
 }
 
 /** @brief DD failures preserve complete cartridges; incomplete preparations are discarded on retry. */
@@ -1617,12 +1618,12 @@ static void test_dd_failed_combo_retry (void) {
         stage_disk();
         TEST_CHECK(pro_cartridge_prepared() == (fault < 2));
         if (fault < 2) {
-            TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/game.z64") == 0);
-            TEST_CHECK(strcmp(pro_diagnostics.save_path, "/saves/game.sav") == 0);
-            TEST_CHECK(pro_diagnostics.launch_extent == 1024 && pro_diagnostics.brm_type == ED64_PRO_BRM_SRM128K);
+            TEST_CHECK(strcmp(pro_runtime.rom_path, "/game.z64") == 0);
+            TEST_CHECK(strcmp(pro_runtime.save_path, "/saves/game.sav") == 0);
+            TEST_CHECK(pro_runtime.launch_extent == 1024 && pro_runtime.brm_type == ED64_PRO_BRM_SRM128K);
         } else {
-            TEST_CHECK(!pro_diagnostics.rom_path[0] && !pro_diagnostics.save_path[0]);
-            TEST_CHECK(pro_diagnostics.launch_extent == 0 && pro_diagnostics.brm_type == ED64_PRO_BRM_OFF);
+            TEST_CHECK(!pro_runtime.rom_path[0] && !pro_runtime.save_path[0]);
+            TEST_CHECK(pro_runtime.launch_extent == 0 && pro_runtime.brm_type == ED64_PRO_BRM_OFF);
         }
         TEST_CHECK(pro_deinit() == FLASHCART_OK);
         TEST_CHECK(mock.config.brom_type == (fault < 2 ? ED64_PRO_ROM_GPAK : ED64_PRO_ROM_IPL));
@@ -1634,12 +1635,12 @@ static void test_dd_failed_combo_retry (void) {
 /** @brief Overlap is rejected before IPL I/O and clears only the rejected cartridge for a clean retry. */
 static void test_dd_overlap_preflight (void) {
     staged_game_fixture(true);
-    pro_diagnostics.launch_extent = ED64_PRO_DD_ROM_LIMIT + 512;
+    pro_runtime.launch_extent = ED64_PRO_DD_ROM_LIMIT + 512;
     unsigned opens = mock.opens;
     TEST_CHECK(pro_load_64dd_ipl("sd:/ipl.n64", NULL) == FLASHCART_ERR_LOAD);
     TEST_CHECK(mock.opens == opens && mock.file_reads == 1 && mock.operations == 1);
-    TEST_CHECK(!pro_diagnostics.ipl_ready && !pro_diagnostics.disk_ready && !pro_cartridge_prepared());
-    TEST_CHECK(!pro_diagnostics.rom_path[0] && !pro_diagnostics.save_path[0]);
+    TEST_CHECK(!pro_runtime.ipl_ready && !pro_runtime.disk_ready && !pro_cartridge_prepared());
+    TEST_CHECK(!pro_runtime.rom_path[0] && !pro_runtime.save_path[0]);
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0);
     mock.file_reads = mock.operations = mock.progress_calls = 0;
     stage_ipl();
@@ -1648,7 +1649,7 @@ static void test_dd_overlap_preflight (void) {
     TEST_CHECK(mock.config.brm_size == 0 && mock.config.gpak_size == 0);
 
     staged_game_fixture(true);
-    pro_diagnostics.launch_extent = ED64_PRO_DD_ROM_LIMIT;
+    pro_runtime.launch_extent = ED64_PRO_DD_ROM_LIMIT;
     stage_ipl();
     stage_disk();
     TEST_CHECK(pro_deinit() == FLASHCART_OK && mock.config.gpak_size == ED64_PRO_DD_ROM_LIMIT);
@@ -1664,8 +1665,8 @@ static void test_ordinary_capacity_after_dd (void) {
     TEST_ASSERT(pro_load_rom("sd:/emulator.z64", NULL) == FLASHCART_OK);
     TEST_ASSERT(pro_load_file("sd:/rom.bin", pro_diagnostics.rom_capacity - 512, 0) == FLASHCART_OK);
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_NONE) == FLASHCART_OK);
-    TEST_CHECK(pro_diagnostics.launch_extent == pro_diagnostics.rom_capacity);
-    TEST_CHECK(pro_diagnostics.launch_extent > ED64_PRO_DD_ROM_LIMIT);
+    TEST_CHECK(pro_runtime.launch_extent == pro_diagnostics.rom_capacity);
+    TEST_CHECK(pro_runtime.launch_extent > ED64_PRO_DD_ROM_LIMIT);
     TEST_CHECK(pro_deinit() == FLASHCART_OK && mock.config.gpak_size == pro_diagnostics.rom_capacity);
     TEST_CHECK(mock.config.dd_en == 0);
 }
@@ -1677,14 +1678,14 @@ static void test_dd_setup_refusals (void) {
         mounted_fixture();
         mock.file_size = sizes[i];
         TEST_CHECK(pro_load_64dd_ipl("sd:/bad.n64", NULL) == FLASHCART_ERR_LOAD);
-        TEST_CHECK(mock.file_reads == 0 && mock.closes == 1 && !pro_diagnostics.ipl_ready);
+        TEST_CHECK(mock.file_reads == 0 && mock.closes == 1 && !pro_runtime.ipl_ready);
         TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0);
     }
     mounted_fixture();
     mock.file_size = ED64_PRO_IPL_SIZE;
     mock.ipl_fixture = mock.bad_ipl_magic = true;
     TEST_CHECK(pro_load_64dd_ipl("sd:/bad.n64", NULL) == FLASHCART_ERR_LOAD);
-    TEST_CHECK(!pro_diagnostics.loading_ipl && !pro_diagnostics.launch_ready && mock.operations == 0);
+    TEST_CHECK(!pro_runtime.loading_ipl && !pro_runtime.launch_ready && mock.operations == 0);
 
     for (unsigned identity_fault = 0; identity_fault < 2; identity_fault++) {
         mounted_fixture();
@@ -1692,7 +1693,7 @@ static void test_dd_setup_refusals (void) {
         mock.ipl_fixture = true;
         mock.bad_ipl_identity = identity_fault == 0;
         TEST_CHECK(pro_load_64dd_ipl(identity_fault ? "sd:/NDDE0.n64" : "sd:/NDDJ2.n64", NULL) == FLASHCART_ERR_LOAD);
-        TEST_CHECK(!pro_diagnostics.ipl_ready && mock.operations == 0 && mock.closes == 1);
+        TEST_CHECK(!pro_runtime.ipl_ready && mock.operations == 0 && mock.closes == 1);
     }
 
     flashcart_disk_parameters_t parameters = {0};
@@ -1706,7 +1707,7 @@ static void test_dd_setup_refusals (void) {
         if (fault == 2) mock.open_result = FR_INVALID_NAME; /* Failed writable open, including read-only files. */
         if (fault == 3) mock.close_result = FR_DISK_ERR;
         TEST_CHECK(pro_load_64dd_disk("sd:/bad.ndd", &parameters) == FLASHCART_ERR_LOAD);
-        TEST_CHECK(!pro_diagnostics.disk_ready && !pro_diagnostics.launch_ready && !pro_diagnostics.disk_path[0]);
+        TEST_CHECK(!pro_runtime.disk_ready && !pro_runtime.launch_ready && !pro_runtime.disk_path[0]);
         TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
     }
 }
@@ -1722,7 +1723,7 @@ static void test_dd_ipl_cleanup_failures (void) {
         if (fault == 2) mock.close_result = FR_DISK_ERR;
         TEST_CHECK(pro_load_64dd_ipl("sd:/NDDJ2.n64", NULL) == FLASHCART_ERR_LOAD);
         TEST_CHECK(mock.opens == 1 && mock.closes == 1);
-        TEST_CHECK(!pro_diagnostics.loading_ipl && !pro_diagnostics.ipl_ready && !pro_diagnostics.launch_ready);
+        TEST_CHECK(!pro_runtime.loading_ipl && !pro_runtime.ipl_ready && !pro_runtime.launch_ready);
         TEST_CHECK(mock.operations == (fault < 2 ? 0u : 32u));
         TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
     }
@@ -1735,7 +1736,7 @@ static void test_dd_transfer_and_mapping_faults (void) {
     mock.file_size = ED64_PRO_IPL_SIZE;
     mock.fail_operation = 2;
     TEST_CHECK(pro_load_64dd_ipl("sd:/ipl.n64", NULL) == FLASHCART_ERR_LOAD);
-    TEST_CHECK(!pro_diagnostics.loading_ipl && !pro_diagnostics.ipl_ready && !pro_diagnostics.launch_ready);
+    TEST_CHECK(!pro_runtime.loading_ipl && !pro_runtime.ipl_ready && !pro_runtime.launch_ready);
     TEST_CHECK(pro_diagnostics.storage_failed && mock.operations == 2 && mock.closes == 1);
 
     mounted_fixture();
@@ -1770,11 +1771,11 @@ static void test_dd_handoff_failures_and_native_swap (void) {
     flashcart_disk_parameters_t parameters = {0};
     char *unused_menu_list[] = {"sd:/DD/sibling.ndd"};
     TEST_CHECK(pro_load_64dd_disks("sd:/DD/primary.ndd", &parameters, unused_menu_list, 25) == FLASHCART_OK);
-    TEST_CHECK(pro_diagnostics.disk_ready && pro_has_feature(FLASHCART_FEATURE_64DD));
+    TEST_CHECK(pro_runtime.disk_ready && pro_has_feature(FLASHCART_FEATURE_64DD));
     TEST_CHECK(pro_load_64dd_disks("sd:/DD/primary.ndd", &parameters, NULL, -1) == FLASHCART_OK);
-    TEST_CHECK(pro_diagnostics.disk_ready);
+    TEST_CHECK(pro_runtime.disk_ready);
     TEST_CHECK(pro_load_64dd_disks(NULL, &parameters, unused_menu_list, 1) == FLASHCART_ERR_ARGS);
-    TEST_CHECK(!pro_diagnostics.disk_ready);
+    TEST_CHECK(!pro_runtime.disk_ready);
 }
 
 /** @brief Missing IPL before the backend callback preserves a fully prepared cartridge/save. */
@@ -1794,13 +1795,13 @@ static void test_shared_loader_missing_ipl_then_standalone (void) {
     TEST_CHECK(pro_cartridge_prepared());
     unsigned opens = mock.opens;
     TEST_CHECK(cart_load_64dd_ipl_and_disks(&menu, NULL) == CART_LOAD_ERR_64DD_IPL_NOT_FOUND);
-    TEST_CHECK(mock.opens == opens && pro_cartridge_prepared() && !pro_diagnostics.dd_requested);
+    TEST_CHECK(mock.opens == opens && pro_cartridge_prepared() && !pro_runtime.dd_requested);
     menu.load.combined_disk_rom = false;
     loader_ipl_present = true;
     mock.file_size = ED64_PRO_IPL_SIZE;
     mock.ipl_fixture = true;
     TEST_ASSERT(cart_load_64dd_ipl_and_disks(&menu, NULL) == CART_LOAD_OK);
-    TEST_CHECK(pro_cartridge_prepared() && pro_diagnostics.ipl_ready && pro_diagnostics.disk_ready);
+    TEST_CHECK(pro_cartridge_prepared() && pro_runtime.ipl_ready && pro_runtime.disk_ready);
     TEST_ASSERT(pro_deinit() == FLASHCART_OK);
     TEST_CHECK(mock.config.brom_type == ED64_PRO_ROM_GPAK && mock.config.gpak_size == 1024);
     TEST_CHECK(mock.config.dd_en == 1 && mock.config.brm_size == 32768);
@@ -1826,11 +1827,11 @@ static void test_shared_loader_failure_then_standalone (void) {
         if (fault == 0) mock.file_size = 0;
         TEST_CHECK(cart_load_n64_rom_and_save(&menu, NULL, NULL) ==
             (fault == 0 ? CART_LOAD_ERR_ROM_LOAD_FAIL : CART_LOAD_ERR_SAVE_LOAD_FAIL));
-        TEST_CHECK(!pro_cartridge_prepared() && !pro_diagnostics.dd_requested);
+        TEST_CHECK(!pro_cartridge_prepared() && !pro_runtime.dd_requested);
         mock.file_size = ED64_PRO_IPL_SIZE;
         mock.ipl_fixture = true;
         TEST_ASSERT(cart_load_64dd_ipl_and_disks(&menu, NULL) == CART_LOAD_OK);
-        TEST_CHECK(!pro_diagnostics.rom_path[0] && !pro_diagnostics.save_path[0]);
+        TEST_CHECK(!pro_runtime.rom_path[0] && !pro_runtime.save_path[0]);
         TEST_ASSERT(pro_deinit() == FLASHCART_OK);
         TEST_CHECK(mock.config.brom_type == ED64_PRO_ROM_IPL && mock.config.brm_size == 0);
         path_free(menu.load.rom_path);

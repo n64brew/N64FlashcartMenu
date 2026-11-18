@@ -68,9 +68,10 @@ verify physical button transitions or calibrate the voltage reading.
 IPL mode requires a user-supplied 4 MiB native IPL at
 `/ed64pro-test/NDDJ2.n64`; override `ED64_PRO_TEST_IPL_PATH` for another location,
 keeping the canonical `NDDJ2.n64`, `NDDE0.n64` or `NDXJ0.n64` filename. It checks
-the production callback's progress and retained readiness after staging to FCI.
-It does not start DD services or verify the mapped IPL contents. Diagnostics and
-IPL modes may be combined; both halt without writes, storage release or START,
+the production callback's result and progress after staging to FCI, then repeats
+the CRC-checked fixture read to verify storage remains usable. It does not start
+DD services or verify the mapped IPL contents. Diagnostics and IPL modes may be
+combined; both halt without writes, storage release or DD START,
 and cannot be combined with write modes. Power off before host access.
 
 Use `--extended` when preparing fixtures for the oversize or timing modes.

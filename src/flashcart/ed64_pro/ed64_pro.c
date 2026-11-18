@@ -26,6 +26,37 @@
 #error "ED64 Pro path staging requires CP437 and the UTF-8 FatFs API"
 #endif
 
+typedef enum {
+    ED64_PRO_STORAGE_COLD,
+    ED64_PRO_STORAGE_MCU_OWNED,
+    ED64_PRO_STORAGE_MOUNTING,
+    ED64_PRO_STORAGE_FATFS_OWNED,
+    ED64_PRO_STORAGE_RELEASING,
+    ED64_PRO_STORAGE_FAILED,
+} ed64_pro_storage_state_t;
+
+/* Storage ownership and staged launch data are backend execution state. */
+static struct {
+    ed64_pro_storage_state_t storage_state;
+    bool unsynced;
+    int volume_id;
+    bool launch_ready; /* Cartridge ROM/auxiliary loading completed, independently of save and DD readiness. */
+    bool load_byte_swap;
+    bool loading_ipl;
+    bool dd_requested;
+    bool ipl_ready;
+    bool disk_ready;
+    uint32_t ipl_header[4];
+    uint32_t ipl_code;
+    char disk_path[ED64_PRO_PATH_MAX + 1];
+    uint32_t launch_extent;
+    char rom_path[ED64_PRO_PATH_MAX + 1];
+    uint32_t brm_type;
+    uint32_t brm_size;
+    bool save_ready;
+    char save_path[ED64_PRO_PATH_MAX + 1];
+} pro_runtime;
+
 static ed64_pro_diagnostics_t pro_diagnostics;
 static uint32_t pro_attempt_start;
 static uint32_t pro_attempt_deadline;
@@ -360,8 +391,8 @@ static flashcart_err_t pro_init (void) {
         pro_diagnostics.info_result =
             version.major < 26 || (version.major == 26 && version.minor < 1014) ? FLASHCART_ERR_OUTDATED : FLASHCART_OK;
         if (pro_diagnostics.info_result == FLASHCART_OK) {
-            pro_diagnostics.storage_state = ED64_PRO_STORAGE_MCU_OWNED;
-            pro_diagnostics.volume_id = -1;
+            pro_runtime.storage_state = ED64_PRO_STORAGE_MCU_OWNED;
+            pro_runtime.volume_id = -1;
         }
         pro_set_phase(ED64_PRO_PHASE_READY);
     }
@@ -466,8 +497,8 @@ static flashcart_firmware_version_t pro_get_firmware_version (void) {
 
 /** @brief Report whether FatFs owns a ready, healthy SD transport. */
 static int pro_disk_status (void) {
-    bool owned = pro_diagnostics.storage_state == ED64_PRO_STORAGE_MOUNTING ||
-                 pro_diagnostics.storage_state == ED64_PRO_STORAGE_FATFS_OWNED;
+    bool owned = pro_runtime.storage_state == ED64_PRO_STORAGE_MOUNTING ||
+                 pro_runtime.storage_state == ED64_PRO_STORAGE_FATFS_OWNED;
     return owned && pro_diagnostics.state == ED64_PRO_READY && !pro_diagnostics.storage_failed ? 0 : STA_NOINIT;
 }
 
@@ -478,7 +509,7 @@ pro_storage_fail (const char *detail, const char *operation, uint32_t lba, uint3
         return;
     }
     pro_diagnostics.storage_failed = true;
-    pro_diagnostics.storage_state = ED64_PRO_STORAGE_FAILED;
+    pro_runtime.storage_state = ED64_PRO_STORAGE_FAILED;
     pro_diagnostics.storage_detail = detail;
     pro_diagnostics.storage_operation = operation;
     pro_diagnostics.storage_lba = lba;
@@ -494,7 +525,7 @@ static bool pro_disk_arguments (const void *buffer, int64_t sector, int count, b
     }
     uintptr_t physical = PhysicalAddr(buffer);
     uint64_t bytes = (uint64_t)(unsigned)count * 512;
-    if (pro_diagnostics.loading_ipl && physical >= ED64_PRO_FCI_IPL && physical < ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE) {
+    if (pro_runtime.loading_ipl && physical >= ED64_PRO_FCI_IPL && physical < ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE) {
         return !write && physical >= ED64_PRO_FCI_IPL && (physical & 511u) == 0 &&
             physical - ED64_PRO_FCI_IPL < ED64_PRO_IPL_SIZE &&
             bytes <= ED64_PRO_IPL_SIZE - (physical - ED64_PRO_FCI_IPL);
@@ -517,7 +548,7 @@ static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool writ
         return RES_NOTRDY;
     }
     uint8_t *cursor = buffer;
-    bool ipl = pro_diagnostics.loading_ipl && PhysicalAddr(buffer) >= ED64_PRO_FCI_IPL &&
+    bool ipl = pro_runtime.loading_ipl && PhysicalAddr(buffer) >= ED64_PRO_FCI_IPL &&
         PhysicalAddr(buffer) < ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE;
     bool fci = ipl || PhysicalAddr(buffer) >= 0x10000000u;
     unsigned max_chunk = fci ? 256 : 64;
@@ -529,7 +560,7 @@ static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool writ
             /* WRSW is confined to the SD-to-FCI operation; FIFO metadata
              * transfers must always run with it cleared. */
             error = ed64_pro_ll_set_flags(
-                ED64_PRO_FLAG_WRSW, pro_diagnostics.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0, deadline
+                ED64_PRO_FLAG_WRSW, pro_runtime.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0, deadline
             );
             if (error == ED64_PRO_LL_OK) {
                 error = ipl ? ed64_pro_ll_sd_read_ipl_fci(PhysicalAddr(cursor), sector, chunk, deadline)
@@ -553,7 +584,7 @@ static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool writ
             return RES_ERROR;
         }
         if (write) {
-            pro_diagnostics.unsynced = true;
+            pro_runtime.unsynced = true;
         }
         cursor += chunk * 512;
         sector += chunk;
@@ -582,7 +613,7 @@ static int pro_disk_ioctl (uint8_t command, void *buffer) {
         return RES_NOTRDY;
     }
     /* Every raw write has already completed its MCU STATUS exchange. */
-    pro_diagnostics.unsynced = false;
+    pro_runtime.unsynced = false;
     return RES_OK;
 }
 
@@ -597,11 +628,11 @@ static const fat_disk_t pro_disk = {
 /** @brief Mount the Pro SD card as FatFs volume 0 at the requested prefix. */
 bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
     (void)max_files;
-    if (!prefix || pro_diagnostics.storage_state != ED64_PRO_STORAGE_MCU_OWNED ||
+    if (!prefix || pro_runtime.storage_state != ED64_PRO_STORAGE_MCU_OWNED ||
         pro_diagnostics.state != ED64_PRO_READY || pro_diagnostics.storage_failed) {
         return false;
     }
-    pro_diagnostics.storage_state = ED64_PRO_STORAGE_MOUNTING;
+    pro_runtime.storage_state = ED64_PRO_STORAGE_MOUNTING;
     int volume_id = fat_mount(prefix, &pro_disk, 0);
     if (volume_id != 0 || pro_diagnostics.storage_failed) {
         if (volume_id >= 0) {
@@ -610,11 +641,11 @@ bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
         pro_storage_fail(volume_id > 0 ? "SD must use FatFs volume 0" : "SD mount failed", NULL, 0, 0, ED64_PRO_LL_OK);
         return false;
     }
-    pro_diagnostics.volume_id = volume_id;
-    pro_diagnostics.storage_state = ED64_PRO_STORAGE_FATFS_OWNED;
+    pro_runtime.volume_id = volume_id;
+    pro_runtime.storage_state = ED64_PRO_STORAGE_FATFS_OWNED;
     if (ed64_pro_rtc_init() != FLASHCART_OK) {
         fat_unmount(volume_id);
-        pro_diagnostics.volume_id = -1;
+        pro_runtime.volume_id = -1;
         pro_storage_fail(ed64_pro_rtc_get_error_message(), "RTC START", 0, 0, ed64_pro_ll_get_failure()->code);
         return false;
     }
@@ -623,17 +654,17 @@ bool ed64_pro_init_sdfs (const char *prefix, int max_files) {
 
 /** @brief Unmount synchronized FatFs storage and return SD ownership to the MCU. */
 static flashcart_err_t pro_release_storage (void) {
-    if (pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_diagnostics.storage_failed ||
-        pro_diagnostics.unsynced) {
+    if (pro_runtime.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_diagnostics.storage_failed ||
+        pro_runtime.unsynced) {
         pro_storage_fail("unclosed write or unavailable storage", NULL, 0, 0, ED64_PRO_LL_OK);
         return FLASHCART_ERR_SD_CARD;
     }
-    if (fat_unmount(pro_diagnostics.volume_id) != 0) {
+    if (fat_unmount(pro_runtime.volume_id) != 0) {
         pro_storage_fail("unmount failed", NULL, 0, 0, ED64_PRO_LL_OK);
         return FLASHCART_ERR_SD_CARD;
     }
-    pro_diagnostics.volume_id = -1;
-    pro_diagnostics.storage_state = ED64_PRO_STORAGE_RELEASING;
+    pro_runtime.volume_id = -1;
+    pro_runtime.storage_state = ED64_PRO_STORAGE_RELEASING;
     uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
     ed64_pro_ll_error_t error = ed64_pro_ll_init_sd(&pro_diagnostics.status, deadline);
     pro_diagnostics.status_valid = error == ED64_PRO_LL_OK || error == ED64_PRO_LL_MCU_ERROR;
@@ -641,26 +672,26 @@ static flashcart_err_t pro_release_storage (void) {
         pro_storage_fail("MCU filesystem reinitialization failed", "FS INIT", 0, 0, error);
         return FLASHCART_ERR_INT;
     }
-    pro_diagnostics.storage_state = ED64_PRO_STORAGE_MCU_OWNED;
+    pro_runtime.storage_state = ED64_PRO_STORAGE_MCU_OWNED;
     return FLASHCART_OK;
 }
 
 /** @brief Return whether cartridge payload and save preparation both completed. */
 static bool pro_cartridge_prepared (void) {
-    return pro_diagnostics.launch_ready && pro_diagnostics.save_ready && pro_diagnostics.rom_path[0] &&
-        pro_diagnostics.launch_extent > 0 && pro_diagnostics.launch_extent <= pro_diagnostics.rom_capacity &&
-        (pro_diagnostics.brm_type == ED64_PRO_BRM_OFF || pro_diagnostics.save_path[0]);
+    return pro_runtime.launch_ready && pro_runtime.save_ready && pro_runtime.rom_path[0] &&
+        pro_runtime.launch_extent > 0 && pro_runtime.launch_extent <= pro_diagnostics.rom_capacity &&
+        (pro_runtime.brm_type == ED64_PRO_BRM_OFF || pro_runtime.save_path[0]);
 }
 
 /** @brief Discard incomplete or rejected cartridge preparation without changing DD readiness. */
 static void pro_clear_cartridge (void) {
-    pro_diagnostics.launch_ready = false;
-    pro_diagnostics.launch_extent = 0;
-    pro_diagnostics.rom_path[0] = '\0';
-    pro_diagnostics.save_path[0] = '\0';
-    pro_diagnostics.brm_type = ED64_PRO_BRM_OFF;
-    pro_diagnostics.brm_size = 0;
-    pro_diagnostics.save_ready = false;
+    pro_runtime.launch_ready = false;
+    pro_runtime.launch_extent = 0;
+    pro_runtime.rom_path[0] = '\0';
+    pro_runtime.save_path[0] = '\0';
+    pro_runtime.brm_type = ED64_PRO_BRM_OFF;
+    pro_runtime.brm_size = 0;
+    pro_runtime.save_ready = false;
 }
 
 /** @brief Release storage and configure MCU game services for the prepared launch. */
@@ -671,10 +702,10 @@ static flashcart_err_t pro_deinit (void) {
     }
     bool cartridge = pro_cartridge_prepared();
 #ifndef ED64_PRO_TEST_STORAGE
-    if ((pro_diagnostics.rom_path[0] && !cartridge) ||
-        (pro_diagnostics.dd_requested
-            ? (!pro_diagnostics.ipl_ready || !pro_diagnostics.disk_ready ||
-               (cartridge && pro_diagnostics.launch_extent > ED64_PRO_DD_ROM_LIMIT))
+    if ((pro_runtime.rom_path[0] && !cartridge) ||
+        (pro_runtime.dd_requested
+            ? (!pro_runtime.ipl_ready || !pro_runtime.disk_ready ||
+               (cartridge && pro_runtime.launch_extent > ED64_PRO_DD_ROM_LIMIT))
             : !cartridge)) {
         pro_diagnostics.storage_detail = "Game launch is not prepared";
         return FLASHCART_ERR_LOAD;
@@ -694,32 +725,32 @@ static flashcart_err_t pro_deinit (void) {
 #endif
     ed64_pro_dev_cfg_t config = {
         .brom_type = cartridge ? ED64_PRO_ROM_GPAK : ED64_PRO_ROM_IPL,
-        .gpak_size = cartridge ? (pro_diagnostics.launch_extent + 511u) & ~511u : 0,
-        .brm_size = cartridge ? pro_diagnostics.brm_size : 0,
-        .brm_type = cartridge ? pro_diagnostics.brm_type : ED64_PRO_BRM_OFF,
-        .rtc_mode = pro_diagnostics.dd_requested ? ED64_PRO_RTC_STD : ED64_PRO_RTC_RDO,
-        .dd_en = pro_diagnostics.dd_requested ? 1 : 0,
+        .gpak_size = cartridge ? (pro_runtime.launch_extent + 511u) & ~511u : 0,
+        .brm_size = cartridge ? pro_runtime.brm_size : 0,
+        .brm_type = cartridge ? pro_runtime.brm_type : ED64_PRO_BRM_OFF,
+        .rtc_mode = pro_runtime.dd_requested ? ED64_PRO_RTC_STD : ED64_PRO_RTC_RDO,
+        .dd_en = pro_runtime.dd_requested ? 1 : 0,
     };
     ed64_pro_ll_error_t error = ED64_PRO_LL_OK;
     const char *step = "GPAK path";
     if (cartridge) {
         error = ed64_pro_ll_dev_set_path(
-            ED64_PRO_PATH_GPAK, pro_diagnostics.rom_path,
+            ED64_PRO_PATH_GPAK, pro_runtime.rom_path,
             TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
         );
     }
-    if (error == ED64_PRO_LL_OK && pro_diagnostics.dd_requested) {
+    if (error == ED64_PRO_LL_OK && pro_runtime.dd_requested) {
         step = "Disk path";
         error = ed64_pro_ll_dev_set_path(
-            ED64_PRO_PATH_DISK, pro_diagnostics.disk_path,
+            ED64_PRO_PATH_DISK, pro_runtime.disk_path,
             TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
         );
     }
-    if (error == ED64_PRO_LL_OK && cartridge && pro_diagnostics.brm_type != ED64_PRO_BRM_OFF) {
+    if (error == ED64_PRO_LL_OK && cartridge && pro_runtime.brm_type != ED64_PRO_BRM_OFF) {
         step = "Save path";
         error = ed64_pro_ll_dev_set_path(
             ED64_PRO_PATH_BRM,
-            pro_diagnostics.save_path,
+            pro_runtime.save_path,
             TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
         );
     }
@@ -735,20 +766,20 @@ static flashcart_err_t pro_deinit (void) {
         pro_storage_fail("Game startup failed", step, 0, 0, error);
         return FLASHCART_ERR_INT;
     }
-    if (pro_diagnostics.dd_requested) {
+    if (pro_runtime.dd_requested) {
         for (unsigned i = 0; i < 4; i++) {
-            if (io_read(0x06000000u + i * 4) != pro_diagnostics.ipl_header[i]) {
+            if (io_read(0x06000000u + i * 4) != pro_runtime.ipl_header[i]) {
                 pro_storage_fail("64DD IPL mapping verification failed", "IPL mapping", 0, 0, ED64_PRO_LL_OK);
                 return FLASHCART_ERR_LOAD;
             }
         }
-        if (io_read(0x06001010u) != pro_diagnostics.ipl_code) {
+        if (io_read(0x06001010u) != pro_runtime.ipl_code) {
             pro_storage_fail("64DD IPL mapping verification failed", "IPL mapping", 0, 0, ED64_PRO_LL_OK);
             return FLASHCART_ERR_LOAD;
         }
     }
-    pro_diagnostics.launch_ready = false;
-    pro_diagnostics.ipl_ready = pro_diagnostics.disk_ready = false;
+    pro_runtime.launch_ready = false;
+    pro_runtime.ipl_ready = pro_runtime.disk_ready = false;
     return FLASHCART_OK;
 }
 
@@ -927,7 +958,7 @@ static flashcart_err_t pro_read_rom (FIL *file, flashcart_progress_callback_t *p
         return FLASHCART_ERR_LOAD;
     }
     uint32_t size = f_size(file);
-    pro_diagnostics.load_byte_swap = cart_card_byteswap != 0;
+    pro_runtime.load_byte_swap = cart_card_byteswap != 0;
     for (uint32_t offset = 0; offset < size;) {
         UINT chunk = size - offset > 128 * 1024u ? 128 * 1024u : size - offset;
         UINT read = 0;
@@ -949,34 +980,34 @@ static flashcart_err_t pro_read_rom (FIL *file, flashcart_progress_callback_t *p
 static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback_t *progress) {
     pro_diagnostics.path_error = NULL;
     pro_clear_cartridge();
-    pro_diagnostics.dd_requested = pro_diagnostics.ipl_ready = pro_diagnostics.disk_ready = false;
-    pro_diagnostics.disk_path[0] = '\0';
+    pro_runtime.dd_requested = pro_runtime.ipl_ready = pro_runtime.disk_ready = false;
+    pro_runtime.disk_path[0] = '\0';
     const char *utf8_path = pro_fatfs_path(rom_path);
     if (!utf8_path) {
         return FLASHCART_ERR_ARGS;
     }
-    if (pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_disk_status() != 0) {
+    if (pro_runtime.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_disk_status() != 0) {
         return FLASHCART_ERR_LOAD;
     }
-    flashcart_err_t result = pro_stage_mcu_path(utf8_path, pro_diagnostics.rom_path);
+    flashcart_err_t result = pro_stage_mcu_path(utf8_path, pro_runtime.rom_path);
     if (result != FLASHCART_OK) {
         return result;
     }
     FIL file;
     if (f_open(&file, utf8_path, FA_READ) != FR_OK) {
-        pro_diagnostics.rom_path[0] = '\0';
+        pro_runtime.rom_path[0] = '\0';
         return FLASHCART_ERR_LOAD;
     }
     result = pro_read_rom(&file, progress);
-    pro_diagnostics.load_byte_swap = false;
+    pro_runtime.load_byte_swap = false;
     if (f_close(&file) != FR_OK) {
         result = FLASHCART_ERR_LOAD;
     }
     if (result == FLASHCART_OK) {
-        pro_diagnostics.launch_extent = f_size(&file);
-        pro_diagnostics.launch_ready = true;
+        pro_runtime.launch_extent = f_size(&file);
+        pro_runtime.launch_ready = true;
     } else {
-        pro_diagnostics.rom_path[0] = '\0';
+        pro_runtime.rom_path[0] = '\0';
     }
     return result;
 }
@@ -1014,14 +1045,14 @@ static flashcart_err_t pro_read_file (FIL *file, uint32_t rom_offset, uint32_t f
 
 /** @brief Load a file from the given offset into cartridge ROM memory. */
 static flashcart_err_t pro_load_file (char *file_path, uint32_t rom_offset, uint32_t file_offset) {
-    bool launch_ready = pro_diagnostics.launch_ready;
-    pro_diagnostics.launch_ready = false;
+    bool launch_ready = pro_runtime.launch_ready;
+    pro_runtime.launch_ready = false;
     pro_diagnostics.path_error = NULL;
     const char *utf8_path = pro_fatfs_path(file_path);
     if (!utf8_path || (rom_offset & 511u) || (file_offset & 511u) || rom_offset > pro_diagnostics.rom_capacity) {
         return FLASHCART_ERR_ARGS;
     }
-    if (!launch_ready || pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_disk_status() != 0) {
+    if (!launch_ready || pro_runtime.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_disk_status() != 0) {
         return FLASHCART_ERR_LOAD;
     }
     FIL file;
@@ -1034,10 +1065,10 @@ static flashcart_err_t pro_load_file (char *file_path, uint32_t rom_offset, uint
     }
     if (result == FLASHCART_OK) {
         uint32_t end = rom_offset + f_size(&file) - file_offset;
-        if (end > pro_diagnostics.launch_extent) {
-            pro_diagnostics.launch_extent = end;
+        if (end > pro_runtime.launch_extent) {
+            pro_runtime.launch_extent = end;
         }
-        pro_diagnostics.launch_ready = true;
+        pro_runtime.launch_ready = true;
     }
     return result;
 }
@@ -1084,21 +1115,21 @@ static flashcart_err_t pro_read_64dd_ipl (FIL *file, const char *utf8_path, flas
         return FLASHCART_ERR_LOAD;
     }
     for (unsigned i = 0; i < 4; i++) {
-        pro_diagnostics.ipl_header[i] = pro_ipl_word(header + i * 4);
+        pro_runtime.ipl_header[i] = pro_ipl_word(header + i * 4);
     }
     if (f_lseek(file, 0x1010) != FR_OK || f_tell(file) != 0x1010 || f_read(file, header, 4, &read) != FR_OK ||
         read != 4) {
         return FLASHCART_ERR_LOAD;
     }
-    pro_diagnostics.ipl_code = pro_ipl_word(header);
+    pro_runtime.ipl_code = pro_ipl_word(header);
     if (f_lseek(file, 0) != FR_OK || f_tell(file) != 0 || file->obj.fs->wflag) {
         return FLASHCART_ERR_LOAD;
     }
     /* These sector-aligned reads go directly to disk_read. The destination is
      * an FCI address, never PI_ROM + FCI_IPL (the latter is the I/O window).
      * Metadata reads still use RDRAM and the ordinary disk-read path. */
-    pro_diagnostics.loading_ipl = true;
-    pro_diagnostics.load_byte_swap = false;
+    pro_runtime.loading_ipl = true;
+    pro_runtime.load_byte_swap = false;
     for (uint32_t offset = 0; offset < ED64_PRO_IPL_SIZE; offset += 128 * 1024u) {
         if (f_read(file, (void *)(uintptr_t)(ED64_PRO_FCI_IPL + offset), 128 * 1024u, &read) != FR_OK ||
             read != 128 * 1024u) {
@@ -1117,12 +1148,12 @@ static flashcart_err_t pro_read_64dd_ipl (FIL *file, const char *utf8_path, flas
 /** @brief Load a native IPL through the explicitly FCI-addressed, bounded IPL4 path. */
 static flashcart_err_t pro_load_64dd_ipl (char *ipl_path, flashcart_progress_callback_t *progress) {
     pro_diagnostics.path_error = NULL;
-    pro_diagnostics.dd_requested = true;
-    pro_diagnostics.ipl_ready = pro_diagnostics.disk_ready = false;
-    pro_diagnostics.disk_path[0] = '\0';
+    pro_runtime.dd_requested = true;
+    pro_runtime.ipl_ready = pro_runtime.disk_ready = false;
+    pro_runtime.disk_path[0] = '\0';
     if (!pro_cartridge_prepared()) {
         pro_clear_cartridge();
-    } else if (pro_diagnostics.launch_extent > ED64_PRO_DD_ROM_LIMIT) {
+    } else if (pro_runtime.launch_extent > ED64_PRO_DD_ROM_LIMIT) {
         /* IPL4 mirrors into cartridge memory above 120 MiB. Reject before any
          * IPL bytes are written, then permit a clean standalone retry. */
         pro_clear_cartridge();
@@ -1133,7 +1164,7 @@ static flashcart_err_t pro_load_64dd_ipl (char *ipl_path, flashcart_progress_cal
     if (!utf8_path) {
         return FLASHCART_ERR_ARGS;
     }
-    if (pro_disk_status() != 0 || pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED) {
+    if (pro_disk_status() != 0 || pro_runtime.storage_state != ED64_PRO_STORAGE_FATFS_OWNED) {
         return FLASHCART_ERR_LOAD;
     }
     FIL file;
@@ -1142,12 +1173,12 @@ static flashcart_err_t pro_load_64dd_ipl (char *ipl_path, flashcart_progress_cal
         return FLASHCART_ERR_LOAD;
     }
     flashcart_err_t result = pro_read_64dd_ipl(&file, utf8_path, progress);
-    pro_diagnostics.loading_ipl = false;
+    pro_runtime.loading_ipl = false;
     if (f_close(&file) != FR_OK) {
         result = FLASHCART_ERR_LOAD;
     }
     if (result == FLASHCART_OK) {
-        pro_diagnostics.ipl_ready = true;
+        pro_runtime.ipl_ready = true;
     }
     return result;
 }
@@ -1155,17 +1186,17 @@ static flashcart_err_t pro_load_64dd_ipl (char *ipl_path, flashcart_progress_cal
 /** @brief Stage a writable native image for firmware disk I/O and directory-based swapping. */
 static flashcart_err_t pro_load_64dd_disk (char *disk_path, flashcart_disk_parameters_t *disk_parameters) {
     pro_diagnostics.path_error = NULL;
-    pro_diagnostics.disk_ready = false;
-    pro_diagnostics.disk_path[0] = '\0';
+    pro_runtime.disk_ready = false;
+    pro_runtime.disk_path[0] = '\0';
     const char *utf8_path = pro_fatfs_path(disk_path);
     if (!utf8_path || !disk_parameters || disk_parameters->disk_type > 6) {
         return FLASHCART_ERR_ARGS;
     }
-    if (!pro_diagnostics.ipl_ready || pro_disk_status() != 0 ||
-        pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED) {
+    if (!pro_runtime.ipl_ready || pro_disk_status() != 0 ||
+        pro_runtime.storage_state != ED64_PRO_STORAGE_FATFS_OWNED) {
         return FLASHCART_ERR_LOAD;
     }
-    flashcart_err_t result = pro_stage_mcu_path(utf8_path, pro_diagnostics.disk_path);
+    flashcart_err_t result = pro_stage_mcu_path(utf8_path, pro_runtime.disk_path);
     if (result != FLASHCART_OK) {
         return result;
     }
@@ -1174,7 +1205,7 @@ static flashcart_err_t pro_load_64dd_disk (char *disk_path, flashcart_disk_param
      * read-only files before the MCU owns storage and must persist disk writes. */
     if (f_open(&file, utf8_path, FA_READ | FA_WRITE) != FR_OK) {
         pro_diagnostics.path_error = "64DD image is missing, read-only, or unavailable";
-        pro_diagnostics.disk_path[0] = '\0';
+        pro_runtime.disk_path[0] = '\0';
         return FLASHCART_ERR_LOAD;
     }
     if (f_size(&file) != ED64_PRO_NATIVE_DISK_SIZE) {
@@ -1185,10 +1216,10 @@ static flashcart_err_t pro_load_64dd_disk (char *disk_path, flashcart_disk_param
         result = FLASHCART_ERR_LOAD;
     }
     if (result != FLASHCART_OK) {
-        pro_diagnostics.disk_path[0] = '\0';
+        pro_runtime.disk_path[0] = '\0';
         return result;
     }
-    pro_diagnostics.disk_ready = true;
+    pro_runtime.disk_ready = true;
     return FLASHCART_OK;
 }
 
@@ -1205,19 +1236,19 @@ static flashcart_err_t pro_load_64dd_disks (
 static flashcart_err_t pro_load_save (char *save_path) {
     pro_diagnostics.path_error = NULL;
     const char *utf8_path = pro_fatfs_path(save_path);
-    pro_diagnostics.save_ready = false;
-    pro_diagnostics.save_path[0] = '\0';
-    if (!utf8_path || pro_diagnostics.brm_type == ED64_PRO_BRM_OFF) {
+    pro_runtime.save_ready = false;
+    pro_runtime.save_path[0] = '\0';
+    if (!utf8_path || pro_runtime.brm_type == ED64_PRO_BRM_OFF) {
         return FLASHCART_ERR_ARGS;
     }
-    if (pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_disk_status() != 0) {
+    if (pro_runtime.storage_state != ED64_PRO_STORAGE_FATFS_OWNED || pro_disk_status() != 0) {
         return FLASHCART_ERR_LOAD;
     }
-    flashcart_err_t result = pro_stage_mcu_path(utf8_path, pro_diagnostics.save_path);
+    flashcart_err_t result = pro_stage_mcu_path(utf8_path, pro_runtime.save_path);
     if (result != FLASHCART_OK) {
         return result;
     }
-    pro_diagnostics.save_ready = true;
+    pro_runtime.save_ready = true;
     return FLASHCART_OK;
 }
 
@@ -1236,17 +1267,17 @@ static flashcart_err_t pro_set_save_type (flashcart_save_type_t save_type) {
         [FLASHCART_SAVE_TYPE_FLASHRAM_1MBIT] = {ED64_PRO_BRM_FLASH, 131072},
         [FLASHCART_SAVE_TYPE_FLASHRAM_PKST2] = {ED64_PRO_BRM_FLASH, 131072},
     };
-    pro_diagnostics.save_ready = false;
-    pro_diagnostics.save_path[0] = '\0';
+    pro_runtime.save_ready = false;
+    pro_runtime.save_path[0] = '\0';
     if ((unsigned)save_type >= __FLASHCART_SAVE_TYPE_END) {
         return FLASHCART_ERR_ARGS;
     }
     if (pro_disk_status() != 0) {
         return FLASHCART_ERR_LOAD;
     }
-    pro_diagnostics.brm_type = saves[save_type].type;
-    pro_diagnostics.brm_size = saves[save_type].size;
-    pro_diagnostics.save_ready = save_type == FLASHCART_SAVE_TYPE_NONE;
+    pro_runtime.brm_type = saves[save_type].type;
+    pro_runtime.brm_size = saves[save_type].size;
+    pro_runtime.save_ready = save_type == FLASHCART_SAVE_TYPE_NONE;
     return FLASHCART_OK;
 }
 

@@ -32,15 +32,6 @@ typedef enum {
     ED64_PRO_PHASE_COUNT,
 } ed64_pro_phase_t;
 
-typedef enum {
-    ED64_PRO_STORAGE_COLD,
-    ED64_PRO_STORAGE_MCU_OWNED,
-    ED64_PRO_STORAGE_MOUNTING,
-    ED64_PRO_STORAGE_FATFS_OWNED,
-    ED64_PRO_STORAGE_RELEASING,
-    ED64_PRO_STORAGE_FAILED,
-} ed64_pro_storage_state_t;
-
 typedef struct {
     ed64_pro_state_t state;
     ed64_pro_phase_t phase;
@@ -59,31 +50,13 @@ typedef struct {
     flashcart_firmware_version_t firmware_version;
     uint32_t firmware_timestamp;
     uint32_t rom_capacity;
-    ed64_pro_storage_state_t storage_state;
     bool storage_failed;
-    bool unsynced;
-    int volume_id;
     const char *storage_detail;
     const char *storage_operation;
     uint32_t storage_lba;
     uint32_t storage_count;
     ed64_pro_ll_failure_t storage_failure;
     const char *path_error;
-    bool launch_ready; /* Cartridge ROM/auxiliary loading completed, independently of save and DD readiness. */
-    bool load_byte_swap;
-    bool loading_ipl;
-    bool dd_requested;
-    bool ipl_ready;
-    bool disk_ready;
-    uint32_t ipl_header[4];
-    uint32_t ipl_code;
-    char disk_path[ED64_PRO_PATH_MAX + 1];
-    uint32_t launch_extent;
-    char rom_path[ED64_PRO_PATH_MAX + 1];
-    uint32_t brm_type;
-    uint32_t brm_size;
-    bool save_ready;
-    char save_path[ED64_PRO_PATH_MAX + 1];
 } ed64_pro_diagnostics_t;
 
 /**

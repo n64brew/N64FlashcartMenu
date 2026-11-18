@@ -5,6 +5,7 @@
 
 #if defined(ED64_PRO_TEST_STORAGE) || defined(ED64_PRO_TEST_LOAD)
 #include <fatfs/ff.h>
+#include <fatfs/diskio.h>
 #endif
 #ifdef ED64_PRO_TEST_LOAD
 #include "flashcart/flashcart_utils.h"
@@ -432,7 +433,7 @@ static bool run_readonly_diagnostics (void) {
     const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
     uint32_t sample_span = diagnostic_samples.last_ticks - diagnostic_samples.first_ticks;
     if (diagnostic_samples.samples < 5 || sample_span < TICKS_FROM_MS(5000) ||
-        diagnostics->state != ED64_PRO_READY || diagnostics->storage_state != ED64_PRO_STORAGE_FATFS_OWNED ||
+        diagnostics->state != ED64_PRO_READY || disk_status(0) != 0 ||
         diagnostics->storage_failed || ed64_pro_ll_get_failure()->code != ED64_PRO_LL_OK) {
         printf("Diagnostics FAILED: sample duration or retained storage/transport fault.\n");
         return false;
@@ -469,15 +470,14 @@ static bool stage_readonly_ipl (void) {
     flashcart_err_t error = adapter->load_64dd_ipl(ED64_PRO_TEST_IPL_PATH, ipl_progress);
     const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
     if (error != FLASHCART_OK || !ipl_progress_valid || ipl_progress_last != 1.0f || !ipl_progress_calls ||
-        !diagnostics->dd_requested || !diagnostics->ipl_ready || diagnostics->disk_ready || diagnostics->loading_ipl ||
-        diagnostics->state != ED64_PRO_READY || diagnostics->storage_state != ED64_PRO_STORAGE_FATFS_OWNED ||
+        diagnostics->state != ED64_PRO_READY || disk_status(0) != 0 ||
         diagnostics->storage_failed || ed64_pro_ll_get_failure()->code != ED64_PRO_LL_OK) {
         printf("Read-only IPL staging FAILED (%u): %s\n", (unsigned)error, ed64_pro_get_error_message());
         return false;
     }
+    if (!read_fixture(false)) return false;
     printf("Read-only IPL staging PASS: 4 MiB, %u progress callbacks.\n", ipl_progress_calls);
-    printf("Header: %08" PRIX32 ", code: %08" PRIX32 "\n", diagnostics->ipl_header[0], diagnostics->ipl_code);
-    printf("IPL copied to FCI; mapped readback was not tested.\n");
+    printf("Storage remains readable; DD START and mapped IPL readback were not tested.\n");
     return true;
 }
 #endif
@@ -654,7 +654,7 @@ static void run_storage_fail_write (void) {
         terminal();
     }
     flashcart_err_t handoff_error = ed64_pro_get_flashcart()->deinit();
-    if (handoff_error != FLASHCART_ERR_SD_CARD || diagnostics->storage_state != ED64_PRO_STORAGE_FAILED ||
+    if (handoff_error != FLASHCART_ERR_SD_CARD || !(disk_status(0) & STA_NOINIT) ||
         !diagnostics->storage_failed) {
         printf("Write-fault FAILED: latched write did not refuse handoff.\n");
         terminal();
@@ -912,7 +912,7 @@ static void run_load (void) {
     }
     error = adapter->load_rom(ED64_PRO_TEST_OVERSIZE_PATH, NULL);
     if (error != FLASHCART_ERR_LOAD || diagnostics->storage_failed || diagnostics->state != ED64_PRO_READY ||
-        diagnostics->storage_state != ED64_PRO_STORAGE_FATFS_OWNED ||
+        disk_status(0) != 0 ||
         ed64_pro_ll_get_failure()->code != ED64_PRO_LL_OK) {
         printf("Oversized ROM FAILED: oversized ROM refusal (%u).\n", (unsigned)error);
         terminal();
