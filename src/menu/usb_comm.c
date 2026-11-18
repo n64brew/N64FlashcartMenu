@@ -20,7 +20,7 @@
 
 #define MAX_FILE_SIZE   MiB(4)
 
-// File commands (list-dir, stat)
+// File commands (list-dir, stat, free-space)
 //
 // These let a USB host manage the files on the SD card while the menu is running.
 // Arguments are NUL terminated so paths may contain spaces.
@@ -281,11 +281,43 @@ static void command_stat (menu_t *menu) {
     usb_comm_send_result(result);
 }
 
+/**
+ * @brief Get the size of the SD card and the free space.
+ *
+ * The data is one line: "<total bytes> <free bytes>".
+ *
+ * @param menu Pointer to the menu structure.
+ */
+static void command_free_space (menu_t *menu) {
+    char data[64];
+    FATFS *fs;
+    DWORD free_clusters;
+
+    usb_purge();
+
+    FRESULT result = f_getfree("", &free_clusters, &fs);
+    if (result == FR_OK) {
+        uint64_t cluster_size = (uint64_t) (fs->csize) * FF_MAX_SS;
+        int length = sprintf(
+            data,
+            "%llu %llu\n",
+            (unsigned long long) ((fs->n_fatent - 2) * cluster_size),
+            (unsigned long long) (free_clusters * cluster_size)
+        );
+        if (usb_write(DATATYPE_RAWBINARY, data, length) != 1) {
+            return;
+        }
+    }
+
+    usb_comm_send_result(result);
+}
+
 static usb_comm_command_t commands[] = {
     { .id = "reboot", .op = command_reboot },
     { .id = "send-file", .op = command_receive_file }, // Note that this is a crossover with the `id` related to the PC commands.
     { .id = "list-dir", .op = command_list_dir },
     { .id = "stat", .op = command_stat },
+    { .id = "free-space", .op = command_free_space },
     { .id = NULL },
 };
 
