@@ -1371,7 +1371,7 @@ static flashcart_t flashcart_ed64_pro = {
     .get_voltage = pro_get_voltage,
     .get_voltage_temperature = NULL,
     .set_save_type = pro_set_save_type,
-    .set_save_writeback = NULL,
+    .set_save_writeback = NULL, // pro_deinit() starts MCU save writeback after returning SD ownership.
     .set_next_boot_mode = NULL,
     .get_error_message = pro_get_error_message,
 };
