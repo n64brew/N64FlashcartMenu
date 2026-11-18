@@ -36,7 +36,7 @@ The current state of support is:
 ## Current (notable) menu features
 * Fully Open Source.
 * Loads all known N64 games, even if they are byteswapped.
-* Fully emulates the 64DD and loads 64DD disks (SummerCart64 only).
+* Native 64DD disk emulation on SummerCart64 and EverDrive-64 Pro; see [64DD support](docs/17_64dd.md).
 * Emulator support (NES, SNES, GB, GBC, SMS, GG, CHF) ROMs.
 * N64 ROM box art image support.
 * Background image (PNG & JPEG) support.

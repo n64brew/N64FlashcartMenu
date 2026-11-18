@@ -6,7 +6,7 @@ PRO_WRITE_FAILURE_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_write_failure_test_sani
 PRO_WRITE_FAILURE_CASE := injected nth write fails after first ACK block
 PRO_SOURCE := tests/ed64_pro/ed64_pro_transport_test.c
 PRO_RTC_SOURCE := src/flashcart/ed64_pro/ed64_pro_rtc.c
-PRO_DEPS := $(PRO_SOURCE) $(PRO_RTC_SOURCE) src/flashcart/ed64_pro/ed64_pro_rtc.h $(RTC_STUB_SOURCE) tests/stubs/system.h $(FATFS_UNICODE_DEPS) tests/stubs/libdragon.h tests/stubs/fatfs/ff.h tests/stubs/fatfs/diskio.h \
+PRO_DEPS := tests/ed64_pro/host_compat.h $(PRO_SOURCE) $(PRO_RTC_SOURCE) src/flashcart/ed64_pro/ed64_pro_rtc.h $(RTC_STUB_SOURCE) tests/stubs/system.h $(FATFS_UNICODE_DEPS) tests/stubs/libdragon.h tests/stubs/fatfs/ff.h tests/stubs/fatfs/diskio.h \
 	tests/stubs/libcart/cart.h src/utils/fs.h src/flashcart/flashcart_utils.h \
 	src/flashcart/ed64_pro/ed64_pro_ll.c src/flashcart/ed64_pro/ed64_pro_ll.h \
 	src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro.h src/flashcart/flashcart.h \
@@ -24,7 +24,9 @@ LIFECYCLE_DEPS := $(LIFECYCLE_SOURCE) tests/stubs/system.h tests/stubs/libdragon
 	src/libs/acutest/acutest.h tests/Makefile tests/ed64_pro/host.mk
 ADAPTER_TEST := $(HOST_BUILD_DIR)/ed64_pro_adapter_test
 ADAPTER_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_adapter_test_sanitize
-ADAPTER_DEPS := tests/ed64_pro/ed64_pro_adapter_test.c $(PRO_DEPS) $(LIFECYCLE_DEPS)
+ADAPTER_DEPS := tests/ed64_pro/ed64_pro_adapter_test.c $(PRO_DEPS) $(LIFECYCLE_DEPS) \
+	src/menu/cart_load.c src/menu/cart_load.h src/menu/path.c src/menu/path.h src/menu/menu_state.h \
+	src/menu/rom_info.h src/menu/settings.h src/menu/theme.h src/menu/bookkeeping.h
 
 .PHONY: test-ed64-pro test-ed64-pro-sanitize
 test-ed64-pro: $(PRO_TEST) $(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE) $(ADAPTER_TEST) $(PRO_WRITE_FAILURE_TEST)
@@ -69,11 +71,11 @@ $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE): $(LIFECYCLE_DEPS)
 
 $(ADAPTER_TEST): $(ADAPTER_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 tests/ed64_pro/ed64_pro_adapter_test.c $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O2 tests/ed64_pro/ed64_pro_adapter_test.c $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@
 
 $(ADAPTER_SANITIZE): $(ADAPTER_DEPS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro/ed64_pro_adapter_test.c $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro/ed64_pro_adapter_test.c $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@
 
 RTC_TEST := $(HOST_BUILD_DIR)/rtc_test
 RTC_SANITIZE := $(HOST_BUILD_DIR)/rtc_test_sanitize
@@ -102,3 +104,29 @@ $(RTC_SANITIZE): $(RTC_DEPS)
 
 test-ed64-pro: test-rom-info
 test-ed64-pro-sanitize: test-rom-info-sanitize
+
+CART_LOAD_DD_TEST := $(HOST_BUILD_DIR)/ed64_pro_cart_load_dd_test
+CART_LOAD_DD_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_cart_load_dd_test_sanitize
+CART_LOAD_DD_SOURCE := tests/ed64_pro/cart_load_dd_test.c
+CART_LOAD_DD_DEPS := $(CART_LOAD_DD_SOURCE) src/menu/cart_load.c src/menu/cart_load.h \
+	src/menu/menu_state.h src/menu/disk_info.h src/menu/path.c src/menu/path.h \
+	src/menu/rom_info.h src/menu/settings.h src/menu/theme.h src/menu/bookkeeping.h \
+	src/flashcart/flashcart.h src/utils/fs.c src/utils/fs.h tests/Makefile tests/ed64_pro/host.mk
+
+.PHONY: test-cart-load-dd test-cart-load-dd-sanitize
+test-cart-load-dd: $(CART_LOAD_DD_TEST)
+	$(CART_LOAD_DD_TEST)
+
+test-cart-load-dd-sanitize: $(CART_LOAD_DD_SANITIZE)
+	$(CART_LOAD_DD_SANITIZE)
+
+test-ed64-pro: test-cart-load-dd
+test-ed64-pro-sanitize: test-cart-load-dd-sanitize
+
+$(CART_LOAD_DD_TEST): $(CART_LOAD_DD_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O2 $(CART_LOAD_DD_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@
+
+$(CART_LOAD_DD_SANITIZE): $(CART_LOAD_DD_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O1 $(SANITIZE_FLAGS) $(CART_LOAD_DD_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@

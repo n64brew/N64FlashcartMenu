@@ -69,8 +69,15 @@ typedef struct {
     uint32_t storage_count;
     ed64_pro_ll_failure_t storage_failure;
     const char *path_error;
-    bool launch_ready;
+    bool launch_ready; /* Cartridge ROM/auxiliary loading completed, independently of save and DD readiness. */
     bool load_byte_swap;
+    bool loading_ipl;
+    bool dd_requested;
+    bool ipl_ready;
+    bool disk_ready;
+    uint32_t ipl_header[4];
+    uint32_t ipl_code;
+    char disk_path[ED64_PRO_PATH_MAX + 1];
     uint32_t launch_extent;
     char rom_path[ED64_PRO_PATH_MAX + 1];
     uint32_t brm_type;

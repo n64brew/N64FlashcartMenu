@@ -1,4 +1,5 @@
 #include <acutest.h>
+#include "host_compat.h"
 #include <string.h>
 #include <setjmp.h>
 #include <stdarg.h>
@@ -15,6 +16,14 @@
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #include "../../src/flashcart/flashcart.c"
 #pragma GCC diagnostic pop
+
+/* The integration cases use the unchanged shared loader and actual Pro adapter. */
+typedef struct { uint8_t r, g, b, a; } color_t;
+bool is_memory_expanded (void);
+#include "../../src/menu/cart_load.c"
+#include "../../src/menu/path.c"
+
+static bool loader_active, loader_ipl_present, loader_bad_save;
 
 static jmp_buf handoff_halt;
 static bool handoff_halt_expected;
@@ -141,9 +150,8 @@ flashcart_t *daisydrive_get_flashcart (void) {
  * @brief Fail if the Pro adapter invokes the shared file-existence helper.
  */
 bool file_exists (char *path) {
-    (void)path;
-    TEST_CHECK(false);
-    return false;
+    TEST_CHECK(loader_active);
+    return strstr(path, ".sav") != NULL || loader_ipl_present;
 }
 
 /**
@@ -151,9 +159,18 @@ bool file_exists (char *path) {
  */
 int64_t file_get_size (char *path) {
     (void)path;
-    TEST_CHECK(false);
-    return -1;
+    TEST_CHECK(loader_active);
+    return loader_bad_save ? -1 : 32768;
 }
+
+bool directory_create (char *path) {
+    (void)path;
+    TEST_CHECK(false);
+    return true;
+}
+
+bool is_memory_expanded (void) { return get_memory_size() > 4 * 1024 * 1024; }
+rom_save_type_t rom_info_get_save_type (rom_info_t *info) { return info->save_type; }
 
 /**
  * @brief Fail if the Pro adapter invokes shared file allocation.
@@ -183,8 +200,13 @@ static struct {
     unsigned opens, file_reads, closes, seeks;
     FRESULT open_result, read_result, close_result, seek_result;
     UINT short_read;
-    uintptr_t destinations[8];
-    UINT read_sizes[8];
+    uintptr_t destinations[128];
+    UINT read_sizes[128];
+    bool ipl_fixture;
+    bool bad_ipl_magic;
+    bool bad_ipl_identity;
+    bool bad_ipl_mapping;
+    uint8_t open_mode;
     char opened_path[ED64_PRO_PATH_MAX + 1];
     struct {
         const char *path;
@@ -195,24 +217,24 @@ static struct {
     unsigned alias_count;
     unsigned stats;
     char stat_paths[8][ED64_PRO_PATH_MAX + 1];
-    uint32_t fci[8];
+    uint32_t fci[128];
     uint16_t flags;
     unsigned flag_calls;
     unsigned fail_flag_call;
-    float progress[8];
+    float progress[128];
     unsigned progress_calls;
     unsigned command_calls;
     unsigned fail_command;
     ed64_pro_dev_cfg_t config;
-    char launch_paths[2][ED64_PRO_PATH_MAX + 1];
+    char launch_paths[3][ED64_PRO_PATH_MAX + 1];
     uint32_t info[2];
     unsigned info_calls;
     unsigned begin_calls;
     unsigned end_calls;
     unsigned reads;
     unsigned writes;
-    uint32_t lbas[8];
-    uint32_t counts[8];
+    uint32_t lbas[128];
+    uint32_t counts[128];
     unsigned operations;
     unsigned fail_operation;
     ed64_pro_ll_error_t io_error;
@@ -230,7 +252,7 @@ static struct {
     ed64_pro_dev_cfg_t rtc_config;
     ed64_pro_ll_error_t rtc_stop_error;
     const fat_disk_t *disk;
-    char events[64];
+    char events[512];
     unsigned events_count;
 } mock;
 
@@ -365,7 +387,7 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
  * @brief Record sector ranges and inject the configured transfer failure.
  */
 static ed64_pro_ll_error_t sector_transfer (uint32_t lba, uint32_t count, bool write) {
-    TEST_ASSERT(mock.operations < 8);
+    TEST_ASSERT(mock.operations < 128);
     mock.lbas[mock.operations] = lba;
     mock.counts[mock.operations++] = count;
     if (write) {
@@ -437,11 +459,12 @@ FRESULT f_stat (const char *path, FILINFO *info) {
  * @brief Record the read-only path and initialize the mock file.
  */
 FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
-    TEST_CHECK(mode == FA_READ);
+    TEST_CHECK(mode == FA_READ || mode == (FA_READ | FA_WRITE));
+    mock.open_mode = mode;
     mock.opens++;
     snprintf(mock.opened_path, sizeof(mock.opened_path), "%s", path);
     file->obj.fs = &mock.fs;
-    file->obj.objsize = mock.file_size;
+    file->obj.objsize = loader_active && strstr(path, ".ndd") ? ED64_PRO_NATIVE_DISK_SIZE : mock.file_size;
     file->fptr = 0;
     return mock.open_result;
 }
@@ -450,14 +473,26 @@ FRESULT f_open (FIL *file, const char *path, uint8_t mode) {
  * @brief Read through the adapter disk callback and simulate short reads or errors.
  */
 FRESULT f_read (FIL *file, void *buffer, UINT bytes, UINT *read) {
-    TEST_ASSERT(mock.file_reads < 8);
+    TEST_ASSERT(mock.file_reads < 128);
     mock.destinations[mock.file_reads] = (uintptr_t)buffer;
     mock.read_sizes[mock.file_reads++] = bytes;
     *read = 0;
     if (mock.read_result != FR_OK) {
         return mock.read_result;
     }
-    if (pro_disk_read(buffer, 1000 + file->fptr / 512, bytes / 512) != RES_OK) {
+    if (mock.ipl_fixture && bytes < 512) {
+        memset(buffer, 0x21, bytes);
+        if (file->fptr == 0) {
+            const uint8_t magic[] = {0x80, 0x27, 0x07, 0x40};
+            memcpy(buffer, magic, 4);
+            if (bytes >= 64) {
+                const uint8_t identity[] = {'N', 'D', 'D', 'J', 2};
+                memcpy((uint8_t *)buffer + 0x3B, identity, sizeof(identity));
+                if (mock.bad_ipl_identity) ((uint8_t *)buffer)[0x3F] = 0;
+            }
+            if (mock.bad_ipl_magic) ((uint8_t *)buffer)[0] = 0;
+        }
+    } else if (pro_disk_read(buffer, 1000 + file->fptr / 512, bytes / 512) != RES_OK) {
         return FR_DISK_ERR;
     }
     *read = mock.short_read ? bytes - mock.short_read : bytes;
@@ -533,6 +568,20 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     return sector_transfer(lba, count, false);
 }
 
+ed64_pro_ll_error_t ed64_pro_ll_sd_read_ipl_fci (
+    ed64_pro_ll_transaction_t *transaction, uint32_t fci, uint32_t lba, uint32_t count, uint32_t deadline
+) {
+    TEST_CHECK(fci >= ED64_PRO_FCI_IPL && fci + count * 512 <= ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE);
+    return ed64_pro_ll_sd_read_fci(transaction, fci, lba, count, deadline);
+}
+
+uint32_t io_read (pi_addr_t pi) {
+    if (loader_active && pi == 0x05000540u) return UINT32_MAX;
+    TEST_CHECK(pi == 0x06001010u || (pi >= 0x06000000u && pi < 0x06000010u));
+    if (mock.bad_ipl_mapping) return 0;
+    return pi == 0x06000000u ? 0x80270740u : 0x21212121u;
+}
+
 /**
  * @brief Record launch command order and inject the configured MCU failure.
  */
@@ -561,9 +610,9 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
 ) {
     (void)transaction;
     (void)deadline;
-    unsigned index = type == ED64_PRO_PATH_GPAK ? 0 : 1;
+    unsigned index = type == ED64_PRO_PATH_GPAK ? 0 : type == ED64_PRO_PATH_BRM ? 1 : 2;
     snprintf(mock.launch_paths[index], sizeof(mock.launch_paths[index]), "%s", path);
-    return launch_command(index == 0 ? 'P' : 'B');
+    return launch_command(index == 0 ? 'P' : index == 1 ? 'B' : 'D');
 }
 
 /**
@@ -573,7 +622,7 @@ ed64_pro_ll_error_t
 ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
     (void)transaction;
     (void)deadline;
-    if (config->rtc_mode == ED64_PRO_RTC_STD) {
+    if (config->brom_type == ED64_PRO_ROM_OFF && config->rtc_mode == ED64_PRO_RTC_STD) {
         mock.rtc_config = *config;
         mock.rtc_pending = true;
         return ED64_PRO_LL_OK;
@@ -601,7 +650,7 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transactio
  * @brief Capture ROM-loading progress values.
  */
 static void progress_callback (float progress) {
-    TEST_ASSERT(mock.progress_calls < 8);
+    TEST_ASSERT(mock.progress_calls < 128);
     mock.progress[mock.progress_calls++] = progress;
 }
 
@@ -1408,7 +1457,311 @@ static void test_unicode_auxiliary_uses_fatfs_only (void) {
     TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/emulator.z64") == 0);
 }
 
+/** @brief Load a fresh, structurally valid native IPL using the production callback. */
+static void stage_ipl (void) {
+    mock.ipl_fixture = true;
+    mock.file_size = ED64_PRO_IPL_SIZE;
+    TEST_ASSERT(ed64_pro_get_flashcart()->load_64dd_ipl("sd:/menu/64ddipl/NDDJ2.n64", progress_callback) == FLASHCART_OK);
+    mock.ipl_fixture = false;
+}
+
+static void stage_disk (void) {
+    flashcart_disk_parameters_t parameters = {.disk_type = 0};
+    mock.file_size = ED64_PRO_NATIVE_DISK_SIZE;
+    TEST_ASSERT(ed64_pro_get_flashcart()->load_64dd_disk("sd:/DD/Caf\xC3\xA9.ndd", &parameters) == FLASHCART_OK);
+}
+
+/** @brief Standalone IPL loads use FCI addresses, then the native firmware owns disk I/O. */
+static void test_dd_standalone (void) {
+    mounted_fixture();
+    stage_ipl();
+    TEST_CHECK(mock.operations == 32 && mock.progress_calls == 32 && mock.progress[31] == 1.0f);
+    TEST_CHECK(mock.file_reads == 34 && !pro_diagnostics.loading_ipl);
+    for (unsigned i = 0; i < 32; i++) {
+        TEST_CHECK(mock.fci[i] == ED64_PRO_FCI_IPL + i * 128 * 1024u);
+        TEST_CHECK(mock.destinations[i + 2] == mock.fci[i] && mock.fci[i] != 0x1F800000u);
+    }
+    TEST_CHECK(pro_diagnostics.ipl_ready && !pro_diagnostics.disk_ready && !pro_diagnostics.save_ready);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.rtc_running);
+    stage_disk();
+    TEST_CHECK(mock.open_mode == (FA_READ | FA_WRITE) && mock.writes == 0);
+    TEST_CHECK(strcmp(pro_diagnostics.disk_path, "/DD/Caf\x82.ndd") == 0);
+    mock.events_count = mock.command_calls = 0;
+    memset(mock.events, 0, sizeof(mock.events));
+    TEST_CHECK(pro_deinit() == FLASHCART_OK);
+    TEST_CHECK(strcmp(mock.events, "TUFDGS") == 0 && mock.unmounts == 1 && mock.fs_inits == 1);
+    TEST_CHECK(strcmp(mock.launch_paths[2], "/DD/Caf\x82.ndd") == 0 && !mock.launch_paths[0][0]);
+    TEST_CHECK(mock.config.brom_type == ED64_PRO_ROM_IPL && mock.config.gpak_size == 0);
+    TEST_CHECK(mock.config.brm_type == ED64_PRO_BRM_OFF && mock.config.brm_size == 0);
+    TEST_CHECK(mock.config.dd_en == 1 && mock.config.rtc_mode == ED64_PRO_RTC_STD);
+}
+
+/** @brief Attaching DD preserves the cartridge extent and its existing save type/path. */
+static void test_dd_combo_and_reset (void) {
+    staged_game_fixture(true);
+    stage_ipl();
+    stage_disk();
+    TEST_CHECK(pro_diagnostics.launch_extent == 1024 && pro_diagnostics.save_ready);
+    mock.events_count = mock.command_calls = 0;
+    memset(mock.events, 0, sizeof(mock.events));
+    TEST_CHECK(pro_deinit() == FLASHCART_OK);
+    TEST_CHECK(strcmp(mock.events, "TUFPDBGS") == 0);
+    TEST_CHECK(mock.config.brom_type == ED64_PRO_ROM_GPAK && mock.config.gpak_size == 1024);
+    TEST_CHECK(mock.config.brm_type == ED64_PRO_BRM_SRM128K && mock.config.brm_size == 131072);
+    TEST_CHECK(strcmp(mock.launch_paths[1], "/saves/game.sav") == 0 && mock.config.dd_en == 1);
+
+    mounted_fixture();
+    stage_ipl();
+    stage_disk();
+    mock.file_reads = mock.operations = mock.progress_calls = 0;
+    mock.file_size = 1024;
+    TEST_CHECK(pro_load_rom("sd:/ordinary.z64", NULL) == FLASHCART_OK);
+    TEST_CHECK(!pro_diagnostics.dd_requested && !pro_diagnostics.ipl_ready && !pro_diagnostics.disk_ready);
+    TEST_CHECK(pro_diagnostics.disk_path[0] == '\0');
+}
+
+/** @brief DD failures preserve complete cartridges; incomplete preparations are discarded on retry. */
+static void test_dd_failed_combo_retry (void) {
+    for (unsigned fault = 0; fault < 5; fault++) {
+        staged_game_fixture(true);
+        if (fault == 0) {
+            mock.file_size = 0;
+            TEST_CHECK(pro_load_64dd_ipl("sd:/bad-ipl.n64", NULL) == FLASHCART_ERR_LOAD);
+        } else if (fault == 1) {
+            stage_ipl();
+            mock.file_size = 0;
+            flashcart_disk_parameters_t parameters = {0};
+            TEST_CHECK(pro_load_64dd_disk("sd:/bad.ndd", &parameters) == FLASHCART_ERR_LOAD);
+        } else if (fault == 2) {
+            TEST_CHECK(pro_load_save(NULL) == FLASHCART_ERR_ARGS);
+        } else if (fault == 3) {
+            mock.file_size = 0;
+            TEST_CHECK(pro_load_rom("sd:/failed.z64", NULL) == FLASHCART_ERR_LOAD);
+        } else {
+            TEST_CHECK(pro_load_file("sd:/failed.gb", 1, 0) == FLASHCART_ERR_ARGS);
+        }
+        TEST_CHECK(pro_cartridge_prepared() == (fault < 2));
+        mock.file_reads = mock.operations = mock.progress_calls = 0;
+        stage_ipl();
+        stage_disk();
+        TEST_CHECK(pro_cartridge_prepared() == (fault < 2));
+        if (fault < 2) {
+            TEST_CHECK(strcmp(pro_diagnostics.rom_path, "/game.z64") == 0);
+            TEST_CHECK(strcmp(pro_diagnostics.save_path, "/saves/game.sav") == 0);
+            TEST_CHECK(pro_diagnostics.launch_extent == 1024 && pro_diagnostics.brm_type == ED64_PRO_BRM_SRM128K);
+        } else {
+            TEST_CHECK(!pro_diagnostics.rom_path[0] && !pro_diagnostics.save_path[0]);
+            TEST_CHECK(pro_diagnostics.launch_extent == 0 && pro_diagnostics.brm_type == ED64_PRO_BRM_OFF);
+        }
+        TEST_CHECK(pro_deinit() == FLASHCART_OK);
+        TEST_CHECK(mock.config.brom_type == (fault < 2 ? ED64_PRO_ROM_GPAK : ED64_PRO_ROM_IPL));
+        TEST_CHECK(mock.config.gpak_size == (fault < 2 ? 1024u : 0u));
+        TEST_CHECK(mock.config.brm_size == (fault < 2 ? 131072u : 0u));
+    }
+}
+
+/** @brief Overlap is rejected before IPL I/O and clears only the rejected cartridge for a clean retry. */
+static void test_dd_overlap_preflight (void) {
+    staged_game_fixture(true);
+    pro_diagnostics.launch_extent = ED64_PRO_DD_ROM_LIMIT + 512;
+    unsigned opens = mock.opens;
+    TEST_CHECK(pro_load_64dd_ipl("sd:/ipl.n64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(mock.opens == opens && mock.file_reads == 1 && mock.operations == 1);
+    TEST_CHECK(!pro_diagnostics.ipl_ready && !pro_diagnostics.disk_ready && !pro_cartridge_prepared());
+    TEST_CHECK(!pro_diagnostics.rom_path[0] && !pro_diagnostics.save_path[0]);
+    TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0);
+    mock.file_reads = mock.operations = mock.progress_calls = 0;
+    stage_ipl();
+    stage_disk();
+    TEST_CHECK(pro_deinit() == FLASHCART_OK && mock.config.brom_type == ED64_PRO_ROM_IPL);
+    TEST_CHECK(mock.config.brm_size == 0 && mock.config.gpak_size == 0);
+
+    staged_game_fixture(true);
+    pro_diagnostics.launch_extent = ED64_PRO_DD_ROM_LIMIT;
+    stage_ipl();
+    stage_disk();
+    TEST_CHECK(pro_deinit() == FLASHCART_OK && mock.config.gpak_size == ED64_PRO_DD_ROM_LIMIT);
+}
+
+/** @brief Ordinary payload loading can still use the full firmware-reported ROM capacity. */
+static void test_ordinary_capacity_after_dd (void) {
+    mounted_fixture();
+    stage_ipl();
+    stage_disk();
+    mock.file_size = 512;
+    mock.file_reads = mock.operations = mock.progress_calls = 0;
+    TEST_ASSERT(pro_load_rom("sd:/emulator.z64", NULL) == FLASHCART_OK);
+    TEST_ASSERT(pro_load_file("sd:/rom.bin", pro_diagnostics.rom_capacity - 512, 0) == FLASHCART_OK);
+    TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_NONE) == FLASHCART_OK);
+    TEST_CHECK(pro_diagnostics.launch_extent == pro_diagnostics.rom_capacity);
+    TEST_CHECK(pro_diagnostics.launch_extent > ED64_PRO_DD_ROM_LIMIT);
+    TEST_CHECK(pro_deinit() == FLASHCART_OK && mock.config.gpak_size == pro_diagnostics.rom_capacity);
+    TEST_CHECK(mock.config.dd_en == 0);
+}
+
+/** @brief Unsupported, read-only, missing and incomplete images cannot reach handoff. */
+static void test_dd_setup_refusals (void) {
+    const FSIZE_t sizes[] = {0, ED64_PRO_IPL_SIZE - 1, ED64_PRO_IPL_SIZE + 512};
+    for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        mounted_fixture();
+        mock.file_size = sizes[i];
+        TEST_CHECK(pro_load_64dd_ipl("sd:/bad.n64", NULL) == FLASHCART_ERR_LOAD);
+        TEST_CHECK(mock.file_reads == 0 && mock.closes == 1 && !pro_diagnostics.ipl_ready);
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0);
+    }
+    mounted_fixture();
+    mock.file_size = ED64_PRO_IPL_SIZE;
+    mock.ipl_fixture = mock.bad_ipl_magic = true;
+    TEST_CHECK(pro_load_64dd_ipl("sd:/bad.n64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(!pro_diagnostics.loading_ipl && !pro_diagnostics.launch_ready && mock.operations == 0);
+
+    for (unsigned identity_fault = 0; identity_fault < 2; identity_fault++) {
+        mounted_fixture();
+        mock.file_size = ED64_PRO_IPL_SIZE;
+        mock.ipl_fixture = true;
+        mock.bad_ipl_identity = identity_fault == 0;
+        TEST_CHECK(pro_load_64dd_ipl(identity_fault ? "sd:/NDDE0.n64" : "sd:/NDDJ2.n64", NULL) == FLASHCART_ERR_LOAD);
+        TEST_CHECK(!pro_diagnostics.ipl_ready && mock.operations == 0 && mock.closes == 1);
+    }
+
+    flashcart_disk_parameters_t parameters = {0};
+    mounted_fixture();
+    TEST_CHECK(pro_load_64dd_disk("sd:/disk.ndd", &parameters) == FLASHCART_ERR_LOAD && mock.opens == 0);
+    for (unsigned fault = 0; fault < 4; fault++) {
+        mounted_fixture();
+        stage_ipl();
+        mock.file_size = fault == 0 ? ED64_PRO_NATIVE_DISK_SIZE - 512 : ED64_PRO_NATIVE_DISK_SIZE;
+        if (fault == 1) mock.open_result = FR_NO_FILE;
+        if (fault == 2) mock.open_result = FR_INVALID_NAME; /* Failed writable open, including read-only files. */
+        if (fault == 3) mock.close_result = FR_DISK_ERR;
+        TEST_CHECK(pro_load_64dd_disk("sd:/bad.ndd", &parameters) == FLASHCART_ERR_LOAD);
+        TEST_CHECK(!pro_diagnostics.disk_ready && !pro_diagnostics.launch_ready && !pro_diagnostics.disk_path[0]);
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
+    }
+}
+
+/** @brief IPL transfer faults and unmapped launch memory stop the actual backend boot callback. */
+static void test_dd_transfer_and_mapping_faults (void) {
+    mounted_fixture();
+    mock.ipl_fixture = true;
+    mock.file_size = ED64_PRO_IPL_SIZE;
+    mock.fail_operation = 2;
+    TEST_CHECK(pro_load_64dd_ipl("sd:/ipl.n64", NULL) == FLASHCART_ERR_LOAD);
+    TEST_CHECK(!pro_diagnostics.loading_ipl && !pro_diagnostics.ipl_ready && !pro_diagnostics.launch_ready);
+    TEST_CHECK(pro_diagnostics.storage_failed && mock.operations == 2 && mock.closes == 1);
+
+    mounted_fixture();
+    stage_ipl();
+    stage_disk();
+    mock.bad_ipl_mapping = true;
+    handoff_halt_expected = true;
+    if (setjmp(handoff_halt) == 0) {
+        ed64_pro_get_flashcart()->deinit();
+        TEST_CHECK(false);
+    }
+    handoff_halt_expected = false;
+    TEST_CHECK(pro_diagnostics.storage_failed && strstr(handoff_halt_message, "IPL mapping"));
+    TEST_CHECK(mock.command_calls == 3 && mock.unmounts == 1);
+}
+
+/** @brief Every native disk handoff failure is terminal and no cartridge slot limit is imposed. */
+static void test_dd_handoff_failures_and_native_swap (void) {
+    const char *steps[] = {"Disk path", "Game configuration", "Game start"};
+    for (unsigned fault = 1; fault <= 3; fault++) {
+        mounted_fixture();
+        stage_ipl();
+        stage_disk();
+        mock.fail_command = fault;
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_INT);
+        TEST_CHECK(mock.command_calls == fault && strstr(ed64_pro_get_error_message(), steps[fault - 1]));
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_SD_CARD && mock.command_calls == fault);
+    }
+    mounted_fixture();
+    stage_ipl();
+    mock.file_size = ED64_PRO_NATIVE_DISK_SIZE;
+    flashcart_disk_parameters_t parameters = {0};
+    char *unused_menu_list[] = {"sd:/DD/sibling.ndd"};
+    TEST_CHECK(pro_load_64dd_disks("sd:/DD/primary.ndd", &parameters, unused_menu_list, 25) == FLASHCART_OK);
+    TEST_CHECK(pro_diagnostics.disk_ready && pro_has_feature(FLASHCART_FEATURE_64DD));
+    TEST_CHECK(pro_load_64dd_disks("sd:/DD/primary.ndd", &parameters, NULL, -1) == FLASHCART_OK);
+    TEST_CHECK(pro_diagnostics.disk_ready);
+    TEST_CHECK(pro_load_64dd_disks(NULL, &parameters, unused_menu_list, 1) == FLASHCART_ERR_ARGS);
+    TEST_CHECK(!pro_diagnostics.disk_ready);
+}
+
+/** @brief Missing IPL before the backend callback preserves a fully prepared cartridge/save. */
+static void test_shared_loader_missing_ipl_then_standalone (void) {
+    mounted_fixture();
+    loader_active = true;
+    loader_ipl_present = loader_bad_save = false;
+    flashcart = ed64_pro_get_flashcart();
+    menu_t menu = {0};
+    menu.storage_prefix = "sd:";
+    menu.load.combined_disk_rom = true;
+    menu.load.rom_path = path_create("sd:/game.z64");
+    menu.load.rom_info.save_type = SAVE_TYPE_SRAM_256KBIT;
+    menu.load.disk_slots.primary.disk_path = path_create("sd:/disk.ndd");
+    menu.load.disk_slots.primary.disk_info.region = DISK_REGION_JAPANESE;
+    TEST_ASSERT(cart_load_n64_rom_and_save(&menu, NULL, NULL) == CART_LOAD_OK);
+    TEST_CHECK(pro_cartridge_prepared());
+    unsigned opens = mock.opens;
+    TEST_CHECK(cart_load_64dd_ipl_and_disks(&menu, NULL) == CART_LOAD_ERR_64DD_IPL_NOT_FOUND);
+    TEST_CHECK(mock.opens == opens && pro_cartridge_prepared() && !pro_diagnostics.dd_requested);
+    menu.load.combined_disk_rom = false;
+    loader_ipl_present = true;
+    mock.file_size = ED64_PRO_IPL_SIZE;
+    mock.ipl_fixture = true;
+    TEST_ASSERT(cart_load_64dd_ipl_and_disks(&menu, NULL) == CART_LOAD_OK);
+    TEST_CHECK(pro_cartridge_prepared() && pro_diagnostics.ipl_ready && pro_diagnostics.disk_ready);
+    TEST_ASSERT(pro_deinit() == FLASHCART_OK);
+    TEST_CHECK(mock.config.brom_type == ED64_PRO_ROM_GPAK && mock.config.gpak_size == 1024);
+    TEST_CHECK(mock.config.dd_en == 1 && mock.config.brm_size == 32768);
+    TEST_CHECK(strcmp(mock.launch_paths[1], "/game.sav") == 0);
+    path_free(menu.load.rom_path);
+    path_free(menu.load.disk_slots.primary.disk_path);
+    loader_active = false;
+}
+
+/** @brief ROM/save failures in the production shared loader cannot leave a complete cartridge. */
+static void test_shared_loader_failure_then_standalone (void) {
+    for (unsigned fault = 0; fault < 2; fault++) {
+        mounted_fixture();
+        loader_active = loader_ipl_present = true;
+        loader_bad_save = fault == 1;
+        flashcart = ed64_pro_get_flashcart();
+        menu_t menu = {0};
+        menu.storage_prefix = "sd:";
+        menu.load.rom_path = path_create("sd:/game.z64");
+        menu.load.rom_info.save_type = SAVE_TYPE_SRAM_256KBIT;
+        menu.load.disk_slots.primary.disk_path = path_create("sd:/disk.ndd");
+        menu.load.disk_slots.primary.disk_info.region = DISK_REGION_JAPANESE;
+        if (fault == 0) mock.file_size = 0;
+        TEST_CHECK(cart_load_n64_rom_and_save(&menu, NULL, NULL) ==
+            (fault == 0 ? CART_LOAD_ERR_ROM_LOAD_FAIL : CART_LOAD_ERR_SAVE_LOAD_FAIL));
+        TEST_CHECK(!pro_cartridge_prepared() && !pro_diagnostics.dd_requested);
+        mock.file_size = ED64_PRO_IPL_SIZE;
+        mock.ipl_fixture = true;
+        TEST_ASSERT(cart_load_64dd_ipl_and_disks(&menu, NULL) == CART_LOAD_OK);
+        TEST_CHECK(!pro_diagnostics.rom_path[0] && !pro_diagnostics.save_path[0]);
+        TEST_ASSERT(pro_deinit() == FLASHCART_OK);
+        TEST_CHECK(mock.config.brom_type == ED64_PRO_ROM_IPL && mock.config.brm_size == 0);
+        path_free(menu.load.rom_path);
+        path_free(menu.load.disk_slots.primary.disk_path);
+        loader_active = loader_bad_save = false;
+    }
+}
+
 TEST_LIST = {
+    {"shared loader missing IPL then standalone retains complete GPAK and save", test_shared_loader_missing_ipl_then_standalone},
+    {"shared loader ROM/save failure then standalone disables cartridge services", test_shared_loader_failure_then_standalone},
+    {"native DD standalone IPL FCI loading and safe handoff", test_dd_standalone},
+    {"native DD combo preserves cartridge saves and ROM resets DD state", test_dd_combo_and_reset},
+    {"native DD retries retain complete cartridges and discard failed preparation", test_dd_failed_combo_retry},
+    {"native DD mirror overlap rejects before writing and allows standalone retry", test_dd_overlap_preflight},
+    {"ordinary ROM loading retains full capacity after DD staging", test_ordinary_capacity_after_dd},
+    {"native DD unsupported missing read-only and incomplete setup refuses boot", test_dd_setup_refusals},
+    {"native DD transfer and mapping faults halt boot", test_dd_transfer_and_mapping_faults},
+    {"native DD handoff failures latch and native swap has no slot cap", test_dd_handoff_failures_and_native_swap},
     {"staged paths use exact CP437 while FatFs keeps UTF-8", test_cp437_paths},
     {"unmappable components use verified UTF-8 short aliases", test_unicode_short_aliases},
     {"malformed UTF-8 rejects before metadata or data I/O", test_invalid_utf8_paths},

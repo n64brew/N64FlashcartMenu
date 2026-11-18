@@ -56,7 +56,7 @@ Before starting a full test cycle, document the current baseline status to track
 | Feature | 64drive | ED64 V3 | ED64 X7 | ED64 Pro | SummerCart64 |
 |---|---|---|---|---|---|
 | **N64 ROM Loading** | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **64DD Disk Loading** | ✓ | ⚠ | ⚠ | … | ✓ |
+| **64DD Disk Loading** | ✓ | ⚠ | ⚠ | ✓ | ✓ |
 | **Emulator ROM Loading** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Save Data Persistence** | ✓ | ⚠ | ⚠ | ✓ | ✓ |
 | **Cheat Codes** | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -69,7 +69,7 @@ Before starting a full test cycle, document the current baseline status to track
 | **Diagnostics** | - | - | - | … | ✓ |
 
 **Notes:**
-- `…` = possible, but not yet implemented; `-` = unavailable.
+- `⚠` = limited support; `…` = possible, but not yet implemented; `-` = unavailable.
 - ED64 V3: Limited USB support (older revision)
 - ED64 V3: Requires manual CIC/region setting
 - ED64 Pro: Firmware `26.1014` has a bug that causes the last 2-3 bytes of 128 KiB FlashRAM and 128 KiB SRAM saves to be stored and loaded incorrectly. This does not affect any retail games; only homebrew games that use the last 4 bytes of these specific save types are impacted. It is not possible to work around this bug in software; a firmware fix is required.

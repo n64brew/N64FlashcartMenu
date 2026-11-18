@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include <acutest.h>
+#include "host_compat.h"
 
 /* Include the production unit to reset ROM-lifetime state between power-on fixtures.
  * No reset or alternate transport implementation is compiled into the ROM. */
@@ -99,7 +100,7 @@ static struct {
     bool nresp_missing;
     bool nresp_trailing;
     uint8_t sectors[256 * 512];
-    uint8_t fci[512 * 512];
+    uint8_t fci[ED64_PRO_IPL_SIZE];
     unsigned fci_transfers;
     uint32_t fci_address;
     uint16_t flags;
@@ -111,7 +112,7 @@ static struct {
     uint8_t dev_path_frame[ED64_PRO_FRAME_MAX];
     size_t dev_path_expected;
     size_t dev_path_received;
-    char dev_paths[2][ED64_PRO_PATH_MAX + 1];
+    char dev_paths[3][ED64_PRO_PATH_MAX + 1];
     unsigned path_commands;
     uint8_t config_bytes[64];
     unsigned config_commands;
@@ -223,16 +224,16 @@ static void release_reply (void) {
 static void record_dev_path (const uint8_t *frame, size_t length) {
     TEST_ASSERT(
         length >= 9 && frame[0] == 0x2B && frame[1] == 0xD4 && frame[2] == 0x85 && frame[3] == 0x7A &&
-        frame[4] == 0x21 && (frame[5] == 0 || frame[5] == 2)
+        frame[4] == 0x21 && (frame[5] == 0 || frame[5] == 2 || frame[5] == 4)
     );
     size_t path_length = (size_t)frame[6] << 8 | frame[7];
     TEST_ASSERT(path_length <= ED64_PRO_PATH_MAX && length == path_length + 8);
-    size_t slot = frame[5] == 0 ? 0 : 1;
+    size_t slot = frame[5] / 2;
     memcpy(mock.dev_paths[slot], frame + 8, path_length);
     mock.dev_paths[slot][path_length] = '\0';
     mock.path_commands++;
     TEST_ASSERT(mock.dev_step_count < sizeof(mock.dev_steps));
-    mock.dev_steps[mock.dev_step_count++] = slot == 0 ? 'G' : 'B';
+    mock.dev_steps[mock.dev_step_count++] = slot == 0 ? 'G' : slot == 1 ? 'B' : 'D';
 }
 
 /**
@@ -397,11 +398,13 @@ static void execute_bus (void) {
                     if (mock.ram[18] == 0x13) {
                         mock.fci_address = mock.ram[9] << 24 | mock.ram[10] << 16 | mock.ram[11] << 8 | mock.ram[12];
                         mock.fci_transfers++;
-                        TEST_ASSERT(mock.fci_address + mock.transfer_length <= sizeof(mock.fci));
+                        uint32_t target = mock.fci_address;
+                        if (target >= ED64_PRO_FCI_IPL) target -= ED64_PRO_FCI_IPL;
+                        TEST_ASSERT(target + mock.transfer_length <= sizeof(mock.fci));
                         TEST_ASSERT(mock.transfer_lba * 512 + mock.transfer_length <= sizeof(mock.sectors));
                         for (size_t i = 0; i < mock.transfer_length; i++) {
                             size_t source = mock.transfer_lba * 512 + (mock.flags & 1 ? i ^ 1 : i);
-                            mock.fci[mock.fci_address + i] = mock.sectors[source];
+                            mock.fci[target + i] = mock.sectors[source];
                         }
                         mock.transfer_done = mock.transfer_length;
                         mock.transfer_active = false;
@@ -1699,7 +1702,8 @@ static void test_adapter_unavailable_operations (void) {
         for (flashcart_features_t feature = FLASHCART_FEATURE_64DD; feature <= FLASHCART_FEATURE_ROM_REBOOT_FAST;
              feature++) {
             bool supported = feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_AUTO_REGION
-                || feature == FLASHCART_FEATURE_SAVE_WRITEBACK || feature == FLASHCART_FEATURE_RTC;
+                || feature == FLASHCART_FEATURE_SAVE_WRITEBACK || feature == FLASHCART_FEATURE_RTC
+                || feature == FLASHCART_FEATURE_64DD;
             TEST_CHECK(adapter->has_feature(feature) == supported);
         }
         flashcart_firmware_version_t version = adapter->get_firmware_version();
@@ -1708,8 +1712,8 @@ static void test_adapter_unavailable_operations (void) {
         TEST_CHECK(adapter->load_file("sd:/test.bin", 0, 0) == FLASHCART_ERR_LOAD);
         TEST_CHECK(adapter->load_save("sd:/test.sra") == FLASHCART_ERR_ARGS);
         TEST_CHECK(adapter->set_save_type(FLASHCART_SAVE_TYPE_SRAM_256KBIT) == FLASHCART_ERR_LOAD);
-        TEST_CHECK(adapter->deinit != NULL && adapter->load_64dd_ipl == NULL && adapter->load_64dd_disk == NULL);
-        TEST_CHECK(adapter->load_64dd_disks == NULL && adapter->get_button_state == NULL);
+        TEST_CHECK(adapter->deinit != NULL && adapter->load_64dd_ipl != NULL && adapter->load_64dd_disk != NULL);
+        TEST_CHECK(adapter->load_64dd_disks != NULL && adapter->get_button_state == NULL);
         TEST_CHECK(adapter->get_voltage_temperature == NULL && adapter->set_save_writeback == NULL);
         TEST_CHECK(adapter->set_next_boot_mode == NULL && mock.accesses == accesses);
     }
@@ -2378,15 +2382,15 @@ static ed64_pro_dev_cfg_t launch_config (void) {
  * @brief Verify device path encoding for UTF-8 bytes and maximum-length paths.
  */
 static void test_dev_path_frames (void) {
-    const char *paths[] = {"/game.z64", "/saves/caf\xC3\xA9.sav"};
-    for (unsigned type = 0; type < 2; type++) {
+    const char *paths[] = {"/game.z64", "/saves/caf\xC3\xA9.sav", "/DD/test.ndd"};
+    for (unsigned type = 0; type < 3; type++) {
         power_on();
         identify();
         ed64_pro_ll_transaction_t transaction;
         begin(&transaction);
-        ed64_pro_path_t path_type = type ? ED64_PRO_PATH_BRM : ED64_PRO_PATH_GPAK;
+        ed64_pro_path_t path_type = type == 0 ? ED64_PRO_PATH_GPAK : type == 1 ? ED64_PRO_PATH_BRM : ED64_PRO_PATH_DISK;
         TEST_CHECK(ed64_pro_ll_dev_set_path(&transaction, path_type, paths[type], deadline_ms(5000)) == ED64_PRO_LL_OK);
-        const uint8_t header[] = {0x2B, 0xD4, 0x85, 0x7A, 0x21, type ? 2 : 0, 0, strlen(paths[type])};
+        const uint8_t header[] = {0x2B, 0xD4, 0x85, 0x7A, 0x21, type * 2, 0, strlen(paths[type])};
         TEST_CHECK(memcmp(mock.tx_bytes, header, sizeof(header)) == 0);
         TEST_CHECK(memcmp(mock.tx_bytes + sizeof(header), paths[type], strlen(paths[type])) == 0);
         const uint8_t status[] = {0x2B, 0xD4, 0x10, 0xEF};
@@ -2449,7 +2453,7 @@ static void test_dev_invalid_arguments (void) {
         ed64_pro_ll_dev_set_path(&transaction, (ed64_pro_path_t)3, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
     );
     TEST_CHECK(
-        ed64_pro_ll_dev_set_path(&transaction, (ed64_pro_path_t)4, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
+        ed64_pro_ll_dev_set_path(&transaction, (ed64_pro_path_t)5, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
     );
     TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, NULL, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
     for (unsigned invalid = 0; invalid < 12; invalid++) {
@@ -2462,7 +2466,7 @@ static void test_dev_invalid_arguments (void) {
         case 4: config.brm_type = 7; break;
         case 5: config.brm_size = 0; break;
         case 6: config.rtc_mode = 1; break;
-        case 7: config.dd_en = 1; break;
+        case 7: config.dd_en = 2; break;
         case 8: config.gpak_wren = 1; break;
         case 9: config.gpak_key = 1; break;
         case 10: config.reserved[0] = 1; break;
@@ -2581,7 +2585,87 @@ static void test_sd_injected_write_failure (void) {
 }
 #endif
 
+/** @brief The IPL helper uses FCI addresses while the ordinary ROM helper excludes them. */
+static void test_dd_ipl_fci_frames_and_bounds (void) {
+    const uint32_t destinations[] = {ED64_PRO_FCI_IPL, ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE - 512};
+    for (unsigned i = 0; i < 2; i++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        TEST_CHECK(ed64_pro_ll_sd_read_ipl_fci(&transaction, destinations[i], 1, 1, deadline_ms(5000)) == ED64_PRO_LL_OK);
+        const uint8_t prefix[] = {0x2B, 0xD4, 0x81, 0x7E, 0x10, 0, 0, 0, 1};
+        TEST_CHECK(memcmp(mock.tx_bytes, prefix, sizeof(prefix)) == 0);
+        TEST_CHECK(mock.tx_bytes[9] == (uint8_t)(destinations[i] >> 24));
+        TEST_CHECK(mock.tx_bytes[10] == (uint8_t)(destinations[i] >> 16));
+        TEST_CHECK(mock.tx_bytes[11] == (uint8_t)(destinations[i] >> 8));
+        TEST_CHECK(mock.tx_bytes[12] == (uint8_t)destinations[i]);
+        const uint8_t tail[] = {0, 0, 2, 0, 0x19, 0x13, 0, 0, 0};
+        TEST_CHECK(memcmp(mock.tx_bytes + 13, tail, sizeof(tail)) == 0 && mock.tx_count == 26);
+        TEST_CHECK(mock.fci_address == destinations[i] && mock.fci_transfers == 1);
+        TEST_CHECK(memcmp(mock.fci + (destinations[i] - ED64_PRO_FCI_IPL), mock.sectors + 512, 512) == 0);
+        end(&transaction);
+    }
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    static const struct { uint32_t address, lba, count; } invalid[] = {
+        {0, 0, 1}, {ED64_PRO_FCI_IPL - 512, 0, 1}, {ED64_PRO_FCI_IPL + 1, 0, 1},
+        {ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE, 0, 1},
+        {ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE - 512, 0, 2},
+        {0x1F800000, 0, 1}, {ED64_PRO_FCI_IPL, 0, 0}, {ED64_PRO_FCI_IPL, 0, 257},
+        {ED64_PRO_FCI_IPL, UINT32_MAX, 2}, {ED64_PRO_FCI_IPL, 0, UINT32_MAX}
+    };
+    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        TEST_CHECK(ed64_pro_ll_sd_read_ipl_fci(&transaction, invalid[i].address, invalid[i].lba,
+                                            invalid[i].count, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    }
+    TEST_CHECK(ed64_pro_ll_sd_read_fci(&transaction, ED64_PRO_FCI_IPL, 0, 1, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
+    end(&transaction);
+}
+
+/** @brief Disk-only and combo profiles encode documented firmware DD and writable RTC settings. */
+static void test_dd_config_profiles (void) {
+    for (unsigned combo = 0; combo < 2; combo++) {
+        power_on();
+        identify();
+        ed64_pro_ll_transaction_t transaction;
+        begin(&transaction);
+        ed64_pro_dev_cfg_t config = combo ? launch_config() : (ed64_pro_dev_cfg_t){.brom_type = ED64_PRO_ROM_IPL};
+        config.dd_en = 1;
+        config.rtc_mode = ED64_PRO_RTC_STD;
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(mock.config_bytes[3] == (combo ? ED64_PRO_ROM_GPAK : ED64_PRO_ROM_IPL));
+        TEST_CHECK(mock.config_bytes[19] == ED64_PRO_RTC_STD && mock.config_bytes[23] == 1);
+        TEST_CHECK(mock.config_bytes[15] == (combo ? ED64_PRO_BRM_EEP4K : ED64_PRO_BRM_OFF));
+        end(&transaction);
+    }
+    power_on();
+    identify();
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    for (unsigned fault = 0; fault < 7; fault++) {
+        ed64_pro_dev_cfg_t config = {.brom_type = ED64_PRO_ROM_IPL, .rtc_mode = ED64_PRO_RTC_STD, .dd_en = 1};
+        switch (fault) {
+        case 0: config.gpak_size = 512; break;
+        case 1: config.brm_type = ED64_PRO_BRM_EEP4K; config.brm_size = 512; break;
+        case 2: config.dd_en = 0; break;
+        case 3: config.dd_en = 2; break;
+        case 4: config.rtc_mode = ED64_PRO_RTC_RDO; break;
+        case 5: config.brom_type = ED64_PRO_ROM_OFF; break;
+        case 6: config.brom_type = ED64_PRO_ROM_GPAK; config.gpak_size = ED64_PRO_DD_ROM_LIMIT + 512; break;
+        }
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    }
+    TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
+    end(&transaction);
+}
+
 TEST_LIST = {
+    {"native DD IPL FCI frames and independent bounds", test_dd_ipl_fci_frames_and_bounds},
+    {"native DD standalone and combo configuration profiles", test_dd_config_profiles},
     {"RTC physical observation framing", test_rtc_frames},
     {"menu RTC configuration uses OFF/zero and disables storage services", test_menu_config},
     {"RTC invalid inputs and contexts never write", test_rtc_rejections},

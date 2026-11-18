@@ -949,15 +949,14 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_write (
 /**
  * @brief Copy SD sectors directly into cartridge ROM memory and check MCU status.
  */
-ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
+static ed64_pro_ll_error_t pro_sd_read_fci (
     ed64_pro_ll_transaction_t *transaction,
     uint32_t fci,
     uint32_t lba,
     uint32_t count,
     uint32_t deadline
 ) {
-    if (!count || count > 256 || count - 1 > UINT32_MAX - lba || (fci & 511) || fci >= ED64_PRO_FCI_ROM_LIMIT ||
-        count * 512 > ED64_PRO_FCI_ROM_LIMIT - fci) {
+    if (!count || count > 256 || count - 1 > UINT32_MAX - lba || (fci & 511)) {
         return ED64_PRO_LL_ARGUMENT;
     }
     ed64_pro_ll_error_t error = pro_owned(transaction);
@@ -983,6 +982,27 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     }
     ed64_pro_status_t status;
     return ed64_pro_ll_check_status(transaction, &status, deadline);
+}
+
+/** @brief Copy SD sectors only to the ordinary ROM window. */
+ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
+    ed64_pro_ll_transaction_t *transaction, uint32_t fci, uint32_t lba, uint32_t count, uint32_t deadline
+) {
+    if (!count || count > 256 || fci >= ED64_PRO_FCI_ROM_LIMIT || count * 512 > ED64_PRO_FCI_ROM_LIMIT - fci) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    return pro_sd_read_fci(transaction, fci, lba, count, deadline);
+}
+
+/** @brief Copy SD sectors only to the dedicated FCI IPL4 window. */
+ed64_pro_ll_error_t ed64_pro_ll_sd_read_ipl_fci (
+    ed64_pro_ll_transaction_t *transaction, uint32_t fci, uint32_t lba, uint32_t count, uint32_t deadline
+) {
+    if (!count || count > 256 || fci < ED64_PRO_FCI_IPL || fci - ED64_PRO_FCI_IPL >= ED64_PRO_IPL_SIZE ||
+        count * 512 > ED64_PRO_IPL_SIZE - (fci - ED64_PRO_FCI_IPL)) {
+        return ED64_PRO_LL_ARGUMENT;
+    }
+    return pro_sd_read_fci(transaction, fci, lba, count, deadline);
 }
 
 /**
@@ -1058,7 +1078,7 @@ static ed64_pro_ll_error_t pro_dev_command (
 }
 
 /**
- * @brief Set the absolute Game Pak or backup-memory path on the device.
+ * @brief Set the absolute Game Pak, backup-memory, or disk path on the device.
  */
 ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     ed64_pro_ll_transaction_t *transaction,
@@ -1066,7 +1086,7 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     const char *path,
     uint32_t deadline
 ) {
-    if ((type != ED64_PRO_PATH_GPAK && type != ED64_PRO_PATH_BRM) || !path || path[0] != '/') {
+    if ((type != ED64_PRO_PATH_GPAK && type != ED64_PRO_PATH_BRM && type != ED64_PRO_PATH_DISK) || !path || path[0] != '/') {
         return ED64_PRO_LL_ARGUMENT;
     }
     size_t length = strnlen(path, ED64_PRO_PATH_MAX + 1);
@@ -1082,22 +1102,25 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
 }
 
 /**
- * @brief Validate and send the Game Pak and backup-memory configuration.
+ * @brief Validate and send the menu, cartridge, or native disk configuration.
  */
 ed64_pro_ll_error_t
 ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
     static const uint32_t brm_sizes[] = {0, 512, 2048, 32768, 98304, 131072, 131072};
-    if (!config || config->dd_en || config->gpak_wren || config->gpak_key) {
+    if (!config || config->dd_en > 1 || config->gpak_wren || config->gpak_key) {
         return ED64_PRO_LL_ARGUMENT;
     }
     /* Game-loading size policies do not apply to the RTC-only OFF profile. */
     bool game = config->brom_type == ED64_PRO_ROM_GPAK && config->gpak_size &&
         !(config->gpak_size & 511) && config->gpak_size <= ED64_PRO_FCI_ROM_LIMIT &&
+        (!config->dd_en || config->gpak_size <= ED64_PRO_DD_ROM_LIMIT) &&
         config->brm_type <= ED64_PRO_BRM_SRM128K && config->brm_size == brm_sizes[config->brm_type] &&
-        config->rtc_mode == ED64_PRO_RTC_RDO;
-    bool menu = config->brom_type == ED64_PRO_ROM_OFF && !config->gpak_size &&
+        config->rtc_mode == (config->dd_en ? ED64_PRO_RTC_STD : ED64_PRO_RTC_RDO);
+    bool disk = config->brom_type == ED64_PRO_ROM_IPL && !config->gpak_size && config->dd_en == 1 &&
         config->brm_type == ED64_PRO_BRM_OFF && !config->brm_size && config->rtc_mode == ED64_PRO_RTC_STD;
-    if (!game && !menu) {
+    bool menu = config->brom_type == ED64_PRO_ROM_OFF && !config->gpak_size && !config->dd_en &&
+        config->brm_type == ED64_PRO_BRM_OFF && !config->brm_size && config->rtc_mode == ED64_PRO_RTC_STD;
+    if (!game && !disk && !menu) {
         return ED64_PRO_LL_ARGUMENT;
     }
     for (size_t i = 0; i < sizeof(config->reserved) / sizeof(config->reserved[0]); i++) {

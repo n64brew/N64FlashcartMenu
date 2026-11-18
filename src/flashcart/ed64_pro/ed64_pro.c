@@ -407,7 +407,8 @@ static const char *pro_get_name (void) {
 /** @brief Report the supported Pro features, including shared boot detection. */
 static bool pro_has_feature (flashcart_features_t feature) {
     return feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_AUTO_REGION
-        || feature == FLASHCART_FEATURE_SAVE_WRITEBACK || feature == FLASHCART_FEATURE_RTC;
+        || feature == FLASHCART_FEATURE_SAVE_WRITEBACK || feature == FLASHCART_FEATURE_RTC
+        || feature == FLASHCART_FEATURE_64DD;
 }
 
 /** @brief Return cached information without MCU traffic. */
@@ -445,6 +446,11 @@ static bool pro_disk_arguments (const void *buffer, int64_t sector, int count, b
     }
     uintptr_t physical = PhysicalAddr(buffer);
     uint64_t bytes = (uint64_t)(unsigned)count * 512;
+    if (pro_diagnostics.loading_ipl && physical >= ED64_PRO_FCI_IPL && physical < ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE) {
+        return !write && physical >= ED64_PRO_FCI_IPL && (physical & 511u) == 0 &&
+            physical - ED64_PRO_FCI_IPL < ED64_PRO_IPL_SIZE &&
+            bytes <= ED64_PRO_IPL_SIZE - (physical - ED64_PRO_FCI_IPL);
+    }
     unsigned rdram_size = (unsigned)get_memory_size();
     if (physical < rdram_size) {
         return bytes <= rdram_size - physical;
@@ -463,7 +469,9 @@ static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool writ
         return RES_NOTRDY;
     }
     uint8_t *cursor = buffer;
-    bool fci = PhysicalAddr(buffer) >= 0x10000000u;
+    bool ipl = pro_diagnostics.loading_ipl && PhysicalAddr(buffer) >= ED64_PRO_FCI_IPL &&
+        PhysicalAddr(buffer) < ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE;
+    bool fci = ipl || PhysicalAddr(buffer) >= 0x10000000u;
     unsigned max_chunk = fci ? 256 : 64;
     while (count > 0) {
         uint32_t chunk = (unsigned)count > max_chunk ? max_chunk : (unsigned)count;
@@ -478,9 +486,10 @@ static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool writ
                     &transaction, ED64_PRO_FLAG_WRSW, pro_diagnostics.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0, deadline
                 );
                 if (error == ED64_PRO_LL_OK) {
-                    error = ed64_pro_ll_sd_read_fci(
-                        &transaction, PhysicalAddr(cursor) - 0x10000000u, sector, chunk, deadline
-                    );
+                    error = ipl ? ed64_pro_ll_sd_read_ipl_fci(&transaction, PhysicalAddr(cursor), sector, chunk, deadline)
+                                : ed64_pro_ll_sd_read_fci(
+                                    &transaction, PhysicalAddr(cursor) - 0x10000000u, sector, chunk, deadline
+                                );
                 }
                 if (error == ED64_PRO_LL_OK) {
                     error = ed64_pro_ll_set_flags(&transaction, ED64_PRO_FLAG_WRSW, 0, deadline);
@@ -606,16 +615,37 @@ static flashcart_err_t pro_release_storage (void) {
     return FLASHCART_OK;
 }
 
+/** @brief Return whether cartridge payload and save preparation both completed. */
+static bool pro_cartridge_prepared (void) {
+    return pro_diagnostics.launch_ready && pro_diagnostics.save_ready && pro_diagnostics.rom_path[0] &&
+        pro_diagnostics.launch_extent > 0 && pro_diagnostics.launch_extent <= pro_diagnostics.rom_capacity &&
+        (pro_diagnostics.brm_type == ED64_PRO_BRM_OFF || pro_diagnostics.save_path[0]);
+}
+
+/** @brief Discard incomplete or rejected cartridge preparation without changing DD readiness. */
+static void pro_clear_cartridge (void) {
+    pro_diagnostics.launch_ready = false;
+    pro_diagnostics.launch_extent = 0;
+    pro_diagnostics.rom_path[0] = '\0';
+    pro_diagnostics.save_path[0] = '\0';
+    pro_diagnostics.brm_type = ED64_PRO_BRM_OFF;
+    pro_diagnostics.brm_size = 0;
+    pro_diagnostics.save_ready = false;
+}
+
 /** @brief Release storage and configure MCU game services for the prepared launch. */
 static flashcart_err_t pro_deinit (void) {
     if (pro_diagnostics.storage_failed) {
         ed64_pro_rtc_close();
         return FLASHCART_ERR_SD_CARD;
     }
+    bool cartridge = pro_cartridge_prepared();
 #ifndef ED64_PRO_TEST_STORAGE
-    if (!pro_diagnostics.launch_ready || !pro_diagnostics.save_ready || pro_diagnostics.launch_extent == 0 ||
-        pro_diagnostics.launch_extent > pro_diagnostics.rom_capacity ||
-        (pro_diagnostics.brm_type != ED64_PRO_BRM_OFF && pro_diagnostics.save_path[0] == '\0')) {
+    if ((pro_diagnostics.rom_path[0] && !cartridge) ||
+        (pro_diagnostics.dd_requested
+            ? (!pro_diagnostics.ipl_ready || !pro_diagnostics.disk_ready ||
+               (cartridge && pro_diagnostics.launch_extent > ED64_PRO_DD_ROM_LIMIT))
+            : !cartridge)) {
         pro_diagnostics.storage_detail = "Game launch is not prepared";
         return FLASHCART_ERR_LOAD;
     }
@@ -633,25 +663,33 @@ static flashcart_err_t pro_deinit (void) {
     return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
 #endif
     ed64_pro_dev_cfg_t config = {
-        .brom_type = ED64_PRO_ROM_GPAK,
-        .gpak_size = (pro_diagnostics.launch_extent + 511u) & ~511u,
-        .brm_size = pro_diagnostics.brm_size,
-        .brm_type = pro_diagnostics.brm_type,
-        .rtc_mode = ED64_PRO_RTC_RDO,
+        .brom_type = cartridge ? ED64_PRO_ROM_GPAK : ED64_PRO_ROM_IPL,
+        .gpak_size = cartridge ? (pro_diagnostics.launch_extent + 511u) & ~511u : 0,
+        .brm_size = cartridge ? pro_diagnostics.brm_size : 0,
+        .brm_type = cartridge ? pro_diagnostics.brm_type : ED64_PRO_BRM_OFF,
+        .rtc_mode = pro_diagnostics.dd_requested ? ED64_PRO_RTC_STD : ED64_PRO_RTC_RDO,
+        .dd_en = pro_diagnostics.dd_requested ? 1 : 0,
     };
     ed64_pro_ll_transaction_t transaction;
-    uint32_t deadline = TICKS_READ() + 4u * TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
+    uint32_t deadline = TICKS_READ() + 5u * TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
     ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
     const char *step = "Game services";
     if (error == ED64_PRO_LL_OK) {
         step = "GPAK path";
-        error = ed64_pro_ll_dev_set_path(
-            &transaction,
-            ED64_PRO_PATH_GPAK,
-            pro_diagnostics.rom_path,
-            TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
-        );
-        if (error == ED64_PRO_LL_OK && pro_diagnostics.brm_type != ED64_PRO_BRM_OFF) {
+        if (cartridge) {
+            error = ed64_pro_ll_dev_set_path(
+                &transaction, ED64_PRO_PATH_GPAK, pro_diagnostics.rom_path,
+                TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
+            );
+        }
+        if (error == ED64_PRO_LL_OK && pro_diagnostics.dd_requested) {
+            step = "Disk path";
+            error = ed64_pro_ll_dev_set_path(
+                &transaction, ED64_PRO_PATH_DISK, pro_diagnostics.disk_path,
+                TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
+            );
+        }
+        if (error == ED64_PRO_LL_OK && cartridge && pro_diagnostics.brm_type != ED64_PRO_BRM_OFF) {
             step = "Save path";
             error = ed64_pro_ll_dev_set_path(
                 &transaction,
@@ -678,7 +716,20 @@ static flashcart_err_t pro_deinit (void) {
         pro_storage_fail("Game startup failed", step, 0, 0, error);
         return FLASHCART_ERR_INT;
     }
+    if (pro_diagnostics.dd_requested) {
+        for (unsigned i = 0; i < 4; i++) {
+            if (io_read(0x06000000u + i * 4) != pro_diagnostics.ipl_header[i]) {
+                pro_storage_fail("64DD IPL mapping verification failed", "IPL mapping", 0, 0, ED64_PRO_LL_OK);
+                return FLASHCART_ERR_LOAD;
+            }
+        }
+        if (io_read(0x06001010u) != pro_diagnostics.ipl_code) {
+            pro_storage_fail("64DD IPL mapping verification failed", "IPL mapping", 0, 0, ED64_PRO_LL_OK);
+            return FLASHCART_ERR_LOAD;
+        }
+    }
     pro_diagnostics.launch_ready = false;
+    pro_diagnostics.ipl_ready = pro_diagnostics.disk_ready = false;
     return FLASHCART_OK;
 }
 
@@ -878,13 +929,9 @@ static flashcart_err_t pro_read_rom (FIL *file, flashcart_progress_callback_t *p
 /** @brief Load a ROM into cartridge memory and stage its MCU launch path. */
 static flashcart_err_t pro_load_rom (char *rom_path, flashcart_progress_callback_t *progress) {
     pro_diagnostics.path_error = NULL;
-    pro_diagnostics.launch_ready = false;
-    pro_diagnostics.launch_extent = 0;
-    pro_diagnostics.rom_path[0] = '\0';
-    pro_diagnostics.save_path[0] = '\0';
-    pro_diagnostics.brm_type = ED64_PRO_BRM_OFF;
-    pro_diagnostics.brm_size = 0;
-    pro_diagnostics.save_ready = false;
+    pro_clear_cartridge();
+    pro_diagnostics.dd_requested = pro_diagnostics.ipl_ready = pro_diagnostics.disk_ready = false;
+    pro_diagnostics.disk_path[0] = '\0';
     const char *utf8_path = pro_fatfs_path(rom_path);
     if (!utf8_path) {
         return FLASHCART_ERR_ARGS;
@@ -974,6 +1021,163 @@ static flashcart_err_t pro_load_file (char *file_path, uint32_t rom_offset, uint
         pro_diagnostics.launch_ready = true;
     }
     return result;
+}
+
+/** @brief Decode a big-endian word from an IPL header independently of host byte order. */
+static uint32_t pro_ipl_word (const uint8_t *bytes) {
+    return (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 | (uint32_t)bytes[2] << 8 | bytes[3];
+}
+
+/** @brief Check supported IPL identities and the shared menu's canonical region/revision names. */
+static bool pro_ipl_identity (const char *path, const uint8_t *header) {
+    static const struct {
+        const char *name;
+        uint8_t identity[5];
+    } ipls[] = {
+        {"NDDJ2.n64", {'N', 'D', 'D', 'J', 2}},
+        {"NDDE0.n64", {'N', 'D', 'D', 'E', 0}},
+        {"NDXJ0.n64", {'N', 'D', 'X', 'J', 0}},
+    };
+    const char *name = strrchr(path, '/');
+    name = name ? name + 1 : path;
+    bool supported = false;
+    for (unsigned i = 0; i < sizeof(ipls) / sizeof(ipls[0]); i++) {
+        bool matches = memcmp(header + 0x3B, ipls[i].identity, sizeof(ipls[i].identity)) == 0;
+        if (strcmp(name, ipls[i].name) == 0) {
+            return matches;
+        }
+        supported = supported || matches;
+    }
+    return supported;
+}
+
+/** @brief Load a native IPL through the explicitly FCI-addressed, bounded IPL4 path. */
+static flashcart_err_t pro_load_64dd_ipl (char *ipl_path, flashcart_progress_callback_t *progress) {
+    pro_diagnostics.path_error = NULL;
+    pro_diagnostics.dd_requested = true;
+    pro_diagnostics.ipl_ready = pro_diagnostics.disk_ready = false;
+    pro_diagnostics.disk_path[0] = '\0';
+    if (!pro_cartridge_prepared()) {
+        pro_clear_cartridge();
+    } else if (pro_diagnostics.launch_extent > ED64_PRO_DD_ROM_LIMIT) {
+        /* IPL4 mirrors into cartridge memory above 120 MiB. Reject before any
+         * IPL bytes are written, then permit a clean standalone retry. */
+        pro_clear_cartridge();
+        pro_diagnostics.path_error = "Prepared cartridge overlaps the 64DD IPL4 mirror (120 MiB limit)";
+        return FLASHCART_ERR_LOAD;
+    }
+    const char *utf8_path = pro_fatfs_path(ipl_path);
+    if (!utf8_path) {
+        return FLASHCART_ERR_ARGS;
+    }
+    if (pro_disk_status() != 0 || pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED) {
+        return FLASHCART_ERR_LOAD;
+    }
+    FIL file;
+    if (f_open(&file, utf8_path, FA_READ) != FR_OK) {
+        pro_diagnostics.path_error = "64DD IPL could not be opened";
+        return FLASHCART_ERR_LOAD;
+    }
+    flashcart_err_t result = FLASHCART_ERR_LOAD;
+    uint8_t header[64];
+    UINT read = 0;
+    if (f_size(&file) != ED64_PRO_IPL_SIZE || !file.obj.fs || file.obj.fs->wflag) {
+        pro_diagnostics.path_error = "64DD IPL must be a 4 MiB native image";
+        goto close;
+    }
+    if (f_read(&file, header, sizeof(header), &read) != FR_OK || read != sizeof(header) ||
+        pro_ipl_word(header) != 0x80270740u || !pro_ipl_identity(utf8_path, header)) {
+        pro_diagnostics.path_error = "Invalid 64DD IPL identity, revision, or byte order";
+        goto close;
+    }
+    for (unsigned i = 0; i < 4; i++) {
+        pro_diagnostics.ipl_header[i] = pro_ipl_word(header + i * 4);
+    }
+    if (f_lseek(&file, 0x1010) != FR_OK || f_tell(&file) != 0x1010 ||
+        f_read(&file, header, 4, &read) != FR_OK || read != 4) {
+        goto close;
+    }
+    pro_diagnostics.ipl_code = pro_ipl_word(header);
+    if (f_lseek(&file, 0) != FR_OK || f_tell(&file) != 0 || file.obj.fs->wflag) {
+        goto close;
+    }
+    /* These sector-aligned reads go directly to disk_read. The destination is
+     * an FCI address, never PI_ROM + FCI_IPL (the latter is the I/O window).
+     * Metadata reads still use RDRAM and the ordinary disk-read path. */
+    pro_diagnostics.loading_ipl = true;
+    pro_diagnostics.load_byte_swap = false;
+    result = FLASHCART_OK;
+    for (uint32_t offset = 0; offset < ED64_PRO_IPL_SIZE; offset += 128 * 1024u) {
+        if (f_read(&file, (void *)(uintptr_t)(ED64_PRO_FCI_IPL + offset), 128 * 1024u, &read) != FR_OK ||
+            read != 128 * 1024u) {
+            result = FLASHCART_ERR_LOAD;
+            break;
+        }
+        if (progress) {
+            progress(f_tell(&file) / (float)ED64_PRO_IPL_SIZE);
+        }
+    }
+    pro_diagnostics.loading_ipl = false;
+    if (f_tell(&file) != ED64_PRO_IPL_SIZE) {
+        result = FLASHCART_ERR_LOAD;
+    }
+close:
+    if (f_close(&file) != FR_OK) {
+        result = FLASHCART_ERR_LOAD;
+    }
+    if (result == FLASHCART_OK) {
+        pro_diagnostics.ipl_ready = true;
+    }
+    return result;
+}
+
+/** @brief Stage a writable native image for firmware disk I/O and directory-based swapping. */
+static flashcart_err_t pro_load_64dd_disk (char *disk_path, flashcart_disk_parameters_t *disk_parameters) {
+    pro_diagnostics.path_error = NULL;
+    pro_diagnostics.disk_ready = false;
+    pro_diagnostics.disk_path[0] = '\0';
+    const char *utf8_path = pro_fatfs_path(disk_path);
+    if (!utf8_path || !disk_parameters || disk_parameters->disk_type > 6) {
+        return FLASHCART_ERR_ARGS;
+    }
+    if (!pro_diagnostics.ipl_ready || pro_disk_status() != 0 ||
+        pro_diagnostics.storage_state != ED64_PRO_STORAGE_FATFS_OWNED) {
+        return FLASHCART_ERR_LOAD;
+    }
+    flashcart_err_t result = pro_stage_mcu_path(utf8_path, pro_diagnostics.disk_path);
+    if (result != FLASHCART_OK) {
+        return result;
+    }
+    FIL file;
+    /* Do not create or write the image: opening with write access detects FAT
+     * read-only files before the MCU owns storage and must persist disk writes. */
+    if (f_open(&file, utf8_path, FA_READ | FA_WRITE) != FR_OK) {
+        pro_diagnostics.path_error = "64DD image is missing, read-only, or unavailable";
+        pro_diagnostics.disk_path[0] = '\0';
+        return FLASHCART_ERR_LOAD;
+    }
+    if (f_size(&file) != ED64_PRO_NATIVE_DISK_SIZE) {
+        pro_diagnostics.path_error = "Unsupported 64DD image layout; expected a 64,931,840-byte native image";
+        result = FLASHCART_ERR_LOAD;
+    }
+    if (f_close(&file) != FR_OK) {
+        result = FLASHCART_ERR_LOAD;
+    }
+    if (result != FLASHCART_OK) {
+        pro_diagnostics.disk_path[0] = '\0';
+        return result;
+    }
+    pro_diagnostics.disk_ready = true;
+    return FLASHCART_OK;
+}
+
+/** @brief Firmware discovers all siblings; the shared menu list is not a Pro slot limit. */
+static flashcart_err_t pro_load_64dd_disks (
+    char *disk_path, flashcart_disk_parameters_t *disk_parameters, char **swap_disk_paths, int swap_disk_count
+) {
+    (void)swap_disk_paths;
+    (void)swap_disk_count;
+    return pro_load_64dd_disk(disk_path, disk_parameters);
 }
 
 /** @brief Stage the save path for MCU loading when game services start. */
@@ -1069,9 +1273,9 @@ static flashcart_t flashcart_ed64_pro = {
     .load_rom = pro_load_rom,
     .load_file = pro_load_file,
     .load_save = pro_load_save,
-    .load_64dd_ipl = NULL,
-    .load_64dd_disk = NULL,
-    .load_64dd_disks = NULL,
+    .load_64dd_ipl = pro_load_64dd_ipl,
+    .load_64dd_disk = pro_load_64dd_disk,
+    .load_64dd_disks = pro_load_64dd_disks,
     .get_button_state = NULL,
     .get_voltage_temperature = NULL,
     .set_save_type = pro_set_save_type,

@@ -44,6 +44,10 @@ enum {
     ED64_PRO_FLAG_WRSW = 0x01,
     ED64_PRO_PATH_MAX = 1023,
     ED64_PRO_FCI_ROM_LIMIT = 0x0F000000,
+    ED64_PRO_FCI_IPL = 0x0F800000,
+    ED64_PRO_IPL_SIZE = 4 * 1024 * 1024,
+    ED64_PRO_DD_ROM_LIMIT = ED64_PRO_FCI_IPL - 0x08000000,
+    ED64_PRO_NATIVE_DISK_SIZE = 64931840,
     ED64_PRO_FRAME_MAX = 1536,
     ED64_PRO_ACK_BLOCK = 1024,
     ED64_PRO_INFS_TS_FW = 6,
@@ -77,6 +81,7 @@ typedef struct {
 typedef enum {
     ED64_PRO_PATH_GPAK = 0,
     ED64_PRO_PATH_BRM = 2,
+    ED64_PRO_PATH_DISK = 4,
 } ed64_pro_path_t;
 
 typedef enum {
@@ -92,6 +97,7 @@ typedef enum {
 enum {
     ED64_PRO_ROM_OFF = 0,
     ED64_PRO_ROM_GPAK = 2,
+    ED64_PRO_ROM_IPL = 3,
     ED64_PRO_RTC_STD = 1,
     ED64_PRO_RTC_RDO = 2,
 };
@@ -255,13 +261,23 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
     uint32_t deadline
 );
 /**
+ * @brief Copy sectors to the bounded FCI IPL4 window, independently of PI ROM bounds.
+ */
+ed64_pro_ll_error_t ed64_pro_ll_sd_read_ipl_fci (
+    ed64_pro_ll_transaction_t *transaction,
+    uint32_t fci,
+    uint32_t lba,
+    uint32_t count,
+    uint32_t deadline
+);
+/**
  * @brief Set the ROM byte-swap flag and wait for stable, idle device status.
  */
 ed64_pro_ll_error_t
 ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline);
 
 /**
- * @brief Set the absolute Game Pak or backup-memory path on the device.
+ * @brief Set the absolute Game Pak, backup-memory, or disk path on the device.
  */
 ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     ed64_pro_ll_transaction_t *transaction,
@@ -270,7 +286,7 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     uint32_t deadline
 );
 /**
- * @brief Validate and send the Game Pak and backup-memory configuration.
+ * @brief Validate and send the menu, cartridge, or native disk configuration.
  */
 ed64_pro_ll_error_t
 ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline);
