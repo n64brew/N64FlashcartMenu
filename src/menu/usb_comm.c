@@ -21,7 +21,7 @@
 
 #define MAX_FILE_SIZE   MiB(4)
 
-// File commands (list-dir, stat, get-file, free-space)
+// File commands (list-dir, stat, get-file, put-file, free-space)
 //
 // These let a USB host manage the files on the SD card while the menu is running.
 // Arguments are NUL terminated so paths may contain spaces; numbers are decimal and end with a space.
@@ -350,6 +350,52 @@ static void command_send_file (menu_t *menu) {
 }
 
 /**
+ * @brief Write a part of a file from the USB host.
+ *
+ * Arguments: <offset> <path>\0, then the data. Offset 0 makes a new file.
+ *
+ * @param menu Pointer to the menu structure.
+ */
+static void command_put_file (menu_t *menu) {
+    char path[MAX_PATH_LENGTH];
+    uint8_t data[DATA_CHUNK_SIZE];
+    uint64_t offset;
+    FIL file;
+
+    if (usb_comm_read_number(&offset)) {
+        return usb_comm_send_result(FR_INVALID_PARAMETER);
+    }
+    if (usb_comm_read_string(path, sizeof(path), '\0')) {
+        return usb_comm_send_result(FR_INVALID_PARAMETER);
+    }
+
+    // The rest of the packet is the data. Offset 0 starts a new file, anything else continues one.
+    int remaining = USBHEADER_GETSIZE(usb_poll());
+
+    FRESULT result = f_open(&file, path, FA_WRITE | ((offset == 0) ? FA_CREATE_ALWAYS : FA_OPEN_EXISTING));
+    if (result != FR_OK) {
+        return usb_comm_send_result(result);
+    }
+
+    result = f_lseek(&file, offset);
+
+    while ((result == FR_OK) && (remaining > 0)) {
+        UINT block_size = MIN(remaining, sizeof(data));
+        UINT bytes_written;
+        usb_read(data, block_size);
+        result = f_write(&file, data, block_size, &bytes_written);
+        if ((result == FR_OK) && (bytes_written != block_size)) {
+            result = FR_DENIED; // The card is full
+        }
+        remaining -= block_size;
+    }
+
+    FRESULT close_result = f_close(&file);
+
+    usb_comm_send_result((result == FR_OK) ? close_result : result);
+}
+
+/**
  * @brief Get the size of the SD card and the free space.
  *
  * The data is one line: "<total bytes> <free bytes>".
@@ -386,6 +432,7 @@ static usb_comm_command_t commands[] = {
     { .id = "list-dir", .op = command_list_dir },
     { .id = "stat", .op = command_stat },
     { .id = "get-file", .op = command_send_file },
+    { .id = "put-file", .op = command_put_file },
     { .id = "free-space", .op = command_free_space },
     { .id = NULL },
 };
