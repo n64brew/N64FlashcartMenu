@@ -934,17 +934,24 @@ static void test_mount (void) {
     TEST_CHECK(test_rtc_hooks.gettime == NULL && test_rtc_hooks.settime == NULL);
 }
 
-static void test_mount_native_failure (void) {
+static void test_mount_without_clock (void) {
     for (unsigned failure = 0; failure < 2; failure++) {
         fixture();
         TEST_ASSERT(pro_init() == FLASHCART_OK);
         test_rtc_available = false;
-        if (failure) test_rtc_source = RTC_SOURCE_NONE;
-        TEST_CHECK(!ed64_pro_init_sdfs("sd:/", 4));
-        TEST_CHECK(pro_diagnostics.storage_failed && mock.unmounts == 1);
-        TEST_CHECK(mock.rtc_starts == 1 && mock.rtc_stops == 1 && !mock.rtc_running);
-        TEST_CHECK(!test_rtc_initialized);
-        TEST_CHECK(strstr(mock.events, "TU") != NULL);
+        test_rtc_source = RTC_SOURCE_NONE;
+        if (failure) test_rtc_init_result = false;
+        TEST_ASSERT(ed64_pro_init_sdfs("sd:/", 4));
+        TEST_CHECK(!pro_diagnostics.storage_failed && mock.unmounts == 0);
+        TEST_CHECK(pro_disk.disk_status() == 0 && test_rtc_initialized);
+        TEST_CHECK(mock.rtc_starts == 1 && mock.rtc_stops == 0 && mock.rtc_running);
+        TEST_CHECK(rtc_get_source() == RTC_SOURCE_NONE && test_rtc_set_source_calls == 0);
+        TEST_ASSERT(pro_load_rom("sd:/game.z64", NULL) == FLASHCART_OK);
+        TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_NONE) == FLASHCART_OK);
+        TEST_CHECK(pro_deinit() == FLASHCART_OK);
+        TEST_CHECK(mock.rtc_stops == 1 && !mock.rtc_running && !test_rtc_initialized);
+        TEST_CHECK(mock.unmounts == 1 && mock.fs_inits == 1);
+        TEST_CHECK(strstr(mock.events, "TUFP") != NULL);
     }
 }
 
@@ -1930,7 +1937,7 @@ TEST_LIST = {
     {"firmware date and minimum boundaries", test_firmware_boundaries},
     {"firmware query failure is latched", test_firmware_query_failure},
     {"mount starts compatible RTC services after FatFs", test_mount},
-    {"unavailable native RTC cleans services and failed mount", test_mount_native_failure},
+    {"unavailable native RTC permits storage loading and safe handoff", test_mount_without_clock},
     {"failed RTC shutdown blocks SD handoff without retry", test_rtc_shutdown_failure},
     {"mount and nonzero volume failures are terminal", test_mount_failure},
     {"mount retains sector I/O failure", test_mount_io_failure},

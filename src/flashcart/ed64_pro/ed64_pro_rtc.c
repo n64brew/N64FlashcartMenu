@@ -48,12 +48,8 @@ flashcart_err_t ed64_pro_rtc_init (void) {
          * reads retain its error instead of displaying a plausible fallback. */
         rtc_set_source(RTC_SOURCE_JOYBUS);
     }
-    if (rtc_get_source() != RTC_SOURCE_JOYBUS || !available) {
-        pro_rtc_error = "EverDrive-64 Pro: native Joybus RTC is unavailable";
-        ed64_pro_rtc_close();
-        pro_rtc_failed = true;
-        return FLASHCART_ERR_INT;
-    }
+    /* Clock availability is optional. Keep services running for normal menu
+     * use, and STOP them before launch even when native RTC detection fails. */
     return FLASHCART_OK;
 }
 

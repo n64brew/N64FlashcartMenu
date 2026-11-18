@@ -98,14 +98,18 @@ static void test_native_services (void) {
     unsigned begins = mock.begins;
     TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_OK && mock.begins == begins && mock.inits == 1);
 }
-static void test_native_gate (void) {
+static void test_unavailable_native_clock (void) {
     for (unsigned failure = 0; failure < 2; failure++) {
         fixture(); mock.native_available = false;
-        if (failure) mock.native_source = RTC_SOURCE_NONE;
-        TEST_CHECK(ed64_pro_rtc_init() != FLASHCART_OK);
-        TEST_CHECK(mock.starts == 1 && mock.stops == 1);
-        TEST_CHECK(!mock.native_initialized && !mock.started);
-        TEST_CHECK(mock.owner == NULL && ed64_pro_rtc_get_error_message() != NULL);
+        mock.native_source = RTC_SOURCE_NONE;
+        if (failure) mock.native_result = false;
+        TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_OK);
+        TEST_CHECK(mock.starts == 1 && mock.stops == 0);
+        TEST_CHECK(mock.native_initialized && mock.started);
+        TEST_CHECK(rtc_get_source() == RTC_SOURCE_NONE && mock.source_sets == 0);
+        TEST_CHECK(mock.owner == NULL && ed64_pro_rtc_get_error_message() == NULL);
+        TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_OK);
+        TEST_CHECK(mock.stops == 1 && !mock.started && !mock.native_initialized);
     }
 }
 static void test_invalid_native_calendar (void) {
@@ -167,7 +171,7 @@ static void test_close_faults (void) {
 }
 TEST_LIST = {
     {"native RTC starts only compatible services before native detection", test_native_services},
-    {"native source and availability failures stop services and close RTC", test_native_gate},
+    {"unavailable native clock preserves services until shutdown", test_unavailable_native_clock},
     {"genuine invalid-calendar RTC keeps native source and error", test_invalid_native_calendar},
     {"configuration and start failures do not publish RTC", test_init_faults},
     {"RTC closes before STOP and shutdown is idempotent", test_close_order},
