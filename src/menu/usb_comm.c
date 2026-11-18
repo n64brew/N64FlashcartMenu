@@ -9,6 +9,7 @@
 //       (for example replace files on the SD card or reboot menu).
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <fatfs/ff.h>
@@ -20,10 +21,10 @@
 
 #define MAX_FILE_SIZE   MiB(4)
 
-// File commands (list-dir, stat, free-space)
+// File commands (list-dir, stat, get-file, free-space)
 //
 // These let a USB host manage the files on the SD card while the menu is running.
-// Arguments are NUL terminated so paths may contain spaces.
+// Arguments are NUL terminated so paths may contain spaces; numbers are decimal and end with a space.
 // A command may be followed by an id of the host's choosing, as in "put-file:1234".
 // Every command answers with any data in DATATYPE_RAWBINARY packets, followed by one
 // DATATYPE_TEXT packet that repeats the command and id: "put-file:1234:ok\n" or
@@ -194,6 +195,25 @@ static void usb_comm_send_result (FRESULT result) {
 }
 
 /**
+ * @brief Read a decimal number, terminated by a space, from the USB input.
+ *
+ * @param value Pointer to store the number.
+ * @return true if the number could not be read, false otherwise.
+ */
+static bool usb_comm_read_number (uint64_t *value) {
+    char buffer[24];
+    char *end;
+
+    if (usb_comm_read_string(buffer, sizeof(buffer), ' ') || (buffer[0] == '\0')) {
+        return true;
+    }
+
+    *value = strtoull(buffer, &end, 10);
+
+    return (*end != '\0');
+}
+
+/**
  * @brief Format a directory entry as "attributes size date time name".
  *
  * @param buffer Buffer to store the line.
@@ -282,6 +302,54 @@ static void command_stat (menu_t *menu) {
 }
 
 /**
+ * @brief Send a part of a file to the USB host.
+ *
+ * Arguments: <offset> <length> <path>\0. The data is shorter than the length at the end of the file.
+ *
+ * @param menu Pointer to the menu structure.
+ */
+static void command_send_file (menu_t *menu) {
+    char path[MAX_PATH_LENGTH];
+    uint8_t data[DATA_CHUNK_SIZE];
+    uint64_t offset;
+    uint64_t remaining;
+    FIL file;
+
+    if (usb_comm_read_number(&offset) || usb_comm_read_number(&remaining)) {
+        return usb_comm_send_result(FR_INVALID_PARAMETER);
+    }
+    if (usb_comm_read_string(path, sizeof(path), '\0')) {
+        return usb_comm_send_result(FR_INVALID_PARAMETER);
+    }
+    usb_purge();
+
+    FRESULT result = f_open(&file, path, FA_READ);
+    if (result != FR_OK) {
+        return usb_comm_send_result(result);
+    }
+
+    result = f_lseek(&file, offset);
+
+    while ((result == FR_OK) && (remaining > 0)) {
+        UINT block_size = MIN(remaining, sizeof(data));
+        UINT bytes_read;
+        result = f_read(&file, data, block_size, &bytes_read);
+        if ((result != FR_OK) || (bytes_read == 0)) {
+            break;
+        }
+        if (usb_write(DATATYPE_RAWBINARY, data, bytes_read) != 1) {
+            f_close(&file);
+            return;
+        }
+        remaining -= bytes_read;
+    }
+
+    f_close(&file);
+
+    usb_comm_send_result(result);
+}
+
+/**
  * @brief Get the size of the SD card and the free space.
  *
  * The data is one line: "<total bytes> <free bytes>".
@@ -317,6 +385,7 @@ static usb_comm_command_t commands[] = {
     { .id = "send-file", .op = command_receive_file }, // Note that this is a crossover with the `id` related to the PC commands.
     { .id = "list-dir", .op = command_list_dir },
     { .id = "stat", .op = command_stat },
+    { .id = "get-file", .op = command_send_file },
     { .id = "free-space", .op = command_free_space },
     { .id = NULL },
 };
