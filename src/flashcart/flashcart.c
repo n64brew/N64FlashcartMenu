@@ -129,6 +129,12 @@ static flashcart_t *flashcart = &((flashcart_t) {
  * @return char* The error message.
  */
 char *flashcart_convert_error_message (flashcart_err_t err) {
+    if (err != FLASHCART_OK && flashcart->get_error_message) {
+        char *message = flashcart->get_error_message(err);
+        if (message) {
+            return message;
+        }
+    }
     switch (err) {
         case FLASHCART_OK: return "No error";
         case FLASHCART_ERR_OUTDATED: return "Outdated flashcart firmware";
@@ -159,7 +165,7 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         }
         return FLASHCART_OK;
     }
-    
+
     if (daisydrive_detected()) {
         *storage_prefix = "sd:/";
         daisydrive_init_sdfs(*storage_prefix, -1);
@@ -169,12 +175,25 @@ flashcart_err_t flashcart_init (const char **storage_prefix) {
         }
         return FLASHCART_OK;
     }
-    else if (ed64_pro_detected()) {
+
+    ed64_pro_probe_t pro = ed64_pro_probe();
+    if (pro.outcome != ED64_PRO_PROBE_ABSENT) {
+        /* rtc_init must skip libcart probes: ED X/V registers overlap Pro
+         * registers and save memory. Never pass this sentinel to cart_exit or
+         * cart_card_*; only the non-Pro debug_init_sdfs path uses those APIs. */
+        cart_type = CART_MAX;
         *storage_prefix = "sd:/";
-        ed64_pro_init_sdfs(*storage_prefix, -1);
+        /* The Pro handler also quarantines an indeterminate probe: no other
+         * cartridge is safe to try, and retained diagnostics explain the failure. */
         flashcart = ed64_pro_get_flashcart();
+        if (pro.outcome != ED64_PRO_PROBE_IDENTIFIED) {
+            return FLASHCART_ERR_INT;
+        }
         if ((err = flashcart->init()) != FLASHCART_OK) {
             return err;
+        }
+        if (!ed64_pro_init_sdfs(*storage_prefix, -1)) {
+            return FLASHCART_ERR_SD_CARD;
         }
         return FLASHCART_OK;
     }
@@ -251,6 +270,11 @@ bool flashcart_has_feature (flashcart_features_t feature) {
  */
 flashcart_firmware_version_t flashcart_get_firmware_version (void) {
     return flashcart->get_firmware_version();
+}
+
+/** @brief Return the backend display name, or NULL if none is provided. */
+const char *flashcart_get_name (void) {
+    return flashcart->get_name ? flashcart->get_name() : NULL;
 }
 
 /**
@@ -422,6 +446,34 @@ flashcart_err_t flashcart_get_button_state (bool *pressed) {
     }
 
     return flashcart->get_button_state(pressed);
+}
+
+/**
+ * @brief Check whether supply voltage can be queried.
+ *
+ * @return bool True if either voltage callback is supported.
+ */
+bool flashcart_has_voltage (void) {
+    return flashcart->get_voltage != NULL || flashcart->get_voltage_temperature != NULL;
+}
+
+/**
+ * @brief Get supply voltage using the voltage-only callback when available.
+ *
+ * @param voltage_mv Output voltage in millivolts.
+ * @return flashcart_err_t Result code.
+ */
+flashcart_err_t flashcart_get_voltage (uint16_t *voltage_mv) {
+    if (voltage_mv == NULL) {
+        return FLASHCART_ERR_ARGS;
+    }
+
+    if (flashcart->get_voltage) {
+        return flashcart->get_voltage(voltage_mv);
+    }
+
+    int16_t temperature_deci_c;
+    return flashcart_get_voltage_temperature(voltage_mv, &temperature_deci_c);
 }
 
 /**

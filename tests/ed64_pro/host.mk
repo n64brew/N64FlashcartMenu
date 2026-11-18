@@ -1,0 +1,132 @@
+# Included by tests/Makefile; run host tests from the repository root.
+PRO_TEST := $(HOST_BUILD_DIR)/ed64_pro_transport_test
+PRO_TEST_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_transport_test_sanitize
+PRO_WRITE_FAILURE_TEST := $(HOST_BUILD_DIR)/ed64_pro_write_failure_test
+PRO_WRITE_FAILURE_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_write_failure_test_sanitize
+PRO_WRITE_FAILURE_CASE := injected nth write fails after first ACK block
+PRO_SOURCE := tests/ed64_pro/ed64_pro_transport_test.c
+PRO_RTC_SOURCE := src/flashcart/ed64_pro/ed64_pro_rtc.c
+PRO_DEPS := tests/ed64_pro/host_compat.h $(PRO_SOURCE) $(PRO_RTC_SOURCE) src/flashcart/ed64_pro/ed64_pro_rtc.h $(RTC_STUB_SOURCE) tests/stubs/system.h $(FATFS_UNICODE_DEPS) tests/stubs/libdragon.h tests/stubs/fatfs/ff.h tests/stubs/fatfs/diskio.h \
+	tests/stubs/libcart/cart.h src/utils/fs.h src/flashcart/flashcart_utils.h \
+	src/flashcart/ed64_pro/ed64_pro_ll.c src/flashcart/ed64_pro/ed64_pro_ll.h \
+	src/flashcart/ed64_pro/ed64_pro.c src/flashcart/ed64_pro/ed64_pro.h src/flashcart/flashcart.h \
+	src/libs/acutest/acutest.h tests/Makefile tests/ed64_pro/host.mk
+LIFECYCLE_TEST := $(HOST_BUILD_DIR)/ed64_pro_lifecycle_test
+LIFECYCLE_RELEASE := $(HOST_BUILD_DIR)/ed64_pro_lifecycle_test_release
+LIFECYCLE_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_lifecycle_test_sanitize
+LIFECYCLE_RELEASE_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_lifecycle_test_release_sanitize
+LIFECYCLE_SOURCE := tests/ed64_pro/ed64_pro_lifecycle_test.c
+LIFECYCLE_DEPS := $(LIFECYCLE_SOURCE) tests/stubs/system.h tests/stubs/libdragon.h tests/stubs/libcart/cart.h \
+	tests/stubs/usb.h tests/stubs/fatfs/ff.h src/flashcart/flashcart.c src/flashcart/flashcart.h \
+	src/flashcart/flashcart_utils.h src/flashcart/ed64_pro/ed64_pro.h src/flashcart/ed64_pro/ed64_pro_ll.h \
+	src/flashcart/64drive/64drive.h src/flashcart/ed64/ed64_vseries.h src/flashcart/ed64/ed64_xseries.h \
+	src/flashcart/sc64/sc64.h src/flashcart/daisydrive/daisydrive.h src/utils/fs.h src/utils/utils.h \
+	src/libs/acutest/acutest.h tests/Makefile tests/ed64_pro/host.mk
+ADAPTER_TEST := $(HOST_BUILD_DIR)/ed64_pro_adapter_test
+ADAPTER_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_adapter_test_sanitize
+ADAPTER_DEPS := tests/ed64_pro/ed64_pro_adapter_test.c $(PRO_DEPS) $(LIFECYCLE_DEPS) \
+	src/menu/cart_load.c src/menu/cart_load.h src/menu/path.c src/menu/path.h src/menu/menu_state.h \
+	src/menu/rom_info.h src/menu/settings.h src/menu/theme.h src/menu/bookkeeping.h
+
+.PHONY: test-ed64-pro test-ed64-pro-sanitize
+test-ed64-pro: $(PRO_TEST) $(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE) $(ADAPTER_TEST) $(PRO_WRITE_FAILURE_TEST)
+	$(PRO_TEST)
+	$(LIFECYCLE_TEST)
+	$(LIFECYCLE_RELEASE)
+	$(ADAPTER_TEST)
+	$(PRO_WRITE_FAILURE_TEST) "$(PRO_WRITE_FAILURE_CASE)"
+
+test-ed64-pro-sanitize: $(PRO_TEST_SANITIZE) $(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE) $(ADAPTER_SANITIZE) $(PRO_WRITE_FAILURE_SANITIZE)
+	$(PRO_TEST_SANITIZE)
+	$(LIFECYCLE_SANITIZE)
+	$(LIFECYCLE_RELEASE_SANITIZE)
+	$(ADAPTER_SANITIZE)
+	$(PRO_WRITE_FAILURE_SANITIZE) "$(PRO_WRITE_FAILURE_CASE)"
+
+$(PRO_TEST): $(PRO_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 $(PRO_SOURCE) $(PRO_RTC_SOURCE) $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
+
+$(PRO_TEST_SANITIZE): $(PRO_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) $(PRO_SOURCE) $(PRO_RTC_SOURCE) $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
+
+$(PRO_WRITE_FAILURE_TEST): $(PRO_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -DED64_PRO_TEST_FAIL_WRITE_N=2 -O2 $(PRO_SOURCE) $(PRO_RTC_SOURCE) $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
+
+$(PRO_WRITE_FAILURE_SANITIZE): $(PRO_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -DED64_PRO_TEST_FAIL_WRITE_N=2 -O1 $(SANITIZE_FLAGS) $(PRO_SOURCE) $(PRO_RTC_SOURCE) $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) -o $@
+
+$(LIFECYCLE_RELEASE) $(LIFECYCLE_RELEASE_SANITIZE): HOST_MODE_FLAGS=-DNDEBUG
+
+$(LIFECYCLE_TEST) $(LIFECYCLE_RELEASE): $(LIFECYCLE_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(HOST_MODE_FLAGS) -O2 $(LIFECYCLE_SOURCE) $(LDFLAGS) -o $@
+
+$(LIFECYCLE_SANITIZE) $(LIFECYCLE_RELEASE_SANITIZE): $(LIFECYCLE_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(HOST_MODE_FLAGS) -O1 $(SANITIZE_FLAGS) $(LIFECYCLE_SOURCE) $(LDFLAGS) -o $@
+
+$(ADAPTER_TEST): $(ADAPTER_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O2 tests/ed64_pro/ed64_pro_adapter_test.c $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@
+
+$(ADAPTER_SANITIZE): $(ADAPTER_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro/ed64_pro_adapter_test.c $(RTC_STUB_SOURCE) $(FATFS_UNICODE_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@
+
+RTC_TEST := $(HOST_BUILD_DIR)/rtc_test
+RTC_SANITIZE := $(HOST_BUILD_DIR)/rtc_test_sanitize
+RTC_DEPS := tests/ed64_pro/rtc_test.c src/flashcart/ed64_pro/ed64_pro_rtc.c \
+	src/flashcart/ed64_pro/ed64_pro_rtc.h src/flashcart/ed64_pro/ed64_pro.h \
+	src/flashcart/ed64_pro/ed64_pro_ll.h src/flashcart/flashcart.h \
+	tests/stubs/libdragon.h tests/stubs/system.h src/libs/acutest/acutest.h tests/Makefile tests/ed64_pro/host.mk
+
+.PHONY: test-rtc test-rtc-sanitize
+test-rtc: $(RTC_TEST)
+	$(RTC_TEST)
+
+test-rtc-sanitize: $(RTC_SANITIZE)
+	$(RTC_SANITIZE)
+
+test-ed64-pro: test-rtc
+test-ed64-pro-sanitize: test-rtc-sanitize
+
+$(RTC_TEST): $(RTC_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O2 tests/ed64_pro/rtc_test.c $(LDFLAGS) -o $@
+
+$(RTC_SANITIZE): $(RTC_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) -O1 $(SANITIZE_FLAGS) tests/ed64_pro/rtc_test.c $(LDFLAGS) -o $@
+
+test-ed64-pro: test-rom-info
+test-ed64-pro-sanitize: test-rom-info-sanitize
+
+CART_LOAD_DD_TEST := $(HOST_BUILD_DIR)/ed64_pro_cart_load_dd_test
+CART_LOAD_DD_SANITIZE := $(HOST_BUILD_DIR)/ed64_pro_cart_load_dd_test_sanitize
+CART_LOAD_DD_SOURCE := tests/ed64_pro/cart_load_dd_test.c
+CART_LOAD_DD_DEPS := $(CART_LOAD_DD_SOURCE) src/menu/cart_load.c src/menu/cart_load.h \
+	src/menu/menu_state.h src/menu/disk_info.h src/menu/path.c src/menu/path.h \
+	src/menu/rom_info.h src/menu/settings.h src/menu/theme.h src/menu/bookkeeping.h \
+	src/flashcart/flashcart.h src/utils/fs.c src/utils/fs.h tests/Makefile tests/ed64_pro/host.mk
+
+.PHONY: test-cart-load-dd test-cart-load-dd-sanitize
+test-cart-load-dd: $(CART_LOAD_DD_TEST)
+	$(CART_LOAD_DD_TEST)
+
+test-cart-load-dd-sanitize: $(CART_LOAD_DD_SANITIZE)
+	$(CART_LOAD_DD_SANITIZE)
+
+test-ed64-pro: test-cart-load-dd
+test-ed64-pro-sanitize: test-cart-load-dd-sanitize
+
+$(CART_LOAD_DD_TEST): $(CART_LOAD_DD_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O2 $(CART_LOAD_DD_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@
+
+$(CART_LOAD_DD_SANITIZE): $(CART_LOAD_DD_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O1 $(SANITIZE_FLAGS) $(CART_LOAD_DD_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@

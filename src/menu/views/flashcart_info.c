@@ -16,6 +16,10 @@ static inline const char *format_boolean_type (bool bool_value) {
 }
 
 static const char *format_cart_type () {
+    const char *name = flashcart_get_name();
+    if (name) {
+        return name;
+    }
     switch (cart_type) {
         case CART_CI:
             return "64drive";
@@ -64,8 +68,16 @@ static const char *format_voltage_temperature (void) {
     int temperature_whole;
     int temperature_frac;
 
-    if (!flashcart_has_voltage_temperature()) {
+    if (!flashcart_has_voltage()) {
         return "Unsupported";
+    }
+
+    if (!flashcart_has_voltage_temperature()) {
+        if (flashcart_get_voltage(&voltage_mv) != FLASHCART_OK) {
+            return "Unavailable / Unsupported";
+        }
+        snprintf(buffer, sizeof(buffer), "%u mV / Unsupported", voltage_mv);
+        return buffer;
     }
 
     if (flashcart_get_voltage_temperature(&voltage_mv, &temperature_deci_c) != FLASHCART_OK) {
@@ -89,7 +101,7 @@ static const char *format_voltage_temperature (void) {
 }
 
 static bool has_extra_info (void) {
-    return flashcart_has_button_state() || flashcart_has_voltage_temperature();
+    return flashcart_has_button_state() || flashcart_has_voltage();
 }
 
 static void pane_enter (menu_t *menu) {
@@ -133,7 +145,7 @@ static void pane_draw (menu_t *menu, bool focused) {
         format_boolean_type(flashcart_has_feature(FLASHCART_FEATURE_BIOS_UPDATE_FROM_MENU)),
         format_boolean_type(flashcart_has_feature(FLASHCART_FEATURE_ROM_REBOOT_FAST)),
         format_boolean_type(flashcart_has_button_state()),
-        format_boolean_type(flashcart_has_voltage_temperature()),
+        format_boolean_type(flashcart_has_voltage()),
     };
     int y = SETTINGS_PANE_Y0 + 4;
 

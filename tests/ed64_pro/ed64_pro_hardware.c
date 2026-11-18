@@ -1,0 +1,1005 @@
+#include <inttypes.h>
+#include <libdragon.h>
+#include <stdio.h>
+#include <string.h>
+
+#if defined(ED64_PRO_TEST_STORAGE) || defined(ED64_PRO_TEST_LOAD)
+#include <fatfs/ff.h>
+#include <fatfs/diskio.h>
+#endif
+#ifdef ED64_PRO_TEST_LOAD
+#include "flashcart/flashcart_utils.h"
+#include <libcart/cart.h>
+#endif
+
+#include "flashcart/ed64_pro/ed64_pro.h"
+
+#ifndef ED64_PRO_TEST_BUILD_ID
+#error Build this ROM with tests/ed64_pro/Makefile.n64
+#endif
+
+#if (defined(ED64_PRO_TEST_INFO) + defined(ED64_PRO_TEST_STORAGE) + defined(ED64_PRO_TEST_LOAD)) > 1
+#error Select one test mode
+#endif
+#if defined(ED64_PRO_TEST_LOAD_TIMING) && !defined(ED64_PRO_TEST_LOAD)
+#error Timing test requires load mode
+#endif
+#if defined(ED64_PRO_TEST_RAW_WRITE) && !defined(ED64_PRO_TEST_STORAGE)
+#error Raw-write test requires storage mode
+#endif
+#if defined(ED64_PRO_TEST_STORAGE_FAIL_WRITE) && !defined(ED64_PRO_TEST_STORAGE)
+#error Injected-write test requires storage mode
+#endif
+#if defined(ED64_PRO_TEST_STORAGE_FAIL_WRITE) && defined(ED64_PRO_TEST_RAW_WRITE)
+#error Select raw-write test or injected-write test
+#endif
+#if defined(ED64_PRO_TEST_STORAGE_FAIL_WRITE) && \
+    (!defined(ED64_PRO_TEST_FAIL_WRITE_N) || ED64_PRO_TEST_FAIL_WRITE_N != 1)
+#error Injected-write test requires ED64_PRO_TEST_FAIL_WRITE_N=1
+#endif
+
+#if (defined(ED64_PRO_TEST_DIAGNOSTICS) || defined(ED64_PRO_TEST_IPL)) && !defined(ED64_PRO_TEST_STORAGE)
+#error Read-only diagnostics and IPL staging require storage mode
+#endif
+#if (defined(ED64_PRO_TEST_DIAGNOSTICS) || defined(ED64_PRO_TEST_IPL)) && \
+    (defined(ED64_PRO_TEST_RAW_WRITE) || defined(ED64_PRO_TEST_STORAGE_FAIL_WRITE))
+#error Read-only tests cannot enable writes
+#endif
+
+#if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO) && !defined(ED64_PRO_TEST_LOAD)
+enum {
+    STRESS_OPERATIONS = 100000,
+    STRESS_TIMER_US = 50,
+};
+
+#define CANARY_BEFORE 0x13579BDFu
+#define CANARY_AFTER 0x2468ACE0u
+
+static struct {
+    volatile uint32_t before;
+    uint32_t value;
+    volatile uint32_t irq_updates;
+    volatile uint32_t after;
+} register_line __attribute__((aligned(16)));
+
+static struct {
+    volatile uint32_t before;
+    ed64_pro_status_t value;
+    volatile uint32_t irq_updates;
+    volatile uint32_t after;
+} status_line __attribute__((aligned(16)));
+
+_Static_assert(sizeof(register_line) == 16, "Register caller and ISR must share a cache line");
+_Static_assert(sizeof(status_line) == 16, "Status caller and ISR must share a cache line");
+
+static timer_link_t stress_timer;
+static volatile bool stress_active;
+static volatile uint32_t irq_dma_overlap;
+static volatile uint32_t irq_canary_errors;
+static volatile uint32_t irq_sink;
+
+/**
+ * @brief Validate guard words around the ISR-shared register and status outputs.
+ */
+static bool canaries_ok (void) {
+    return register_line.before == CANARY_BEFORE && register_line.after == CANARY_AFTER &&
+           status_line.before == CANARY_BEFORE && status_line.after == CANARY_AFTER;
+}
+
+/**
+ * @brief Dirty caller cache lines and count PI/IRQ overlaps and canary corruption.
+ *
+ * This ISR never submits PI work, so it is not a competing DMA producer.
+ */
+static void stress_interrupt (int overflow) {
+    (void)overflow;
+    irq_sink ^= *(volatile uint32_t *)&register_line.value;
+    volatile uint8_t *bytes = (volatile uint8_t *)&status_line.value;
+    for (size_t i = 0; i < sizeof(status_line.value); i++) {
+        irq_sink ^= bytes[i];
+    }
+    register_line.irq_updates++;
+    status_line.irq_updates++;
+    if (!canaries_ok()) {
+        irq_canary_errors++;
+    }
+    if (stress_active && (*PI_STATUS & PI_STATUS_DMA_BUSY)) {
+        irq_dma_overlap++;
+    }
+}
+
+#endif
+
+/**
+ * @brief Label the console video standard, falling back for unknown values.
+ */
+static const char *tv_name (void) {
+    switch (get_tv_type()) {
+    case TV_PAL: return "PAL";
+    case TV_NTSC: return "NTSC";
+    case TV_MPAL: return "MPAL";
+    default: return "unknown";
+    }
+}
+
+/**
+ * @brief Initialize the console for manually rendered test output.
+ */
+static void screen_init (void) {
+    console_init();
+    console_set_debug(false);
+    console_set_render_mode(RENDER_MANUAL);
+}
+
+/**
+ * @brief Print build/console identity and only a successfully completed passive EDID read.
+ */
+static void print_identity (void) {
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    printf("ED64 Pro hardware test\nBuild: %s\n", ED64_PRO_TEST_BUILD_ID);
+    printf("Console: %s, %d MiB\n", tv_name(), get_memory_size() / (1024 * 1024));
+    if (diagnostics->probe.id_valid) {
+        printf("EDID: %08" PRIX32 "\n", diagnostics->probe.id);
+    } else {
+        printf("EDID: no completed read\n");
+    }
+}
+
+/**
+ * @brief Report valid inherited status, cleanup counts, and measured protocol phase timing.
+ */
+static void print_init_metrics (void) {
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    const ed64_pro_ll_metrics_t *metrics = ed64_pro_ll_get_metrics();
+    if (diagnostics->inherited_status_valid) {
+        const ed64_pro_status_t *status = &diagnostics->inherited_status;
+        printf(
+            "Inherited: %02X %02X %02X %02X\n",
+            (unsigned)status->key,
+            (unsigned)status->opaque[0],
+            (unsigned)status->opaque[1],
+            (unsigned)status->mcu_status
+        );
+    }
+    printf(
+        "Drained: %zu + %zu bytes; RX peak: %" PRIu32 "\n",
+        diagnostics->initial_drained,
+        diagnostics->post_stop_drained,
+        metrics->rx_peak
+    );
+    for (ed64_pro_phase_t phase = ED64_PRO_PHASE_PROBE; phase < ED64_PRO_PHASE_READY; phase++) {
+        printf("%s: %" PRIu32 " ms\n", ed64_pro_phase_name(phase), TICKS_TO_MS(diagnostics->phase_ticks[phase]));
+    }
+    printf("Attempt: %" PRIu32 " ms\n", TICKS_TO_MS(diagnostics->attempt_ticks));
+}
+
+static void terminal (void) __attribute__((noreturn));
+/**
+ * @brief Keep test results visible without activating storage, USB, or retries.
+ */
+static void terminal (void) {
+    printf("\nHalted; no further MCU commands or USB polling.\n");
+    printf("After any failure: power cycle. Do not retry.\n");
+    for (;;) {
+        console_render();
+    }
+}
+
+#if !defined(ED64_PRO_TEST_STORAGE) && !defined(ED64_PRO_TEST_INFO) && !defined(ED64_PRO_TEST_LOAD)
+/**
+ * @brief Exercise 100,000 status/EDID operations under timer-driven cache-line contention.
+ *
+ * Stop on the first transport or integrity failure. A passing run requires
+ * observed IRQ/DMA overlap and ends on the terminal screen without storage access.
+ */
+static void run_stress (void) {
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    register_line.before = status_line.before = CANARY_BEFORE;
+    register_line.after = status_line.after = CANARY_AFTER;
+    register_line.value = diagnostics->probe.id;
+    status_line.value = diagnostics->status;
+    start_timer(&stress_timer, TIMER_TICKS(STRESS_TIMER_US), TF_CONTINUOUS, stress_interrupt);
+
+    uint32_t completed = 0;
+    uint32_t max_status_ticks = 0;
+    uint32_t max_register_ticks = 0;
+    ed64_pro_ll_error_t error = ED64_PRO_LL_OK;
+    bool integrity = true;
+    while (completed < STRESS_OPERATIONS) {
+        bool status_operation = (completed & 1u) == 0;
+        uint32_t start = TICKS_READ();
+        uint32_t deadline = start + TICKS_FROM_MS(ED64_PRO_STATUS_TIMEOUT_MS);
+        stress_active = true;
+        error = status_operation
+                    ? ed64_pro_ll_check_status(&status_line.value, deadline)
+                    : ed64_pro_ll_read_reg(ED64_PRO_REG_EDID, &register_line.value, deadline);
+        stress_active = false;
+        uint32_t elapsed = TICKS_READ() - start;
+        uint32_t *maximum = status_operation ? &max_status_ticks : &max_register_ticks;
+        if (elapsed > *maximum) {
+            *maximum = elapsed;
+        }
+        integrity = canaries_ok() && irq_canary_errors == 0 && (register_line.value & 0xFFFF00FFu) == 0xED640027u;
+        if (error != ED64_PRO_LL_OK || !integrity) {
+            break;
+        }
+        completed++;
+        if (completed % 10000 == 0) {
+            console_clear();
+            print_identity();
+            printf("\nStatus/EDID stress: %" PRIu32 " / %u\n", completed, STRESS_OPERATIONS);
+            printf(
+                "Timer IRQs: %" PRIu32 "; IRQ/DMA overlap: %" PRIu32 "\n", register_line.irq_updates, irq_dma_overlap
+            );
+            console_render();
+        }
+    }
+    stop_timer(&stress_timer);
+
+    console_clear();
+    print_identity();
+    print_init_metrics();
+    printf("\nStress: %" PRIu32 " / %u operations\n", completed, STRESS_OPERATIONS);
+    printf(
+        "IRQs: %" PRIu32 "; DMA overlap: %" PRIu32 "; canary errors: %" PRIu32 "\n",
+        register_line.irq_updates,
+        irq_dma_overlap,
+        irq_canary_errors
+    );
+    printf(
+        "Max status/register: %" PRIu64 " / %" PRIu64 " us\n",
+        (uint64_t)max_status_ticks * 1000000 / TICKS_PER_SECOND,
+        (uint64_t)max_register_ticks * 1000000 / TICKS_PER_SECOND
+    );
+    if (error != ED64_PRO_LL_OK) {
+        const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
+        printf(
+            "FAILED: %s operation, transport error %u\n", (completed & 1u) == 0 ? "status" : "EDID", (unsigned)error
+        );
+        printf("Confirmed RX: %zu\n", failure->transferred);
+        if (error == ED64_PRO_LL_MCU_ERROR) {
+            printf("Fresh MCU status: 0x%02X\n", (unsigned)status_line.value.mcu_status);
+        }
+    } else if (!integrity) {
+        printf("FAILED: caller data/canary corruption\n");
+    } else if (!irq_dma_overlap) {
+        printf("SKIPPED: no timer IRQ overlapped a PI DMA; rerun the stress test\n");
+    } else {
+        printf("Stress PASS.\n");
+    }
+    terminal();
+}
+
+#endif
+
+#if defined(ED64_PRO_TEST_STORAGE) || defined(ED64_PRO_TEST_LOAD)
+/**
+ * @brief Print the mounted FAT variant and cluster size.
+ */
+static void print_volume (const FIL *file) {
+    const FATFS *fs = file->obj.fs;
+    const char *type = "unknown";
+    switch (fs->fs_type) {
+    case FS_FAT12: type = "FAT12"; break;
+    case FS_FAT16: type = "FAT16"; break;
+    case FS_FAT32: type = "FAT32"; break;
+    case FS_EXFAT: type = "exFAT"; break;
+    }
+    printf("SD: %s, cluster %" PRIu32 " bytes\n", type, (uint32_t)fs->csize * 512u);
+}
+#endif
+
+#ifdef ED64_PRO_TEST_STORAGE
+#ifndef ED64_PRO_TEST_FIXTURE_PATH
+#define ED64_PRO_TEST_FIXTURE_PATH "/ed64pro-test/read.bin"
+#endif
+#ifndef ED64_PRO_TEST_FIXTURE_CRC32
+#define ED64_PRO_TEST_FIXTURE_CRC32 0x1821D2CDu
+#endif
+#define STORAGE_FIXTURE_SIZE (1024u * 1024u)
+#define SCRATCH_PATH "/ed64pro-test/scratch.bin"
+#define SCRATCH_SIZE (64u * 1024u)
+#define SCRATCH_SECTORS (SCRATCH_SIZE / 512u)
+#define SCRATCH_PATTERN_A 0xA5u
+
+static uint8_t storage_buffer[4096] __attribute__((aligned(16)));
+
+/**
+ * @brief Update a running CRC32 with fixture bytes.
+ */
+static uint32_t fixture_crc32 (uint32_t crc, const uint8_t *data, size_t length) {
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (unsigned bit = 0; bit < 8; bit++) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+    }
+    return crc;
+}
+
+#ifdef ED64_PRO_TEST_DIAGNOSTICS
+static struct {
+    uint32_t samples;
+    uint32_t first_ticks;
+    uint32_t last_ticks;
+    uint32_t min_interval;
+    uint32_t max_interval;
+    uint16_t minimum_mv;
+    uint16_t maximum_mv;
+    uint32_t pressed_samples;
+} diagnostic_samples;
+
+/** @brief Poll the real callbacks between read chunks, spanning the voltage cache period. */
+static bool sample_diagnostics (void) {
+    uint32_t now = TICKS_READ();
+    if (diagnostic_samples.samples && now - diagnostic_samples.last_ticks < TICKS_FROM_MS(250)) {
+        return true;
+    }
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    uint16_t voltage_mv = 0;
+    bool pressed = false;
+    if (!adapter->get_voltage || !adapter->get_button_state ||
+        adapter->get_voltage(&voltage_mv) != FLASHCART_OK || adapter->get_button_state(&pressed) != FLASHCART_OK) {
+        printf("Diagnostics FAILED: voltage/button callback.\n");
+        return false;
+    }
+    /* Check encoding invariants, not an invented voltage calibration band. */
+    if (!voltage_mv || voltage_mv % 10u) {
+        printf("Diagnostics FAILED: invalid voltage %u mV.\n", voltage_mv);
+        return false;
+    }
+    if (!diagnostic_samples.samples) {
+        diagnostic_samples.first_ticks = now;
+        diagnostic_samples.minimum_mv = diagnostic_samples.maximum_mv = voltage_mv;
+        diagnostic_samples.min_interval = UINT32_MAX;
+    } else {
+        uint32_t interval = now - diagnostic_samples.last_ticks;
+        if (interval < diagnostic_samples.min_interval) diagnostic_samples.min_interval = interval;
+        if (interval > diagnostic_samples.max_interval) diagnostic_samples.max_interval = interval;
+        if (voltage_mv < diagnostic_samples.minimum_mv) diagnostic_samples.minimum_mv = voltage_mv;
+        if (voltage_mv > diagnostic_samples.maximum_mv) diagnostic_samples.maximum_mv = voltage_mv;
+    }
+    diagnostic_samples.last_ticks = now;
+    diagnostic_samples.samples++;
+    diagnostic_samples.pressed_samples += pressed;
+    return true;
+}
+#endif
+
+/**
+ * @brief Read and time the storage fixture, then verify its size and configured CRC32.
+ */
+static bool read_fixture (bool report) {
+    FIL file;
+    if (f_open(&file, ED64_PRO_TEST_FIXTURE_PATH, FA_READ) != FR_OK) {
+        printf("Storage read FAILED: cannot open read.bin\n");
+        return false;
+    }
+    if (report) print_volume(&file);
+    bool valid = f_size(&file) == STORAGE_FIXTURE_SIZE;
+    uint32_t crc = UINT32_MAX;
+    uint32_t bytes = 0;
+    uint32_t read_ticks = 0;
+    while (valid && bytes < STORAGE_FIXTURE_SIZE) {
+        UINT count = 0;
+        uint32_t start = TICKS_READ();
+        FRESULT result = f_read(&file, storage_buffer, sizeof(storage_buffer), &count);
+        read_ticks += TICKS_READ() - start;
+        valid = result == FR_OK && count == sizeof(storage_buffer);
+        if (valid) {
+            crc = fixture_crc32(crc, storage_buffer, count);
+            bytes += count;
+        }
+#ifdef ED64_PRO_TEST_DIAGNOSTICS
+        if (valid && !sample_diagnostics()) {
+            f_close(&file);
+            return false;
+        }
+#endif
+    }
+    if (!valid) {
+        printf("Storage read FAILED: size/read at %" PRIu32 " bytes\n", bytes);
+        return false;
+    }
+    if (f_close(&file) != FR_OK) {
+        printf("Storage read FAILED: close\n");
+        return false;
+    }
+    crc ^= UINT32_MAX;
+    if (report) {
+        printf("Storage read: %" PRIu32 " bytes, CRC32 %08" PRIX32 "\n", bytes, crc);
+        printf(
+            "Read I/O: %" PRIu32 " ms, %" PRIu64 " KiB/s\n",
+            TICKS_TO_MS(read_ticks),
+            read_ticks ? (uint64_t)bytes * TICKS_PER_SECOND / read_ticks / 1024 : 0
+        );
+    }
+    if (crc != (uint32_t)ED64_PRO_TEST_FIXTURE_CRC32) {
+        printf("Storage read FAILED: expected %08" PRIX32 "\n", (uint32_t)ED64_PRO_TEST_FIXTURE_CRC32);
+        return false;
+    }
+    if (report) printf("Storage read PASS.\n");
+    return true;
+}
+
+#ifdef ED64_PRO_TEST_DIAGNOSTICS
+/** @brief Repeat complete CRC-checked reads for at least five seconds with live diagnostics. */
+static bool run_readonly_diagnostics (void) {
+    uint32_t passes = 0;
+    do {
+        if (!read_fixture(false)) return false;
+        passes++;
+    } while (diagnostic_samples.last_ticks - diagnostic_samples.first_ticks < TICKS_FROM_MS(5000));
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    uint32_t sample_span = diagnostic_samples.last_ticks - diagnostic_samples.first_ticks;
+    if (diagnostic_samples.samples < 5 || sample_span < TICKS_FROM_MS(5000) ||
+        diagnostics->state != ED64_PRO_READY || disk_status(0) != 0 ||
+        diagnostics->storage_failed || ed64_pro_ll_get_failure()->code != ED64_PRO_LL_OK) {
+        printf("Diagnostics FAILED: sample duration or retained storage/transport fault.\n");
+        return false;
+    }
+    printf("Read-only diagnostics PASS.\n");
+    printf("Read passes: %" PRIu32 ", CRC32 %08" PRIX32 " each\n", passes, (uint32_t)ED64_PRO_TEST_FIXTURE_CRC32);
+    printf("Samples: %" PRIu32 " over %" PRIu32 " ms\n", diagnostic_samples.samples, TICKS_TO_MS(sample_span));
+    printf("Sample intervals: %" PRIu32 "..%" PRIu32 " ms\n",
+           TICKS_TO_MS(diagnostic_samples.min_interval), TICKS_TO_MS(diagnostic_samples.max_interval));
+    printf("Voltage: %u..%u mV; pressed samples: %" PRIu32 "\n",
+           diagnostic_samples.minimum_mv, diagnostic_samples.maximum_mv, diagnostic_samples.pressed_samples);
+    if (diagnostic_samples.minimum_mv < 3000) printf("Low-voltage warning: sample below 3000 mV.\n");
+    return true;
+}
+#endif
+
+#ifdef ED64_PRO_TEST_IPL
+#ifndef ED64_PRO_TEST_IPL_PATH
+#define ED64_PRO_TEST_IPL_PATH "/ed64pro-test/NDDJ2.n64"
+#endif
+static unsigned ipl_progress_calls;
+static float ipl_progress_last;
+static bool ipl_progress_valid = true;
+
+static void ipl_progress (float progress) {
+    if (!(progress >= ipl_progress_last && progress <= 1.0f)) ipl_progress_valid = false;
+    ipl_progress_last = progress;
+    ipl_progress_calls++;
+}
+
+/** @brief Stage the canonical native IPL without configuring or starting DD services. */
+static bool stage_readonly_ipl (void) {
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    flashcart_err_t error = adapter->load_64dd_ipl(ED64_PRO_TEST_IPL_PATH, ipl_progress);
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    if (error != FLASHCART_OK || !ipl_progress_valid || ipl_progress_last != 1.0f || !ipl_progress_calls ||
+        diagnostics->state != ED64_PRO_READY || disk_status(0) != 0 ||
+        diagnostics->storage_failed || ed64_pro_ll_get_failure()->code != ED64_PRO_LL_OK) {
+        printf("Read-only IPL staging FAILED (%u): %s\n", (unsigned)error, ed64_pro_get_error_message());
+        return false;
+    }
+    if (!read_fixture(false)) return false;
+    printf("Read-only IPL staging PASS: 4 MiB, %u progress callbacks.\n", ipl_progress_calls);
+    printf("Storage remains readable; DD START and mapped IPL readback were not tested.\n");
+    return true;
+}
+#endif
+
+#ifdef ED64_PRO_TEST_RAW_WRITE
+/**
+ * @brief Map an existing scratch file to unique sector LBAs without changing FAT metadata.
+ */
+static bool map_scratch (uint32_t sectors[SCRATCH_SECTORS]) {
+    FIL file;
+    if (f_open(&file, SCRATCH_PATH, FA_READ) != FR_OK) {
+        printf("Raw write FAILED: cannot open scratch.bin\n");
+        return false;
+    }
+    FATFS *fs = file.obj.fs;
+    bool valid = f_size(&file) == SCRATCH_SIZE && fs && !fs->wflag && fs->csize && fs->database <= UINT32_MAX;
+    for (uint32_t index = 0; valid && index < SCRATCH_SECTORS;) {
+        if (f_lseek(&file, index * 512u + 256u) != FR_OK) {
+            valid = false;
+            break;
+        }
+        uint32_t cluster = file.clust;
+        if (cluster < 2 || cluster >= fs->n_fatent) {
+            valid = false;
+            break;
+        }
+        uint64_t base = (uint64_t)fs->database + (uint64_t)fs->csize * (cluster - 2u);
+        uint32_t in_cluster = index % fs->csize;
+        for (; valid && in_cluster < fs->csize && index < SCRATCH_SECTORS; in_cluster++, index++) {
+            uint64_t lba = base + in_cluster;
+            if (lba < fs->database || lba > UINT32_MAX) {
+                valid = false;
+                break;
+            }
+            for (uint32_t previous = 0; previous < index; previous++) {
+                if (sectors[previous] == lba) {
+                    valid = false;
+                    break;
+                }
+            }
+            sectors[index] = (uint32_t)lba;
+        }
+    }
+    if (!valid) {
+        printf("Raw write FAILED: scratch size/cluster/LBA map\n");
+        return false;
+    }
+    if (f_close(&file) != FR_OK) {
+        printf("Raw write FAILED: scratch close\n");
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Read or write one scratch sector with a protocol polling deadline.
+ */
+static bool scratch_sector_io (uint32_t lba, bool write) {
+    uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
+    ed64_pro_ll_error_t error = write ? ed64_pro_ll_sd_write(storage_buffer, lba, 1, deadline)
+                                    : ed64_pro_ll_sd_read(storage_buffer, lba, 1, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        printf("Raw write FAILED: %s LBA %" PRIu32 ", LL %u\n", write ? "write" : "read", lba, (unsigned)error);
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Generate the replacement scratch byte for a file offset.
+ */
+static uint8_t scratch_pattern_b (uint32_t offset) {
+    return (uint8_t)(offset * 29u + 0x3Cu);
+}
+
+/**
+ * @brief Verify scratch pattern A, write B to even sectors, and check every sector.
+ */
+static bool write_scratch (void) {
+    uint32_t sectors[SCRATCH_SECTORS];
+    if (!map_scratch(sectors)) {
+        return false;
+    }
+    /* Verify every mapped sector is A before sending any WRE command. */
+    for (uint32_t sector = 0; sector < SCRATCH_SECTORS; sector++) {
+        if (!scratch_sector_io(sectors[sector], false)) {
+            return false;
+        }
+        for (uint32_t byte = 0; byte < 512; byte++) {
+            if (storage_buffer[byte] != SCRATCH_PATTERN_A) {
+                printf("Raw write REFUSED: scratch is not pattern A (A5).\n");
+                return false;
+            }
+        }
+    }
+    printf("Raw write: writing B to even scratch sectors only...\n");
+    console_render();
+    for (uint32_t sector = 0; sector < SCRATCH_SECTORS; sector += 2) {
+        for (uint32_t byte = 0; byte < 512; byte++) {
+            storage_buffer[byte] = scratch_pattern_b(sector * 512u + byte);
+        }
+        /* An error after WRE can be an ambiguous write. Do not retry or release. */
+        if (!scratch_sector_io(sectors[sector], true)) {
+            return false;
+        }
+    }
+    for (uint32_t sector = 0; sector < SCRATCH_SECTORS; sector++) {
+        if (!scratch_sector_io(sectors[sector], false)) {
+            return false;
+        }
+        for (uint32_t byte = 0; byte < 512; byte++) {
+            uint8_t expected = (sector & 1u) ? SCRATCH_PATTERN_A : scratch_pattern_b(sector * 512u + byte);
+            if (storage_buffer[byte] != expected) {
+                printf("Raw write FAILED: verify at %" PRIu32 "\n", sector * 512u + byte);
+                return false;
+            }
+        }
+    }
+    printf("Raw write PASS: scratch-sector read-back matches.\nVerify scratch.bin on the host after power-off.\n");
+    return true;
+}
+#endif
+
+#ifdef ED64_PRO_TEST_STORAGE_FAIL_WRITE
+static void run_storage_fail_write (void) __attribute__((noreturn));
+/**
+ * @brief Verify an injected protocol write fault invalidates handles and refuses handoff.
+ */
+static void run_storage_fail_write (void) {
+    FIL writer;
+    if (f_open(&writer, SCRATCH_PATH, FA_READ | FA_WRITE) != FR_OK || f_size(&writer) != SCRATCH_SIZE) {
+        printf("FAIL-WRITE REFUSED: existing scratch.bin must be 64 KiB.\n");
+        terminal();
+    }
+    for (uint32_t offset = 0; offset < SCRATCH_SIZE; offset += sizeof(storage_buffer)) {
+        UINT read = 0;
+        if (f_read(&writer, storage_buffer, sizeof(storage_buffer), &read) != FR_OK || read != sizeof(storage_buffer)) {
+            printf("FAIL-WRITE REFUSED: scratch read.\n");
+            terminal();
+        }
+        for (size_t byte = 0; byte < sizeof(storage_buffer); byte++) {
+            if (storage_buffer[byte] != SCRATCH_PATTERN_A) {
+                printf("FAIL-WRITE REFUSED: scratch must contain A5.\n");
+                terminal();
+            }
+        }
+    }
+    FIL reader;
+    if (f_open(&reader, ED64_PRO_TEST_FIXTURE_PATH, FA_READ) != FR_OK || f_lseek(&writer, 0) != FR_OK ||
+        f_tell(&writer) != 0 || writer.obj.fs->wflag) {
+        printf("FAIL-WRITE REFUSED: handle preparation/dirty window.\n");
+        terminal();
+    }
+    for (size_t byte = 0; byte < 1024; byte++) {
+        storage_buffer[byte] = (uint8_t)(byte * 29u + 0x3Cu);
+    }
+    UINT written = 0;
+    FRESULT write_result = f_write(&writer, storage_buffer, 1024, &written);
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    if (write_result != FR_DISK_ERR || !diagnostics->storage_failed ||
+        diagnostics->storage_failure.code != ED64_PRO_LL_TIMEOUT || diagnostics->storage_failure.transferred != 1 ||
+        !diagnostics->storage_operation ||
+        strcmp(diagnostics->storage_operation, "Write") != 0) {
+        printf("FAIL-WRITE FAILED: expected latched write fault (%u, %u bytes).\n", (unsigned)write_result, written);
+        terminal();
+    }
+    UINT read = 0;
+    FRESULT read_result = f_read(&reader, storage_buffer, 512, &read);
+    FRESULT reader_close = f_close(&reader);
+    FRESULT writer_close = f_close(&writer);
+    if (read_result != FR_INVALID_OBJECT || reader_close != FR_INVALID_OBJECT || writer_close != FR_INVALID_OBJECT ||
+        read != 0) {
+        printf("FAIL-WRITE FAILED: old handles were not inert.\n");
+        terminal();
+    }
+    flashcart_err_t handoff_error = ed64_pro_get_flashcart()->deinit();
+    if (handoff_error != FLASHCART_ERR_SD_CARD || !(disk_status(0) & STA_NOINIT) ||
+        !diagnostics->storage_failed) {
+        printf("Write-fault FAILED: latched write did not refuse handoff.\n");
+        terminal();
+    }
+    printf("\nWrite-fault refusal PASS\n");
+    printf("Old handles invalid; deinit refused.\n");
+    printf("No START or game boot attempted.\n");
+    printf("Power-cycle console and USB before host verification.\n");
+    terminal();
+}
+#endif
+
+/**
+ * @brief Test mounted storage reads and optional writes, then release ownership.
+ */
+static void run_storage (void) {
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    flashcart_err_t error = adapter->init();
+    print_identity();
+    print_init_metrics();
+    if (error != FLASHCART_OK) {
+        printf("Startup failed: %s\n", ed64_pro_get_error_message());
+        terminal();
+    }
+    flashcart_firmware_version_t firmware = adapter->get_firmware_version();
+    printf("Firmware: %u.%u.%" PRIu32 "\n", firmware.major, firmware.minor, firmware.revision);
+    if (!ed64_pro_init_sdfs("sd:/", 4)) {
+        printf("Mount failed: %s\n", ed64_pro_get_error_message());
+        terminal();
+    }
+    printf("Mounted; host tools must remain idle.\n");
+    console_render();
+#ifdef ED64_PRO_TEST_DIAGNOSTICS
+    if (!run_readonly_diagnostics()) terminal();
+#else
+    if (!read_fixture(true)) terminal();
+#endif
+#ifdef ED64_PRO_TEST_IPL
+    if (!stage_readonly_ipl()) terminal();
+#endif
+#if defined(ED64_PRO_TEST_DIAGNOSTICS) || defined(ED64_PRO_TEST_IPL)
+    printf("No writes, release or START. Power off before host access.\n");
+    terminal();
+#endif
+#ifdef ED64_PRO_TEST_STORAGE_FAIL_WRITE
+    run_storage_fail_write();
+#endif
+#ifdef ED64_PRO_TEST_RAW_WRITE
+    if (!write_scratch()) {
+        terminal();
+    }
+#else
+    printf("Raw write not run: ED64_PRO_TEST_RAW_WRITE is disabled.\n");
+#endif
+    error = adapter->deinit();
+    if (error != FLASHCART_ERR_FUNCTION_NOT_SUPPORTED) {
+        printf("Release FAILED: %s\n", ed64_pro_get_error_message());
+        terminal();
+    }
+    printf("RELEASED: %s\n", ed64_pro_get_error_message());
+    printf("Power off console before host verification.\n");
+    terminal();
+}
+#endif
+
+#ifdef ED64_PRO_TEST_LOAD
+#ifndef ED64_PRO_TEST_LOAD_PATH
+#define ED64_PRO_TEST_LOAD_PATH "/ed64pro-test/load.z64"
+#endif
+#ifndef ED64_PRO_TEST_V64_PATH
+#define ED64_PRO_TEST_V64_PATH "/ed64pro-test/load.v64"
+#endif
+#ifndef ED64_PRO_TEST_AUX_PATH
+#define ED64_PRO_TEST_AUX_PATH "/ed64pro-test/load-offset.bin"
+#endif
+#ifndef ED64_PRO_TEST_OVERSIZE_PATH
+#define ED64_PRO_TEST_OVERSIZE_PATH "/ed64pro-test/oversize.z64"
+#endif
+#ifndef ED64_PRO_TEST_LOAD_TIMING_32_PATH
+#define ED64_PRO_TEST_LOAD_TIMING_32_PATH "/ed64pro-test/load-32m.z64"
+#endif
+#ifndef ED64_PRO_TEST_LOAD_TIMING_64_PATH
+#define ED64_PRO_TEST_LOAD_TIMING_64_PATH "/ed64pro-test/load-64m.z64"
+#endif
+
+static uint8_t source_buffer[4096] __attribute__((aligned(16)));
+static uint8_t pi_buffer[4096] __attribute__((aligned(16)));
+static unsigned load_progress_percent;
+static bool load_progress_valid;
+
+/**
+ * @brief Check monotonic load progress and print each crossed quarter milestone.
+ */
+static void load_progress (float progress) {
+    if (!(progress >= 0.0f && progress <= 1.0f)) {
+        load_progress_valid = false;
+        return;
+    }
+    unsigned percent = (unsigned)(progress * 100.0f);
+    if (percent < load_progress_percent) {
+        load_progress_valid = false;
+    }
+    if (percent / 25 > load_progress_percent / 25) {
+        printf("%u%% ", percent);
+        console_render();
+    }
+    load_progress_percent = percent;
+}
+
+/**
+ * @brief Validate a nonempty sector-aligned fixture and return its byte size.
+ */
+static bool fixture_size (const char *path, uint32_t *size) {
+    FIL file;
+    if (f_open(&file, path, FA_READ) != FR_OK) {
+        printf("FAILED: cannot open %s\n", path);
+        return false;
+    }
+    print_volume(&file);
+    FSIZE_t bytes = f_size(&file);
+    if (bytes == 0 || bytes > UINT32_MAX || (bytes & 511u)) {
+        printf("FAILED: fixture must have a nonzero sector-aligned size.\n");
+        return false;
+    }
+    if (f_close(&file) != FR_OK) {
+        printf("FAILED: fixture close\n");
+        return false;
+    }
+    *size = (uint32_t)bytes;
+    return true;
+}
+
+/**
+ * @brief Compare cartridge ROM bytes with a fixture, optionally normalizing v64 byte order.
+ */
+static bool compare_loaded (const char *path, uint32_t rom_offset, uint32_t file_offset, bool normalize_v64) {
+    FIL file;
+    if (f_open(&file, path, FA_READ) != FR_OK || f_size(&file) < file_offset) {
+        printf("FAILED: comparison open/size\n");
+        return false;
+    }
+    if (f_lseek(&file, file_offset) != FR_OK || f_tell(&file) != file_offset) {
+        printf("FAILED: comparison seek\n");
+        return false;
+    }
+    uint32_t extent = (uint32_t)(f_size(&file) - file_offset);
+    for (uint32_t offset = 0; offset < extent;) {
+        UINT chunk = extent - offset;
+        if (chunk > sizeof(source_buffer)) {
+            chunk = sizeof(source_buffer);
+        }
+        UINT read = 0;
+        if (f_read(&file, source_buffer, chunk, &read) != FR_OK || read != chunk) {
+            printf("FAILED: source read at %" PRIu32 "\n", offset);
+            return false;
+        }
+        if (normalize_v64) {
+            for (UINT byte = 0; byte < chunk; byte += 2) {
+                uint8_t first = source_buffer[byte];
+                source_buffer[byte] = source_buffer[byte + 1];
+                source_buffer[byte + 1] = first;
+            }
+        }
+        pi_dma_read_data((void *)(uintptr_t)(0x10000000u + rom_offset + offset), pi_buffer, chunk);
+        if (memcmp(source_buffer, pi_buffer, chunk) != 0) {
+            for (UINT byte = 0; byte < chunk; byte++) {
+                if (source_buffer[byte] != pi_buffer[byte]) {
+                    printf(
+                        "FAILED: PI offset %08" PRIX32 ": %02X != %02X\n",
+                        rom_offset + offset + byte,
+                        pi_buffer[byte],
+                        source_buffer[byte]
+                    );
+                    break;
+                }
+            }
+            return false;
+        }
+        offset += chunk;
+    }
+    if (f_tell(&file) != f_size(&file) || f_close(&file) != FR_OK) {
+        printf("FAILED: comparison completion/close\n");
+        return false;
+    }
+    printf("Compared %" PRIu32 " bytes at PI +%08" PRIX32 ".\n", extent, rom_offset);
+    return true;
+}
+
+/**
+ * @brief Time a ROM load, validate progress, and optionally compare loaded bytes.
+ */
+static bool load_rom_fixture (flashcart_t *adapter, char *path, bool normalize_v64, bool verify_contents) {
+    cart_card_byteswap = normalize_v64;
+    load_progress_percent = 0;
+    load_progress_valid = true;
+    uint32_t start = TICKS_READ();
+    flashcart_err_t error = adapter->load_rom(path, load_progress);
+    uint32_t elapsed = TICKS_READ() - start;
+    cart_card_byteswap = 0;
+    printf("\nLoad: %" PRIu32 " ms\n", TICKS_TO_MS(elapsed));
+    if (error != FLASHCART_OK) {
+        printf("Load FAILED (%u): %s\n", (unsigned)error, ed64_pro_get_error_message());
+        return false;
+    }
+    if (!load_progress_valid || load_progress_percent != 100) {
+        printf("FAILED: progress callbacks\n");
+        return false;
+    }
+    return !verify_contents || compare_loaded(path, 0, 0, normalize_v64);
+}
+
+/**
+ * @brief Test ROM and auxiliary loading or run the selected timing-only mode.
+ */
+static void run_load (void) {
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    flashcart_err_t error = adapter->init();
+    print_identity();
+    print_init_metrics();
+    if (error != FLASHCART_OK || !ed64_pro_init_sdfs("sd:/", 4)) {
+        printf("Startup/mount FAILED: %s\n", ed64_pro_get_error_message());
+        terminal();
+    }
+#ifdef ED64_PRO_TEST_LOAD_TIMING
+    static const struct {
+        char *path;
+        uint32_t size;
+    } fixtures[] = {
+        {ED64_PRO_TEST_LOAD_PATH, 8u * 1024u * 1024u},
+        {ED64_PRO_TEST_LOAD_TIMING_32_PATH, 32u * 1024u * 1024u},
+        {ED64_PRO_TEST_LOAD_TIMING_64_PATH, 64u * 1024u * 1024u},
+    };
+    for (size_t fixture = 0; fixture < sizeof(fixtures) / sizeof(fixtures[0]); fixture++) {
+        uint32_t size;
+        if (!fixture_size(fixtures[fixture].path, &size) || size != fixtures[fixture].size) {
+            printf("TIMING REFUSED: fixture size mismatch.\n");
+            terminal();
+        }
+        printf("Timing %" PRIu32 " MiB, comparison disabled:\n", size / (1024u * 1024u));
+        console_render();
+        if (!load_rom_fixture(adapter, fixtures[fixture].path, false, false)) {
+            terminal();
+        }
+    }
+    printf("Timing-only loads complete.\n");
+    printf("No release or START. Power off before host access.\n");
+    terminal();
+#endif
+#if defined(ED64_PRO_TEST_OVERSIZE)
+    uint32_t oversize_size;
+    const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
+    if (!fixture_size(ED64_PRO_TEST_OVERSIZE_PATH, &oversize_size) || oversize_size <= diagnostics->rom_capacity) {
+        printf("Oversized ROM REFUSED: fixture must exceed reported capacity.\n");
+        terminal();
+    }
+    error = adapter->load_rom(ED64_PRO_TEST_OVERSIZE_PATH, NULL);
+    if (error != FLASHCART_ERR_LOAD || diagnostics->storage_failed || diagnostics->state != ED64_PRO_READY ||
+        disk_status(0) != 0 ||
+        ed64_pro_ll_get_failure()->code != ED64_PRO_LL_OK) {
+        printf("Oversized ROM FAILED: oversized ROM refusal (%u).\n", (unsigned)error);
+        terminal();
+    }
+    printf("Oversized ROM PASS: oversized ROM refused, storage healthy.\n");
+    console_render();
+#endif
+    uint32_t rom_size;
+    uint32_t auxiliary_size;
+    if (!fixture_size(ED64_PRO_TEST_LOAD_PATH, &rom_size) || !fixture_size(ED64_PRO_TEST_AUX_PATH, &auxiliary_size) ||
+        auxiliary_size <= 512u) {
+        terminal();
+    }
+    printf("ROM/auxiliary load: z64 (%" PRIu32 " bytes)\n", rom_size);
+    console_render();
+    if (!load_rom_fixture(adapter, ED64_PRO_TEST_LOAD_PATH, false, true)) {
+        terminal();
+    }
+    uint32_t start = TICKS_READ();
+    error = adapter->load_file(ED64_PRO_TEST_AUX_PATH, rom_size, 512);
+    printf("Auxiliary: %" PRIu32 " ms, skip512, ROM +%08" PRIX32 "\n", TICKS_TO_MS(TICKS_READ() - start), rom_size);
+    if (error != FLASHCART_OK || !compare_loaded(ED64_PRO_TEST_AUX_PATH, rom_size, 512, false)) {
+        printf("Auxiliary load FAILED (%u)\n", (unsigned)error);
+        terminal();
+    }
+    printf("ROM/auxiliary load PASS.\n");
+    console_render();
+    uint32_t v64_size;
+    if (!fixture_size(ED64_PRO_TEST_V64_PATH, &v64_size) || v64_size != rom_size) {
+        printf("Byte-swapped load REFUSED: v64 size must match z64.\n");
+        terminal();
+    }
+    printf("Byte-swapped load: v64 (%" PRIu32 " bytes)\n", v64_size);
+    console_render();
+    if (!load_rom_fixture(adapter, ED64_PRO_TEST_V64_PATH, true, true)) {
+        terminal();
+    }
+    printf("Byte-swapped load PASS: PI read-back matches normalized v64.\n");
+    printf("No release or START attempted. Power off before host access.\n");
+    terminal();
+}
+#endif
+
+/**
+ * @brief Run the selected Pro test without starting USB polling or game services.
+ *
+ * Initialize the clock before deadlines, bypass iQue, and stop permanently on
+ * startup failure rather than retrying or selecting another cartridge backend.
+ */
+int main (void) {
+    /* timer_init resets CP0 COUNT; it must precede the probe/attempt deadline. */
+    timer_init();
+    if (sys_bbplayer()) {
+        screen_init();
+        printf("iQue: Pro probe intentionally bypassed.\n");
+        terminal();
+    }
+#ifdef ED64_PRO_TEST_INFO
+    screen_init();
+    flashcart_t *adapter = ed64_pro_get_flashcart();
+    flashcart_err_t result = adapter->init();
+    print_identity();
+    print_init_metrics();
+    flashcart_firmware_version_t firmware = adapter->get_firmware_version();
+    printf("\nCartridge: %s\n", adapter->get_name());
+    printf("Firmware: %u.%u.%" PRIu32 " (minimum 26.1014)\n", firmware.major, firmware.minor, firmware.revision);
+    printf("Init result: %u\n%s\n", (unsigned)result, ed64_pro_get_error_message());
+    terminal();
+#elif defined(ED64_PRO_TEST_STORAGE)
+    screen_init();
+    run_storage();
+#elif defined(ED64_PRO_TEST_LOAD)
+    screen_init();
+    run_load();
+#else
+    ed64_pro_ll_error_t error = ed64_pro_init_transport();
+    screen_init();
+    print_identity();
+    if (error != ED64_PRO_LL_OK) {
+        printf("\n%s\n", ed64_pro_get_error_message());
+        print_init_metrics();
+        terminal();
+    }
+    printf("\nTransport/SD ready; storage remains inactive.\n");
+    print_init_metrics();
+    printf("\nStarting 100,000 status/EDID operations...\n");
+    console_render();
+    run_stress();
+#endif
+}

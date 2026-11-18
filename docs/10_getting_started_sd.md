@@ -17,6 +17,22 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 - Place your ROM files on the Micro SD card, **in any folder except the root directory `menu` folder**.
 - Remove the Micro SD Card from your computer and insert it into the SC64. 
 
+#### Preparations for EverDrive-64 Pro
+
+- Use firmware `26.1014` or newer.
+- Download `menu.n64` from a [release](https://github.com/n64brew/N64FlashcartMenu/releases/) that includes EverDrive-64 Pro support, then copy it to `/ed64/menu.n64` on your Micro SD card. Until such a release is available, use the `ED64-Pro` artifact from a successful [Actions build](https://github.com/n64brew/N64FlashcartMenu/actions/workflows/build.yml) of a branch containing Pro support. Older releases do not contain this backend.
+- Place your ROM files on the Micro SD card, **in any folder except the root directory `ed64` folder**.
+- Remove the Micro SD Card from your computer and insert it into the ED64 Pro. 
+
+> [!IMPORTANT]
+> Use active USB tools only with the console powered off or in the stock Pro menu.
+
+Automatic CIC/region detection, save writeback, RTC reads/writes, and native [64DD disk loading](17_64dd.md) are supported. Set the clock in Settings > Time. Fast reboot and USB debugging are not implemented.
+
+The tested configuration is an original NTSC-U console with an 8 MiB Expansion Pak; intermittent menu preview/startup faults with a 4 MiB Jumper Pak remain unresolved.
+
+ROM and save paths use [CP437](https://en.wikipedia.org/wiki/Code_page_437), with existing [8.3 aliases](https://en.wikipedia.org/wiki/8.3_filename) for unsupported characters. Paths without usable aliases are rejected before launch.
+
 ### Advanced Steps
 Advanced steps are optional, which adds additional capabilities.
 

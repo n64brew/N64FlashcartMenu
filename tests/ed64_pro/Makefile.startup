@@ -1,0 +1,37 @@
+.DEFAULT_GOAL := all
+
+BUILD_DIR ?= build/ed64-pro-startup-guard
+OUTPUT_DIR ?= output/ed64-pro-startup-guard
+# -DED64_PRO_TEST_FAIL_MOUNT exercises the normal menu startup-error view.
+TEST_FLAGS ?=
+
+ifneq ($(ED64_PRO_STARTUP_INNER),1)
+
+.PHONY: all
+all:
+	@mkdir -p "$(OUTPUT_DIR)"
+	$(MAKE) --no-print-directory -f tests/ed64_pro/Makefile.startup ED64_PRO_STARTUP_INNER=1 \
+		BUILD_DIR="$(BUILD_DIR)" OUTPUT_DIR="$(OUTPUT_DIR)" "$(OUTPUT_DIR)/N64FlashcartMenu.n64"
+
+else
+
+include Makefile
+
+# Keep legacy calls and the mount-failure injection visible to the linker.
+$(BUILD_DIR)/menu/menu.o $(BUILD_DIR)/flashcart/flashcart.o \
+$(BUILD_DIR)/flashcart/ed64_pro/ed64_pro.o $(BUILD_DIR)/ed64_pro_startup_guard.o: N64_CFLAGS+=-fno-lto
+$(BUILD_DIR)/ed64_pro_startup_guard.o: N64_CFLAGS+=$(TEST_FLAGS)
+GUARDED_APIS := cart_init debug_init_isviewer debug_init_sdfs debug_init_usblog debug_init_emulog usb_initialize fat_mount
+N64_LDFLAGS += $(addprefix --wrap=,$(GUARDED_APIS))
+
+$(BUILD_DIR)/$(PROJECT_NAME).elf: $(BUILD_DIR)/ed64_pro_startup_guard.o
+
+# Same compiler/flags/dependency pattern as the installed SDK's C rule.
+$(BUILD_DIR)/ed64_pro_startup_guard.o: tests/ed64_pro/ed64_pro_startup_guard.c src/flashcart/flashcart.h src/flashcart/ed64_pro/ed64_pro.h tests/ed64_pro/Makefile.startup
+	@mkdir -p $(dir $@)
+	@echo "    [CC] $<"
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+-include $(BUILD_DIR)/ed64_pro_startup_guard.d
+
+endif

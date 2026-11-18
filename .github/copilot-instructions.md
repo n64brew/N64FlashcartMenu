@@ -179,8 +179,8 @@ Do not invoke libdragon tools directly unless debugging the build system. Prefer
 ---
 
 ## Tests, formatting & debugging
-- No automated unit tests are currently present.
-- `Makefile` contains a commented-out `test` placeholder for future use.
+- Run host unit tests with `make -f tests/Makefile test test-sanitize`.
+- See `tests/README.md` for test coverage and hardware test instructions.
 - Formatting:
   - Use `make format` to apply `clang-format` across repository sources.
 - Manual runtime testing:

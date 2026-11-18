@@ -21,6 +21,9 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Run host tests
+        run: make -f tests/Makefile test test-sanitize
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
@@ -94,7 +97,7 @@ jobs:
             ./output/menu.bin
             # ./output/OS64.v64
             # ./output/OS64P.v64
-            # ./output/menu.n64
+            ./output/menu.n64
             ./output/sc64menu.n64
         continue-on-error: true
 
@@ -112,5 +115,6 @@ jobs:
             ./output/menu.bin
             ./output/OS64.v64
             ./output/OS64P.v64
+            ./output/menu.n64
             ./output/sc64menu.n64
         continue-on-error: true

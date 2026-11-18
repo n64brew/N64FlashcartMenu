@@ -8,7 +8,7 @@ The N64FlashcartMenu requires comprehensive testing across multiple hardware and
 
 - **Console Regions**: NTSC (US/JP), PAL (EU), MPAL (BR)
 - **Memory Configurations**: Jumper Pak (4MB), Expansion Pak (8MB)
-- **Flashcarts**: 64drive, EverDrive64 (V3/X7), SummerCart64
+- **Flashcarts**: 64drive, EverDrive64 (V3/X7/Pro), SummerCart64
 - **ROM/Content Types**: N64 Games, 64DD Disks, Emulator ROMs (NES/SNES/GB/SMS)
 - **Display Mods**: PixelFX, UltraHDMI, Analogue3D
 
@@ -53,24 +53,28 @@ Before starting a full test cycle, document the current baseline status to track
 
 ## Flashcart Compatibility Matrix
 
-| Feature | 64drive | ED64 V3 | ED64 X7 | SummerCart64 |
-|---|---|---|---|---|
-| **N64 ROM Loading** | ✓ | ✓ | ✓ | ✓ |
-| **64DD Disk Loading** | ✓ | ⚠ | ⚠ | ✓ |
-| **Emulator ROM Loading** | ✓ | ✓ | ✓ | ✓ |
-| **Save Data Persistence** | ✓ | ⚠ | ⚠ | ✓ |
-| **Cheat Codes** | ✓ | ✓ | ✓ | ✓ |
-| **ROM Patches** | ⚠ | ⚠ | ⚠ | ⚠ |
-| **USB Communication** | ✓ | Limited | ✓ | ✓ |
-| **RTC Support** | ✓ | ✓ | ✓ | ✓ |
-| **Controller Pak** | ✓ | ✓ | ✓ | ✓ |
-| **Auto CIC/Region Detection** | ✓ | Manual | ✓ | ✓ |
-| **Fast Reboot** | ✓ | - | - | ✓ |
-| **Diagnostics** | - | - | - | ✓ |
+| Feature | 64drive | ED64 V3 | ED64 X7 | ED64 Pro | SummerCart64 |
+|---|---|---|---|---|---|
+| **N64 ROM Loading** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **64DD Disk Loading** | ✓ | ⚠ | ⚠ | ✓ | ✓ |
+| **Emulator ROM Loading** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Save Data Persistence** | ✓ | ⚠ | ⚠ | ✓ | ✓ |
+| **Cheat Codes** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **ROM Patches** | ⚠ | ⚠ | ⚠ | ⚠ | ⚠ |
+| **USB Communication** | ✓ | Limited | ✓ | … | ✓ |
+| **RTC Support** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Controller Pak** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Auto CIC/Region Detection** | ✓ | Manual | ✓ | ✓ | ✓ |
+| **Fast Reboot** | ✓ | - | - | - | ✓ |
+| **Diagnostics** | - | - | - | ✓ | ✓ |
 
 **Notes:**
+- `⚠` = limited support; `…` = possible, but not yet implemented; `-` = unavailable.
 - ED64 V3: Limited USB support (older revision)
 - ED64 V3: Requires manual CIC/region setting
+- ED64 Pro: Firmware `26.1014` has a bug that corrupts the last four bytes of 128 KiB FlashRAM and 128 KiB SRAM saves. This does not affect known retail games; homebrew using those bytes needs a firmware fix.
+- ED64 Pro memory: tested on an original NTSC-U console with an 8 MiB Expansion Pak; intermittent menu preview/startup faults with a 4 MiB Jumper Pak remain unresolved.
+- ED64 Pro Diagnostics: cartridge button and 3.3 V supply supported; the cartridge has no temperature reading. See [diagnostics](ed64_pro_diagnostics.md).
 - SummerCart64: Most feature-complete (includes diagnostics & BIOS updates)
 
 ## Display Mod Compatibility Matrix

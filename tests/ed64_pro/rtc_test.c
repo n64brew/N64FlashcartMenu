@@ -1,0 +1,165 @@
+#include <acutest.h>
+#include <string.h>
+#include <time.h>
+
+#include "../../src/flashcart/ed64_pro/ed64_pro_rtc.c"
+
+static struct {
+    ed64_pro_dev_cfg_t config;
+    uint32_t ticks;
+    bool started, native_initialized, native_available, native_result;
+    rtc_source_t native_source;
+    unsigned configs, starts, stops, drains, statuses, inits, closes, source_sets;
+    int source_set_result;
+    ed64_pro_ll_error_t cfg_error, start_error, stop_error, drain_error, status_error;
+    char events[128];
+    unsigned event_count;
+} mock;
+int cart_type;
+
+static void event (char c) {
+    TEST_ASSERT(mock.event_count + 1 < sizeof(mock.events));
+    mock.events[mock.event_count++] = c;
+    mock.events[mock.event_count] = 0;
+}
+uint32_t mock_ticks_read (void) { return mock.ticks++; }
+uint64_t get_ticks (void) { return mock.ticks; }
+bool rtc_init (void) {
+    TEST_CHECK(mock.starts == 1 && mock.started);
+    event('I'); mock.inits++; mock.native_initialized = true;
+    return mock.native_result;
+}
+void rtc_close (void) { event('X'); mock.closes++; mock.native_initialized = false; }
+rtc_source_t rtc_get_source (void) { TEST_ASSERT(mock.native_initialized); return mock.native_source; }
+int rtc_set_source (rtc_source_t source) {
+    mock.source_sets++;
+    TEST_CHECK(source == RTC_SOURCE_JOYBUS && mock.native_available);
+    if (mock.source_set_result != RTC_ENOCLOCK) mock.native_source = source;
+    return mock.source_set_result;
+}
+bool rtc_is_source_available (rtc_source_t source) {
+    TEST_ASSERT(mock.native_initialized);
+    TEST_CHECK(source == RTC_SOURCE_JOYBUS);
+    return mock.native_available;
+}
+int hook_rtc_calls (rtc_hooks_t *hooks) { (void)hooks; TEST_CHECK(false); return -1; }
+int unhook_rtc_calls (rtc_hooks_t *hooks) { (void)hooks; TEST_CHECK(false); return -1; }
+
+ed64_pro_ll_error_t ed64_pro_ll_dev_set_cfg (const ed64_pro_dev_cfg_t *cfg, uint32_t deadline) {
+    event('G'); mock.configs++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); mock.config = *cfg; return mock.cfg_error;
+}
+ed64_pro_ll_error_t ed64_pro_ll_dev_start (uint32_t deadline) {
+    event('S'); mock.starts++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); mock.started = true; return mock.start_error;
+}
+ed64_pro_ll_error_t ed64_pro_ll_stop (uint32_t deadline) {
+    event('T'); mock.stops++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); mock.started = false; return mock.stop_error;
+}
+ed64_pro_ll_error_t ed64_pro_ll_drain (size_t *drained, uint32_t deadline) {
+    event('D'); mock.drains++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); *drained = 0; return mock.drain_error;
+}
+ed64_pro_ll_error_t ed64_pro_ll_check_status (ed64_pro_status_t *status, uint32_t deadline) {
+    event('C'); mock.statuses++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); *status = (ed64_pro_status_t){.key = 0x5A}; return mock.status_error;
+}
+
+static void fixture (void) {
+    mock.stop_error = mock.drain_error = mock.status_error = ED64_PRO_LL_OK;
+    ed64_pro_rtc_close();
+    /* Each fixture is a new simulated boot; production failures remain latched. */
+    pro_rtc_failed = pro_rtc_running = false;
+    pro_rtc_error = NULL;
+    memset(&mock, 0, sizeof(mock));
+    mock.native_available = mock.native_result = true;
+    mock.native_source = RTC_SOURCE_JOYBUS;
+    mock.ticks = 0xFFFFFF00u;
+    cart_type = CART_NULL;
+}
+static void test_native_services (void) {
+    fixture();
+    TEST_ASSERT(ed64_pro_rtc_init() == FLASHCART_OK);
+    TEST_CHECK(mock.config.brom_type == 0); /* Vendor ROM_OFF. */
+    TEST_CHECK(mock.config.gpak_size == 0);
+    TEST_CHECK(mock.config.rtc_mode == ED64_PRO_RTC_STD);
+    TEST_CHECK(mock.config.brm_type == ED64_PRO_BRM_OFF && mock.config.brm_size == 0);
+    TEST_CHECK(mock.config.dd_en == 0 && mock.config.gpak_wren == 0 && mock.config.gpak_key == 0);
+    for (unsigned i = 0; i < 8; i++) TEST_CHECK(mock.config.reserved[i] == 0);
+    TEST_CHECK(mock.starts == 1 && mock.inits == 1 && cart_type == CART_MAX);
+    TEST_CHECK(rtc_get_source() == RTC_SOURCE_JOYBUS && rtc_is_source_available(RTC_SOURCE_JOYBUS));
+    TEST_CHECK(ed64_pro_rtc_get_error_message() == NULL);
+    TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_OK && mock.configs == 1 && mock.starts == 1 && mock.inits == 1);
+}
+static void test_unavailable_native_clock (void) {
+    for (unsigned failure = 0; failure < 2; failure++) {
+        fixture(); mock.native_available = false;
+        mock.native_source = RTC_SOURCE_NONE;
+        if (failure) mock.native_result = false;
+        TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_OK);
+        TEST_CHECK(mock.starts == 1 && mock.stops == 0);
+        TEST_CHECK(mock.native_initialized && mock.started);
+        TEST_CHECK(rtc_get_source() == RTC_SOURCE_NONE && mock.source_sets == 0);
+        TEST_CHECK(ed64_pro_rtc_get_error_message() == NULL);
+        TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_OK);
+        TEST_CHECK(mock.stops == 1 && !mock.started && !mock.native_initialized);
+    }
+}
+static void test_invalid_native_calendar (void) {
+    fixture();
+    mock.native_result = false;
+    mock.native_source = RTC_SOURCE_NONE;
+    mock.source_set_result = RTC_EBADTIME;
+    TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_OK);
+    TEST_CHECK(mock.source_sets == 1 && rtc_get_source() == RTC_SOURCE_JOYBUS);
+    TEST_CHECK(mock.source_set_result == RTC_EBADTIME && mock.stops == 0);
+}
+static void test_init_faults (void) {
+    for (unsigned failure = 0; failure < 2; failure++) {
+        fixture();
+        switch (failure) {
+        case 0: mock.cfg_error = ED64_PRO_LL_MCU_ERROR; break;
+        case 1: mock.start_error = ED64_PRO_LL_TIMEOUT; break;
+        }
+        TEST_CHECK(ed64_pro_rtc_init() != FLASHCART_OK);
+        TEST_CHECK(mock.configs <= 1 && mock.starts <= 1 && mock.inits == 0);
+        TEST_CHECK(ed64_pro_rtc_get_error_message() != NULL);
+        unsigned configs = mock.configs, starts = mock.starts;
+        const char *error = ed64_pro_rtc_get_error_message();
+        TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_ERR_INT);
+        TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_ERR_INT);
+        TEST_CHECK(mock.configs == configs && mock.starts == starts && ed64_pro_rtc_get_error_message() == error);
+    }
+}
+static void test_close_order (void) {
+    fixture(); TEST_ASSERT(ed64_pro_rtc_init() == FLASHCART_OK);
+    mock.event_count = 0; mock.events[0] = 0;
+    TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_OK);
+    TEST_CHECK(mock.events[0] == 'X');
+    TEST_CHECK(strstr(mock.events, "TDC") != NULL);
+    TEST_CHECK(!mock.native_initialized && !mock.started);
+    unsigned stops = mock.stops;
+    TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_OK && mock.stops == stops);
+}
+static void test_close_faults (void) {
+    for (unsigned failure = 0; failure < 3; failure++) {
+        fixture(); TEST_ASSERT(ed64_pro_rtc_init() == FLASHCART_OK);
+        switch (failure) {
+        case 0: mock.stop_error = ED64_PRO_LL_TIMEOUT; break;
+        case 1: mock.drain_error = ED64_PRO_LL_TIMEOUT; break;
+        case 2: mock.status_error = ED64_PRO_LL_FRAME; break;
+        }
+        TEST_CHECK(ed64_pro_rtc_close() != FLASHCART_OK);
+        TEST_CHECK(!mock.native_initialized);
+        TEST_CHECK(ed64_pro_rtc_get_error_message() != NULL);
+        unsigned stops = mock.stops, configs = mock.configs;
+        TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_ERR_INT);
+        TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_ERR_INT);
+        TEST_CHECK(mock.stops == stops && mock.configs == configs); /* Never retry an ambiguous shutdown. */
+    }
+}
+TEST_LIST = {
+    {"native RTC starts only compatible services before native detection", test_native_services},
+    {"unavailable native clock preserves services until shutdown", test_unavailable_native_clock},
+    {"genuine invalid-calendar RTC keeps native source and error", test_invalid_native_calendar},
+    {"configuration and start failures do not publish RTC", test_init_faults},
+    {"RTC closes before STOP and shutdown is idempotent", test_close_order},
+    {"failed shutdown clears native state without retrying writes", test_close_faults},
+    {NULL, NULL},
+};

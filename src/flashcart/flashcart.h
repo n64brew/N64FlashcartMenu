@@ -82,6 +82,11 @@ typedef struct {
     flashcart_err_t (*deinit) (void);
     /** @brief The flashcart feature function */
     bool (*has_feature) (flashcart_features_t feature);
+    /**
+     * @brief Optional display name for cartridges detected outside libcart.
+     * NULL keeps the display name based on libcart's cartridge type.
+     */
+    const char *(*get_name)(void);
     /** @brief The flashcart firmware version function */
     flashcart_firmware_version_t (*get_firmware_version) (void);
     /** @brief The flashcart ROM load function */
@@ -98,6 +103,8 @@ typedef struct {
     flashcart_err_t (*load_64dd_disks) (char *disk_path, flashcart_disk_parameters_t *disk_parameters, char **swap_disk_paths, int swap_disk_count);
     /** @brief Query hardware button state if supported by flashcart. */
     flashcart_err_t (*get_button_state) (bool *pressed);
+    /** @brief Query supply voltage if supported, independently of temperature. */
+    flashcart_err_t (*get_voltage) (uint16_t *voltage_mv);
     /** @brief Query realtime voltage/temperature diagnostic data if supported. */
     flashcart_err_t (*get_voltage_temperature) (uint16_t *voltage_mv, int16_t *temperature_deci_c);
     /** @brief The flashcart set save type function */
@@ -106,6 +113,8 @@ typedef struct {
     flashcart_err_t (*set_save_writeback) (char *save_path);
     /** @brief The flashcart set boot mode function */
     flashcart_err_t (*set_next_boot_mode) (flashcart_reboot_mode_t boot_mode);
+    /** @brief Optional error detail from retained state; NULL uses the generic message. Must not perform I/O. */
+    char *(*get_error_message)(flashcart_err_t err);
 } flashcart_t;
 
 /**
@@ -145,6 +154,14 @@ bool flashcart_has_feature (flashcart_features_t feature);
  * @return flashcart_firmware_version_t The firmware version.
  */
 flashcart_firmware_version_t flashcart_get_firmware_version (void);
+
+/**
+ * @brief Return the backend's cartridge display name, or NULL if none is provided.
+ *
+ * Backends detected outside libcart can provide a name for display in Settings.
+ * Callers can fall back to libcart's cartridge type when no name is provided.
+ */
+const char *flashcart_get_name (void);
 
 /**
  * @brief Load a ROM onto the flashcart.
@@ -218,6 +235,21 @@ bool flashcart_has_button_state (void);
  * @return flashcart_err_t Result code.
  */
 flashcart_err_t flashcart_get_button_state (bool *pressed);
+
+/**
+ * @brief Check whether supply voltage can be queried, with or without temperature.
+ *
+ * @return bool True when either voltage callback is supported.
+ */
+bool flashcart_has_voltage (void);
+
+/**
+ * @brief Get supply voltage, preferring the voltage-only callback when available.
+ *
+ * @param voltage_mv Output voltage in millivolts.
+ * @return flashcart_err_t Result code.
+ */
+flashcart_err_t flashcart_get_voltage (uint16_t *voltage_mv);
 
 /**
  * @brief Check whether realtime voltage/temperature diagnostics are supported.

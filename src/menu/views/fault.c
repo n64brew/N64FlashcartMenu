@@ -9,7 +9,8 @@ static void draw (menu_t *menu, surface_t *d) {
     const char *firmware_message = (
         "Minimum supported firmware versions:\n"
         "64drive: 2.05+\n"
-        "EverDrive-64: ???+\n"
+        "EverDrive-64 V/X series: ???+\n"
+        "EverDrive-64 Pro: 26.1014+\n"
         "SummerCart64: 2.17.0+"
     );
 
