@@ -18,10 +18,11 @@
 #include "sound.h"
 #include "usb_comm.h"
 #include "utils/utils.h"
+#include "views/views.h"
 
 #define MAX_FILE_SIZE   MiB(4)
 
-// File commands (list-dir, stat, get-file, put-file, free-space)
+// File commands (list-dir, stat, get-file, put-file, make-dir, rename, free-space)
 //
 // These let a USB host manage the files on the SD card while the menu is running.
 // Arguments are NUL terminated so paths may contain spaces; numbers are decimal and end with a space.
@@ -396,6 +397,52 @@ static void command_put_file (menu_t *menu) {
 }
 
 /**
+ * @brief Make a directory.
+ *
+ * Arguments: <path>\0.
+ *
+ * @param menu Pointer to the menu structure.
+ */
+static void command_make_dir (menu_t *menu) {
+    char path[MAX_PATH_LENGTH];
+
+    if (usb_comm_read_string(path, sizeof(path), '\0')) {
+        return usb_comm_send_result(FR_INVALID_PARAMETER);
+    }
+
+    FRESULT result = f_mkdir(path);
+
+    menu->browser.reload = true;
+    view_grid_library_changed();
+
+    usb_comm_send_result(result);
+}
+
+/**
+ * @brief Rename or move a file or directory.
+ *
+ * Arguments: <old path>\0<new path>\0.
+ *
+ * @param menu Pointer to the menu structure.
+ */
+static void command_rename (menu_t *menu) {
+    char old_path[MAX_PATH_LENGTH];
+    char new_path[MAX_PATH_LENGTH];
+
+    if (usb_comm_read_string(old_path, sizeof(old_path), '\0') ||
+        usb_comm_read_string(new_path, sizeof(new_path), '\0')) {
+        return usb_comm_send_result(FR_INVALID_PARAMETER);
+    }
+
+    FRESULT result = f_rename(old_path, new_path);
+
+    menu->browser.reload = true;
+    view_grid_library_changed();
+
+    usb_comm_send_result(result);
+}
+
+/**
  * @brief Get the size of the SD card and the free space.
  *
  * The data is one line: "<total bytes> <free bytes>".
@@ -433,6 +480,8 @@ static usb_comm_command_t commands[] = {
     { .id = "stat", .op = command_stat },
     { .id = "get-file", .op = command_send_file },
     { .id = "put-file", .op = command_put_file },
+    { .id = "make-dir", .op = command_make_dir },
+    { .id = "rename", .op = command_rename },
     { .id = "free-space", .op = command_free_space },
     { .id = NULL },
 };
