@@ -57,7 +57,6 @@ Additional modes use the same Makefile and separate build/output directories:
 | Injected write failure and refused handoff | `-DED64_PRO_TEST_STORAGE -DED64_PRO_TEST_STORAGE_FAIL_WRITE -DED64_PRO_TEST_FAIL_WRITE_N=1` |
 | Oversized ROM rejection | `-DED64_PRO_TEST_LOAD -DED64_PRO_TEST_OVERSIZE` |
 | 8/32/64 MiB load timing | `-DED64_PRO_TEST_LOAD -DED64_PRO_TEST_LOAD_TIMING` |
-| Injected PI timeout | `-DED64_PRO_TEST_FORCE_TIMEOUT` |
 
 Diagnostics mode repeats complete `read.bin` checks for at least five seconds
 while polling the actual voltage and button callbacks between read chunks. It

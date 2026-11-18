@@ -1007,9 +1007,6 @@ int main (void) {
     ed64_pro_ll_error_t error = ed64_pro_init_transport();
     screen_init();
     print_identity();
-#ifdef ED64_PRO_TEST_FORCE_TIMEOUT
-    printf("Software PI-completion timeout injection build\n");
-#endif
     if (error != ED64_PRO_LL_OK) {
         printf("\n%s\n", ed64_pro_get_error_message());
         print_init_metrics();
