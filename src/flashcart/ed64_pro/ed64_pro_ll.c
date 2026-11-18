@@ -14,7 +14,6 @@
 static uint32_t pro_staging[ED64_PRO_FIFO_CHUNK] __attribute__((aligned(512)));
 
 static struct {
-    ed64_pro_ll_transaction_t *owner;
     ed64_pro_ll_failure_t failure;
     size_t transferred;
     uint32_t id;
@@ -46,15 +45,6 @@ typedef enum {
 } pro_command_t;
 
 /**
- * @brief Allow transport only in an interrupt-enabled, non-kernel foreground context.
- */
-static bool pro_context_valid (void) {
-    uint32_t sr = C0_STATUS();
-    return get_interrupts_state() == INTERRUPTS_ENABLED && (sr & C0_STATUS_IE) &&
-           !(sr & (C0_STATUS_EXL | C0_STATUS_ERL)) && kthread_current() == NULL;
-}
-
-/**
  * @brief Check whether an absolute CP0 deadline has expired.
  */
 static bool pro_expired (uint32_t deadline) {
@@ -72,13 +62,6 @@ uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t timeout_ms) {
 }
 
 /**
- * @brief Clamp a phase deadline to the owning transaction's whole-attempt deadline.
- */
-static uint32_t pro_deadline (const ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
-    return (int32_t)(transaction->deadline - deadline) < 0 ? transaction->deadline : deadline;
-}
-
-/**
  * @brief Latch the first protocol fault with confirmed RX progress and MCU status.
  */
 static ed64_pro_ll_error_t pro_fail (ed64_pro_ll_error_t error) {
@@ -93,64 +76,6 @@ static ed64_pro_ll_error_t pro_fail (ed64_pro_ll_error_t error) {
         };
     }
     return pro_ll.failure.code;
-}
-
-/**
- * @brief Reject invalid context or ownership before returning any latched transport fault.
- */
-static ed64_pro_ll_error_t pro_owned (ed64_pro_ll_transaction_t *transaction) {
-    if (!transaction) {
-        return ED64_PRO_LL_ARGUMENT;
-    }
-    if (!pro_context_valid()) {
-        return ED64_PRO_LL_CONTEXT;
-    }
-    if (pro_ll.owner != transaction) {
-        return ED64_PRO_LL_BUSY;
-    }
-    return pro_ll.failure.code;
-}
-
-/**
- * @brief Acquire exclusive foreground ownership without retrying a latched transport fault.
- *
- * The transaction's address is its token and must stay valid through end.
- * Interrupts must already be enabled; ISR and kernel callers are unsupported.
- */
-ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
-    if (!transaction) {
-        return ED64_PRO_LL_ARGUMENT;
-    }
-    if (!pro_context_valid()) {
-        return ED64_PRO_LL_CONTEXT;
-    }
-
-    ed64_pro_ll_error_t error = pro_ll.failure.code;
-    if (pro_ll.owner) {
-        error = ED64_PRO_LL_BUSY;
-    } else if (error == ED64_PRO_LL_OK) {
-        transaction->deadline = deadline;
-        pro_ll.owner = transaction;
-        pro_ll.transferred = 0;
-    }
-    return error;
-}
-
-/**
- * @brief Release ownership without clearing transport faults; all accesses have completed.
- */
-ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
-    if (!transaction) {
-        return ED64_PRO_LL_ARGUMENT;
-    }
-    if (!pro_context_valid()) {
-        return ED64_PRO_LL_CONTEXT;
-    }
-    if (pro_ll.owner != transaction) {
-        return ED64_PRO_LL_BUSY;
-    }
-    pro_ll.owner = NULL;
-    return ED64_PRO_LL_OK;
 }
 
 /**
@@ -190,14 +115,12 @@ static bool pro_readable_reg (ed64_pro_reg_t reg) {
  * for completion; protocol deadlines cannot interrupt that hardware wait.
  */
 static ed64_pro_ll_error_t pro_fifo_transfer (
-    ed64_pro_ll_transaction_t *transaction,
     size_t length,
     bool write,
     uint32_t deadline
 ) {
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
+    if (pro_ll.failure.code != ED64_PRO_LL_OK) {
+        return pro_ll.failure.code;
     }
     if (length == 0 || length > sizeof(pro_staging) || length % sizeof(uint32_t) != 0) {
         return ED64_PRO_LL_ARGUMENT;
@@ -205,7 +128,6 @@ static ed64_pro_ll_error_t pro_fifo_transfer (
     if (!pro_ll.identified) {
         return ED64_PRO_LL_NOT_IDENTIFIED;
     }
-    deadline = pro_deadline(transaction, deadline);
     if (pro_expired(deadline)) {
         return pro_fail(ED64_PRO_LL_TIMEOUT);
     }
@@ -231,18 +153,16 @@ static ed64_pro_ll_error_t pro_fifo_transfer (
  * The first completed EDID read caches the Pro family/device identification.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_read_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg, uint32_t *value, uint32_t deadline) {
+ed64_pro_ll_read_reg (ed64_pro_reg_t reg, uint32_t *value, uint32_t deadline) {
     if (!value || !pro_readable_reg(reg)) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
+    if (pro_ll.failure.code != ED64_PRO_LL_OK) {
+        return pro_ll.failure.code;
     }
     if (!pro_ll.identified && (pro_ll.probed || reg != ED64_PRO_REG_EDID)) {
         return ED64_PRO_LL_NOT_IDENTIFIED;
     }
-    deadline = pro_deadline(transaction, deadline);
     if (pro_expired(deadline)) {
         return pro_fail(ED64_PRO_LL_TIMEOUT);
     }
@@ -257,13 +177,12 @@ ed64_pro_ll_read_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg
 }
 
 /**
- * @brief Permit only the mailbox zero/NOP write after ownership and Pro identification checks.
+ * @brief Permit only the mailbox zero/NOP write after Pro identification.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_write_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg, uint32_t value, uint32_t deadline) {
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
+ed64_pro_ll_write_reg (ed64_pro_reg_t reg, uint32_t value, uint32_t deadline) {
+    if (pro_ll.failure.code != ED64_PRO_LL_OK) {
+        return pro_ll.failure.code;
     }
     if (reg != ED64_PRO_REG_MBX || value != 0) {
         return ED64_PRO_LL_ARGUMENT;
@@ -271,7 +190,6 @@ ed64_pro_ll_write_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t re
     if (!pro_ll.identified) {
         return ED64_PRO_LL_NOT_IDENTIFIED;
     }
-    deadline = pro_deadline(transaction, deadline);
     if (pro_expired(deadline)) {
         return pro_fail(ED64_PRO_LL_TIMEOUT);
     }
@@ -285,17 +203,10 @@ ed64_pro_ll_write_reg (ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t re
  * @brief Cache one passive EDID read without ever classifying an I/O failure as absence.
  */
 ed64_pro_probe_t ed64_pro_ll_probe (uint32_t deadline) {
-    ed64_pro_ll_transaction_t transaction;
-    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
-    if (error == ED64_PRO_LL_OK) {
-        if (!pro_ll.probed) {
-            uint32_t id;
-            error = ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &id, deadline);
-        }
-        ed64_pro_ll_error_t release_error = ed64_pro_ll_end(&transaction);
-        if (error == ED64_PRO_LL_OK) {
-            error = release_error;
-        }
+    ed64_pro_ll_error_t error = pro_ll.failure.code;
+    if (error == ED64_PRO_LL_OK && !pro_ll.probed) {
+        uint32_t id;
+        error = ed64_pro_ll_read_reg(ED64_PRO_REG_EDID, &id, deadline);
     }
     return (ed64_pro_probe_t){
         .outcome = error != ED64_PRO_LL_OK ? ED64_PRO_PROBE_IO_ERROR
@@ -311,9 +222,9 @@ ed64_pro_probe_t ed64_pro_ll_probe (uint32_t deadline) {
  * @brief Read the low-16-bit RX count, track its peak, and reject implausible FIFO capacity.
  */
 static ed64_pro_ll_error_t
-pro_fifo_available (ed64_pro_ll_transaction_t *transaction, uint32_t *available, uint32_t deadline) {
+pro_fifo_available (uint32_t *available, uint32_t deadline) {
     uint32_t value;
-    ed64_pro_ll_error_t error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_FIFOSTAT, &value, deadline);
+    ed64_pro_ll_error_t error = ed64_pro_ll_read_reg(ED64_PRO_REG_FIFOSTAT, &value, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
@@ -334,22 +245,17 @@ pro_fifo_available (ed64_pro_ll_transaction_t *transaction, uint32_t *available,
  * Zero length is a no-op.
  */
 static ed64_pro_ll_error_t
-pro_fifo_read (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size_t length, uint32_t deadline) {
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
+pro_fifo_read (uint8_t *output, size_t length, uint32_t deadline) {
     if (length > ED64_PRO_FIFO_LIMIT || (length && !output)) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    deadline = pro_deadline(transaction, deadline);
     pro_ll.transferred = 0;
     while (pro_ll.transferred < length) {
         if (pro_expired(deadline)) {
             return pro_fail(ED64_PRO_LL_TIMEOUT);
         }
         uint32_t available;
-        error = pro_fifo_available(transaction, &available, deadline);
+        ed64_pro_ll_error_t error = pro_fifo_available(&available, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -363,7 +269,7 @@ pro_fifo_read (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size_t l
         if (chunk > ED64_PRO_FIFO_CHUNK) {
             chunk = ED64_PRO_FIFO_CHUNK;
         }
-        error = pro_fifo_transfer(transaction, chunk * sizeof(uint32_t), false, deadline);
+        error = pro_fifo_transfer(chunk * sizeof(uint32_t), false, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -381,22 +287,18 @@ pro_fifo_read (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size_t l
  * Intended only for initial and post-stop cleanup. Continuous refill cannot
  * restart the deadline, and the output count is published only on success.
  */
-ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, size_t *drained, uint32_t deadline) {
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
+ed64_pro_ll_error_t ed64_pro_ll_drain (size_t *drained, uint32_t deadline) {
     if (!drained) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_DRAIN_TIMEOUT_MS);
+    deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_DRAIN_TIMEOUT_MS);
     pro_ll.transferred = 0;
     for (;;) {
         if (pro_expired(deadline)) {
             return pro_fail(ED64_PRO_LL_TIMEOUT);
         }
         uint32_t available;
-        error = pro_fifo_available(transaction, &available, deadline);
+        ed64_pro_ll_error_t error = pro_fifo_available(&available, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -408,7 +310,7 @@ ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, s
             return pro_fail(ED64_PRO_LL_DRAIN_LIMIT);
         }
         size_t chunk = available < ED64_PRO_FIFO_CHUNK ? available : ED64_PRO_FIFO_CHUNK;
-        error = pro_fifo_transfer(transaction, chunk * sizeof(uint32_t), false, deadline);
+        error = pro_fifo_transfer(chunk * sizeof(uint32_t), false, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -417,12 +319,11 @@ ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, s
 }
 
 /**
- * @brief Send a frame for an allowed command and subcommand through the FIFO.
+ * @brief Send a typed command frame through the FIFO.
  *
  * Only typed builders may select protocol operations.
  */
 static ed64_pro_ll_error_t pro_send_frame (
-    ed64_pro_ll_transaction_t *transaction,
     pro_command_t command,
     int subcommand,
     const void *payload,
@@ -432,20 +333,6 @@ static ed64_pro_ll_error_t pro_send_frame (
     size_t header_length = subcommand < 0 ? 4 : 5;
     if (payload_length > ED64_PRO_FRAME_MAX - header_length || (payload_length && !payload)) {
         return ED64_PRO_LL_ARGUMENT;
-    }
-    bool selected =
-        (command == PRO_CMD_STATUS && subcommand == -1) || (command == PRO_CMD_NRESP && subcommand == -1) ||
-        ((command == PRO_CMD_STOP || command == PRO_CMD_SD_INIT || command == PRO_CMD_SYS) && subcommand == 0x10) ||
-        (command == PRO_CMD_EPO && (subcommand == 0x10 || subcommand == 0x11)) ||
-        (command == PRO_CMD_RTC && subcommand == 0x10) ||
-        (command == PRO_CMD_DEV &&
-         (subcommand == 0x11 || subcommand == 0x20 || subcommand == 0x21 || subcommand == 0x28));
-    if (!selected) {
-        return ED64_PRO_LL_ARGUMENT;
-    }
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
     }
     if (!pro_ll.identified) {
         return ED64_PRO_LL_NOT_IDENTIFIED;
@@ -463,7 +350,7 @@ static ed64_pro_ll_error_t pro_send_frame (
             size_t index = offset + i;
             pro_staging[i] = index < header_length ? header[index] : bytes[index - header_length];
         }
-        error = pro_fifo_transfer(transaction, chunk * sizeof(uint32_t), true, deadline);
+        ed64_pro_ll_error_t error = pro_fifo_transfer(chunk * sizeof(uint32_t), true, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -476,22 +363,15 @@ static ed64_pro_ll_error_t pro_send_frame (
  * @brief Send a status, stop, or SD initialization command without a payload.
  */
 static ed64_pro_ll_error_t
-pro_send_command (ed64_pro_ll_transaction_t *transaction, pro_command_t command, uint32_t deadline) {
-    if (command != PRO_CMD_STATUS && command != PRO_CMD_STOP && command != PRO_CMD_SD_INIT) {
-        return ED64_PRO_LL_ARGUMENT;
-    }
-    return pro_send_frame(transaction, command, command == PRO_CMD_STATUS ? -1 : 0x10, NULL, 0, deadline);
+pro_send_command (pro_command_t command, uint32_t deadline) {
+    return pro_send_frame(command, command == PRO_CMD_STATUS ? -1 : 0x10, NULL, 0, deadline);
 }
 
 /**
  * @brief Write bytes to the FIFO in staging-sized chunks within the deadline.
  */
 static ed64_pro_ll_error_t
-pro_fifo_write (ed64_pro_ll_transaction_t *transaction, const uint8_t *input, size_t length, uint32_t deadline) {
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
+pro_fifo_write (const uint8_t *input, size_t length, uint32_t deadline) {
     if (length && !input) {
         return ED64_PRO_LL_ARGUMENT;
     }
@@ -503,7 +383,7 @@ pro_fifo_write (ed64_pro_ll_transaction_t *transaction, const uint8_t *input, si
         for (size_t i = 0; i < chunk; i++) {
             pro_staging[i] = input[offset + i];
         }
-        error = pro_fifo_transfer(transaction, chunk * sizeof(uint32_t), true, deadline);
+        ed64_pro_ll_error_t error = pro_fifo_transfer(chunk * sizeof(uint32_t), true, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -515,9 +395,9 @@ pro_fifo_write (ed64_pro_ll_transaction_t *transaction, const uint8_t *input, si
 /**
  * @brief Reject unexpected data remaining in the receive FIFO.
  */
-static ed64_pro_ll_error_t pro_assert_idle (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
+static ed64_pro_ll_error_t pro_assert_idle (uint32_t deadline) {
     uint32_t available = 0;
-    ed64_pro_ll_error_t error = pro_fifo_available(transaction, &available, deadline);
+    ed64_pro_ll_error_t error = pro_fifo_available(&available, deadline);
     if (error == ED64_PRO_LL_OK && available) {
         return pro_fail(ED64_PRO_LL_TRAILING_DATA);
     }
@@ -531,39 +411,34 @@ static ed64_pro_ll_error_t pro_assert_idle (ed64_pro_ll_transaction_t *transacti
  * after a complete four-byte reply within the original deadline.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
+ed64_pro_ll_read_status (ed64_pro_status_t *status, uint32_t deadline) {
     if (!status) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    deadline = pro_deadline(transaction, deadline);
     pro_ll.transferred = 0;
     pro_ll.status_valid = false;
     pro_ll.nresp_valid = false;
     uint32_t available;
-    error = pro_fifo_available(transaction, &available, deadline);
+    ed64_pro_ll_error_t error = pro_fifo_available(&available, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     if (available) {
         return pro_fail(ED64_PRO_LL_TRAILING_DATA);
     }
-    error = pro_send_command(transaction, PRO_CMD_STATUS, deadline);
+    error = pro_send_command(PRO_CMD_STATUS, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     uint8_t reply[4];
-    error = pro_fifo_read(transaction, reply, sizeof(reply), deadline);
+    error = pro_fifo_read(reply, sizeof(reply), deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     if (reply[0] != 0x5A) {
         return pro_fail(ED64_PRO_LL_FRAME);
     }
-    error = pro_fifo_available(transaction, &available, deadline);
+    error = pro_fifo_available(&available, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
@@ -584,20 +459,16 @@ ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status
 /**
  * @brief Clear the mailbox, send STOP, and require two consecutive matching READY samples.
  *
- * All polls share the original capped stop/transaction deadline.
+ * All polls share the original stop deadline.
  */
-ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
-    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_STOP_TIMEOUT_MS);
+ed64_pro_ll_error_t ed64_pro_ll_stop (uint32_t deadline) {
+    deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_STOP_TIMEOUT_MS);
     pro_ll.transferred = 0;
-    error = ed64_pro_ll_write_reg(transaction, ED64_PRO_REG_MBX, 0, deadline);
+    ed64_pro_ll_error_t error = ed64_pro_ll_write_reg(ED64_PRO_REG_MBX, 0, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    error = pro_send_command(transaction, PRO_CMD_STOP, deadline);
+    error = pro_send_command(PRO_CMD_STOP, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
@@ -606,11 +477,11 @@ ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, ui
             return pro_fail(ED64_PRO_LL_MAILBOX_TIMEOUT);
         }
         uint32_t first, second;
-        error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_MBX, &first, deadline);
+        error = ed64_pro_ll_read_reg(ED64_PRO_REG_MBX, &first, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
-        error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_MBX, &second, deadline);
+        error = ed64_pro_ll_read_reg(ED64_PRO_REG_MBX, &second, deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
@@ -624,11 +495,11 @@ ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, ui
  * @brief Require zero fresh MCU status, retaining the completed frame on MCU_ERROR.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
-    ed64_pro_ll_error_t error = ed64_pro_ll_read_status(transaction, status, deadline);
+ed64_pro_ll_check_status (ed64_pro_status_t *status, uint32_t deadline) {
+    ed64_pro_ll_error_t error = ed64_pro_ll_read_status(status, deadline);
     if (error == ED64_PRO_LL_OK && status->mcu_status != 0) {
         uint8_t detail;
-        error = ed64_pro_ll_read_nresp(transaction, status->mcu_status, &detail, deadline);
+        error = ed64_pro_ll_read_nresp(status->mcu_status, &detail, deadline);
         if (error == ED64_PRO_LL_OK) {
             error = pro_fail(ED64_PRO_LL_MCU_ERROR);
         }
@@ -642,48 +513,40 @@ ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_statu
  * The complete status frame is also published when the MCU reports an error.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
+ed64_pro_ll_init_sd (ed64_pro_status_t *status, uint32_t deadline) {
     if (!status) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_SD_TIMEOUT_MS);
-    error = pro_send_command(transaction, PRO_CMD_SD_INIT, deadline);
+    deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_SD_TIMEOUT_MS);
+    ed64_pro_ll_error_t error = pro_send_command(PRO_CMD_SD_INIT, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    return ed64_pro_ll_check_status(transaction, status, deadline);
+    return ed64_pro_ll_check_status(status, deadline);
 }
 
 /**
  * @brief Read and retain the detail byte for the current nonzero MCU status.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_read_nresp (ed64_pro_ll_transaction_t *transaction, uint8_t category, uint8_t *detail, uint32_t deadline) {
+ed64_pro_ll_read_nresp (uint8_t category, uint8_t *detail, uint32_t deadline) {
     if (!detail || !category || !pro_ll.status_valid || pro_ll.status != category || pro_ll.nresp_valid) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    ed64_pro_ll_error_t error = pro_owned(transaction);
+    ed64_pro_ll_error_t error = pro_assert_idle(deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    error = pro_assert_idle(transaction, deadline);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
-    error = pro_send_frame(transaction, PRO_CMD_NRESP, -1, &category, 1, deadline);
+    error = pro_send_frame(PRO_CMD_NRESP, -1, &category, 1, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     uint8_t reply;
-    error = pro_fifo_read(transaction, &reply, 1, deadline);
+    error = pro_fifo_read(&reply, 1, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    error = pro_assert_idle(transaction, deadline);
+    error = pro_assert_idle(deadline);
     if (error == ED64_PRO_LL_OK) {
         pro_ll.nresp = reply;
         pro_ll.nresp_valid = true;
@@ -698,34 +561,30 @@ ed64_pro_ll_read_nresp (ed64_pro_ll_transaction_t *transaction, uint8_t category
  * Production clock reads and writes use native libdragon RTC integration.
  */
 ed64_pro_ll_error_t ed64_pro_ll_rtc_get (
-    ed64_pro_ll_transaction_t *transaction,
     uint8_t output[ED64_PRO_RTC_SIZE],
     uint32_t deadline
 ) {
     if (!output) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
-    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_STATUS_TIMEOUT_MS);
+    deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_STATUS_TIMEOUT_MS);
     pro_ll.status_valid = false;
     pro_ll.nresp_valid = false;
-    error = pro_assert_idle(transaction, deadline);
+    pro_ll.transferred = 0;
+    ed64_pro_ll_error_t error = pro_assert_idle(deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    error = pro_send_frame(transaction, PRO_CMD_RTC, 0x10, NULL, 0, deadline);
+    error = pro_send_frame(PRO_CMD_RTC, 0x10, NULL, 0, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     uint8_t reply[ED64_PRO_RTC_SIZE];
-    error = pro_fifo_read(transaction, reply, sizeof(reply), deadline);
+    error = pro_fifo_read(reply, sizeof(reply), deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    error = pro_assert_idle(transaction, deadline);
+    error = pro_assert_idle(deadline);
     if (error == ED64_PRO_LL_OK) {
         memcpy(output, reply, sizeof(reply));
     }
@@ -746,7 +605,6 @@ static void pro_put_u32 (uint8_t *output, uint32_t value) {
  * @brief Read selected firmware, maximum ROM size, or 3.3 V supply values.
  */
 ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
-    ed64_pro_ll_transaction_t *transaction,
     const uint32_t *ids,
     uint32_t *values,
     size_t count,
@@ -764,24 +622,21 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
         }
         pro_put_u32(&payload[1 + i * 4], ids[i]);
     }
-    ed64_pro_ll_error_t error = pro_owned(transaction);
+    pro_ll.transferred = 0;
+    ed64_pro_ll_error_t error = pro_assert_idle(deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    error = pro_assert_idle(transaction, deadline);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
-    error = pro_send_frame(transaction, PRO_CMD_SYS, 0x10, payload, 1 + count * 4, deadline);
+    error = pro_send_frame(PRO_CMD_SYS, 0x10, payload, 1 + count * 4, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     uint8_t reply[8];
-    error = pro_fifo_read(transaction, reply, count * 4, deadline);
+    error = pro_fifo_read(reply, count * 4, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    error = pro_assert_idle(transaction, deadline);
+    error = pro_assert_idle(deadline);
     if (error == ED64_PRO_LL_OK) {
         for (size_t i = 0; i < count; i++) {
             const uint8_t *value = &reply[i * 4];
@@ -795,7 +650,7 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
  * @brief Request and read FIFO data in acknowledged blocks.
  */
 static inline ed64_pro_ll_error_t
-pro_fifo_read_ack (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size_t length, uint32_t deadline) {
+pro_fifo_read_ack (uint8_t *output, size_t length, uint32_t deadline) {
     if (length && !output) {
         return ED64_PRO_LL_ARGUMENT;
     }
@@ -805,9 +660,9 @@ pro_fifo_read_ack (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size
             block = ED64_PRO_ACK_BLOCK;
         }
         const uint8_t ack = 0;
-        ed64_pro_ll_error_t error = pro_fifo_write(transaction, &ack, 1, deadline);
+        ed64_pro_ll_error_t error = pro_fifo_write(&ack, 1, deadline);
         if (error == ED64_PRO_LL_OK) {
-            error = pro_fifo_read(transaction, output + offset, block, deadline);
+            error = pro_fifo_read(output + offset, block, deadline);
         }
         if (error != ED64_PRO_LL_OK) {
             return error;
@@ -821,7 +676,6 @@ pro_fifo_read_ack (ed64_pro_ll_transaction_t *transaction, uint8_t *output, size
  * @brief Wait for each block acknowledgment before writing FIFO data.
  */
 static inline ed64_pro_ll_error_t pro_fifo_write_ack (
-    ed64_pro_ll_transaction_t *transaction,
     const uint8_t *input,
     size_t length,
     bool fail_after_block,
@@ -836,9 +690,9 @@ static inline ed64_pro_ll_error_t pro_fifo_write_ack (
             block = ED64_PRO_ACK_BLOCK;
         }
         uint8_t ack;
-        ed64_pro_ll_error_t error = pro_fifo_read(transaction, &ack, 1, deadline);
+        ed64_pro_ll_error_t error = pro_fifo_read(&ack, 1, deadline);
         if (error == ED64_PRO_LL_OK) {
-            error = pro_fifo_write(transaction, input + offset, block, deadline);
+            error = pro_fifo_write(input + offset, block, deadline);
         }
         if (error != ED64_PRO_LL_OK) {
             return error;
@@ -855,20 +709,19 @@ static inline ed64_pro_ll_error_t pro_fifo_write_ack (
  * @brief Send a raw SD transfer command for the requested sectors and direction.
  */
 static ed64_pro_ll_error_t
-pro_sd_xfer (ed64_pro_ll_transaction_t *transaction, uint32_t lba, uint32_t count, bool write, uint32_t deadline) {
+pro_sd_xfer (uint32_t lba, uint32_t count, bool write, uint32_t deadline) {
     uint8_t payload[17] = {0};
     pro_put_u32(&payload[write ? 4 : 0], lba);
     pro_put_u32(&payload[8], count * 512);
     payload[12] = write ? 0x11 : 0x19;
     payload[13] = write ? 0x19 : 0x11;
-    return pro_send_frame(transaction, PRO_CMD_EPO, 0x10, payload, sizeof(payload), deadline);
+    return pro_send_frame(PRO_CMD_EPO, 0x10, payload, sizeof(payload), deadline);
 }
 
 /**
  * @brief Transfer SD sectors through the FIFO and validate the final MCU status.
  */
 static ed64_pro_ll_error_t pro_sd_transfer (
-    ed64_pro_ll_transaction_t *transaction,
     void *buffer,
     uint32_t lba,
     uint32_t count,
@@ -878,29 +731,26 @@ static ed64_pro_ll_error_t pro_sd_transfer (
     if (!buffer || !count || count > 64 || count - 1 > UINT32_MAX - lba) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
-    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_IO_TIMEOUT_MS);
+    deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_IO_TIMEOUT_MS);
     pro_ll.status_valid = false;
     pro_ll.nresp_valid = false;
-    error = pro_assert_idle(transaction, deadline);
+    pro_ll.transferred = 0;
+    ed64_pro_ll_error_t error = pro_assert_idle(deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     if (write) {
         const uint8_t key[] = {0xDE, 0xAD, 0xBE, 0xEF};
-        error = pro_send_frame(transaction, PRO_CMD_EPO, 0x11, key, sizeof(key), deadline);
+        error = pro_send_frame(PRO_CMD_EPO, 0x11, key, sizeof(key), deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
-        error = pro_assert_idle(transaction, deadline);
+        error = pro_assert_idle(deadline);
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
     }
-    error = pro_sd_xfer(transaction, lba, count, write, deadline);
+    error = pro_sd_xfer(lba, count, write, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
@@ -911,47 +761,44 @@ static ed64_pro_ll_error_t pro_sd_transfer (
 #ifdef ED64_PRO_TEST_FAIL_WRITE_N
     fail_after_block = fail_write;
 #endif
-    error = write ? pro_fifo_write_ack(transaction, buffer, count * 512, fail_after_block, deadline)
-                  : pro_fifo_read_ack(transaction, buffer, count * 512, deadline);
+    error = write ? pro_fifo_write_ack(buffer, count * 512, fail_after_block, deadline)
+                  : pro_fifo_read_ack(buffer, count * 512, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     ed64_pro_status_t status;
-    return ed64_pro_ll_check_status(transaction, &status, deadline);
+    return ed64_pro_ll_check_status(&status, deadline);
 }
 
 /**
  * @brief Read SD sectors into the caller buffer through the FIFO.
  */
 ed64_pro_ll_error_t ed64_pro_ll_sd_read (
-    ed64_pro_ll_transaction_t *transaction,
     void *output,
     uint32_t lba,
     uint32_t count,
     uint32_t deadline
 ) {
-    return pro_sd_transfer(transaction, output, lba, count, false, deadline);
+    return pro_sd_transfer(output, lba, count, false, deadline);
 }
 
 /**
  * @brief Write SD sectors from the caller buffer through the FIFO.
  */
 ed64_pro_ll_error_t ed64_pro_ll_sd_write (
-    ed64_pro_ll_transaction_t *transaction,
     const void *input,
     uint32_t lba,
     uint32_t count,
     uint32_t deadline
 ) {
     /* Once WRE has been sent, any failure leaves the write ambiguous. Never retry. */
-    return pro_sd_transfer(transaction, (void *)input, lba, count, true, deadline);
+    return pro_sd_transfer((void *)input, lba, count, true, deadline);
 }
 
 /**
  * @brief Copy SD sectors directly into cartridge ROM memory and check MCU status.
  */
 static ed64_pro_ll_error_t pro_sd_read_fci (
-    ed64_pro_ll_transaction_t *transaction,
     uint32_t fci,
     uint32_t lba,
     uint32_t count,
@@ -960,14 +807,11 @@ static ed64_pro_ll_error_t pro_sd_read_fci (
     if (!count || count > 256 || count - 1 > UINT32_MAX - lba || (fci & 511)) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
-    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_IO_TIMEOUT_MS);
+    deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_IO_TIMEOUT_MS);
     pro_ll.status_valid = false;
     pro_ll.nresp_valid = false;
-    error = pro_assert_idle(transaction, deadline);
+    pro_ll.transferred = 0;
+    ed64_pro_ll_error_t error = pro_assert_idle(deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
@@ -977,74 +821,69 @@ static ed64_pro_ll_error_t pro_sd_read_fci (
     pro_put_u32(&payload[8], count * 512);
     payload[12] = 0x19;
     payload[13] = 0x13;
-    error = pro_send_frame(transaction, PRO_CMD_EPO, 0x10, payload, sizeof(payload), deadline);
+    error = pro_send_frame(PRO_CMD_EPO, 0x10, payload, sizeof(payload), deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     ed64_pro_status_t status;
-    return ed64_pro_ll_check_status(transaction, &status, deadline);
+    return ed64_pro_ll_check_status(&status, deadline);
 }
 
 /** @brief Copy SD sectors only to the ordinary ROM window. */
-ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
-    ed64_pro_ll_transaction_t *transaction, uint32_t fci, uint32_t lba, uint32_t count, uint32_t deadline
+ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (uint32_t fci, uint32_t lba, uint32_t count, uint32_t deadline
 ) {
     if (!count || count > 256 || fci >= ED64_PRO_FCI_ROM_LIMIT || count * 512 > ED64_PRO_FCI_ROM_LIMIT - fci) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    return pro_sd_read_fci(transaction, fci, lba, count, deadline);
+    return pro_sd_read_fci(fci, lba, count, deadline);
 }
 
 /** @brief Copy SD sectors only to the dedicated FCI IPL4 window. */
-ed64_pro_ll_error_t ed64_pro_ll_sd_read_ipl_fci (
-    ed64_pro_ll_transaction_t *transaction, uint32_t fci, uint32_t lba, uint32_t count, uint32_t deadline
+ed64_pro_ll_error_t ed64_pro_ll_sd_read_ipl_fci (uint32_t fci, uint32_t lba, uint32_t count, uint32_t deadline
 ) {
     if (!count || count > 256 || fci < ED64_PRO_FCI_IPL || fci - ED64_PRO_FCI_IPL >= ED64_PRO_IPL_SIZE ||
         count * 512 > ED64_PRO_IPL_SIZE - (fci - ED64_PRO_FCI_IPL)) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    return pro_sd_read_fci(transaction, fci, lba, count, deadline);
+    return pro_sd_read_fci(fci, lba, count, deadline);
 }
 
 /**
  * @brief Set the ROM byte-swap flag and wait for stable, idle device status.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline) {
+ed64_pro_ll_set_flags (uint16_t mask, uint16_t value, uint32_t deadline) {
     if (mask != ED64_PRO_FLAG_WRSW || (value & ~mask)) {
         return ED64_PRO_LL_ARGUMENT;
     }
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
-    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_IO_TIMEOUT_MS);
+    deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_IO_TIMEOUT_MS);
     pro_ll.status_valid = false;
     pro_ll.nresp_valid = false;
-    error = pro_assert_idle(transaction, deadline);
+    pro_ll.transferred = 0;
+    ed64_pro_ll_error_t error = pro_assert_idle(deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     uint8_t payload[4];
     pro_put_u32(payload, (uint32_t)mask << 16 | value);
-    error = pro_send_frame(transaction, PRO_CMD_DEV, 0x28, payload, sizeof(payload), deadline);
+    error = pro_send_frame(PRO_CMD_DEV, 0x28, payload, sizeof(payload), deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     for (;;) {
-        if (pro_expired(pro_deadline(transaction, deadline))) {
+        if (pro_expired(deadline)) {
             return pro_fail(ED64_PRO_LL_TIMEOUT);
         }
         uint32_t first = 0, second = 0;
-        error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_SYSSTAT, &first, deadline);
+        error = ed64_pro_ll_read_reg(ED64_PRO_REG_SYSSTAT, &first, deadline);
         if (error == ED64_PRO_LL_OK) {
-            error = ed64_pro_ll_read_reg(transaction, ED64_PRO_REG_SYSSTAT, &second, deadline);
+            error = ed64_pro_ll_read_reg(ED64_PRO_REG_SYSSTAT, &second, deadline);
         }
         if (error != ED64_PRO_LL_OK) {
             return error;
         }
         if ((first & ~8u) == (second & ~8u) && !(second & 1u)) {
-            return pro_assert_idle(transaction, deadline);
+            return pro_assert_idle(deadline);
         }
     }
 }
@@ -1053,36 +892,31 @@ ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, ui
  * @brief Send a device command and validate its fresh MCU status.
  */
 static ed64_pro_ll_error_t pro_dev_command (
-    ed64_pro_ll_transaction_t *transaction,
     uint8_t subcommand,
     const uint8_t *payload,
     size_t length,
     uint32_t deadline
 ) {
-    ed64_pro_ll_error_t error = pro_owned(transaction);
-    if (error != ED64_PRO_LL_OK) {
-        return error;
-    }
-    deadline = ed64_pro_ll_limit_deadline(pro_deadline(transaction, deadline), ED64_PRO_IO_TIMEOUT_MS);
+    deadline = ed64_pro_ll_limit_deadline(deadline, ED64_PRO_IO_TIMEOUT_MS);
     pro_ll.status_valid = false;
     pro_ll.nresp_valid = false;
-    error = pro_assert_idle(transaction, deadline);
+    pro_ll.transferred = 0;
+    ed64_pro_ll_error_t error = pro_assert_idle(deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
-    error = pro_send_frame(transaction, PRO_CMD_DEV, subcommand, payload, length, deadline);
+    error = pro_send_frame(PRO_CMD_DEV, subcommand, payload, length, deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     ed64_pro_status_t status;
-    return ed64_pro_ll_check_status(transaction, &status, deadline);
+    return ed64_pro_ll_check_status(&status, deadline);
 }
 
 /**
  * @brief Set the absolute Game Pak, backup-memory, or disk path on the device.
  */
 ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
-    ed64_pro_ll_transaction_t *transaction,
     ed64_pro_path_t type,
     const char *path,
     uint32_t deadline
@@ -1099,14 +933,14 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
     payload[1] = length >> 8;
     payload[2] = length;
     memcpy(payload + 3, path, length);
-    return pro_dev_command(transaction, 0x21, payload, length + 3, deadline);
+    return pro_dev_command(0x21, payload, length + 3, deadline);
 }
 
 /**
  * @brief Validate and send the menu, cartridge, or native disk configuration.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
+ed64_pro_ll_dev_set_cfg (const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
     static const uint32_t brm_sizes[] = {0, 512, 2048, 32768, 98304, 131072, 131072};
     if (!config || config->dd_en > 1 || config->gpak_wren || config->gpak_key) {
         return ED64_PRO_LL_ARGUMENT;
@@ -1143,12 +977,12 @@ ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_
     for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
         pro_put_u32(payload + i * 4, values[i]);
     }
-    return pro_dev_command(transaction, 0x20, payload, sizeof(payload), deadline);
+    return pro_dev_command(0x20, payload, sizeof(payload), deadline);
 }
 
 /**
  * @brief Start the configured device and validate its MCU status.
  */
-ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
-    return pro_dev_command(transaction, 0x11, NULL, 0, deadline);
+ed64_pro_ll_error_t ed64_pro_ll_dev_start (uint32_t deadline) {
+    return pro_dev_command(0x11, NULL, 0, deadline);
 }

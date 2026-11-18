@@ -6,13 +6,12 @@
 
 static struct {
     ed64_pro_dev_cfg_t config;
-    ed64_pro_ll_transaction_t *owner;
     uint32_t ticks;
     bool started, native_initialized, native_available, native_result;
     rtc_source_t native_source;
-    unsigned begins, ends, configs, starts, stops, drains, statuses, inits, closes, source_sets;
+    unsigned configs, starts, stops, drains, statuses, inits, closes, source_sets;
     int source_set_result;
-    ed64_pro_ll_error_t begin_error, cfg_error, start_error, stop_error, drain_error, status_error, end_error;
+    ed64_pro_ll_error_t cfg_error, start_error, stop_error, drain_error, status_error;
     char events[128];
     unsigned event_count;
 } mock;
@@ -46,33 +45,24 @@ bool rtc_is_source_available (rtc_source_t source) {
 int hook_rtc_calls (rtc_hooks_t *hooks) { (void)hooks; TEST_CHECK(false); return -1; }
 int unhook_rtc_calls (rtc_hooks_t *hooks) { (void)hooks; TEST_CHECK(false); return -1; }
 
-ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *t, uint32_t deadline) {
-    event('B'); mock.begins++; TEST_CHECK(!mock.owner);
-    if (!mock.begin_error) { mock.owner = t; t->deadline = deadline; }
-    return mock.begin_error;
+ed64_pro_ll_error_t ed64_pro_ll_dev_set_cfg (const ed64_pro_dev_cfg_t *cfg, uint32_t deadline) {
+    event('G'); mock.configs++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); mock.config = *cfg; return mock.cfg_error;
 }
-ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *t) {
-    event('E'); mock.ends++; TEST_CHECK(mock.owner == t); mock.owner = NULL; return mock.end_error;
+ed64_pro_ll_error_t ed64_pro_ll_dev_start (uint32_t deadline) {
+    event('S'); mock.starts++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); mock.started = true; return mock.start_error;
 }
-ed64_pro_ll_error_t ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *t, const ed64_pro_dev_cfg_t *cfg, uint32_t deadline) {
-    event('G'); mock.configs++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); mock.config = *cfg; return mock.cfg_error;
+ed64_pro_ll_error_t ed64_pro_ll_stop (uint32_t deadline) {
+    event('T'); mock.stops++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); mock.started = false; return mock.stop_error;
 }
-ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *t, uint32_t deadline) {
-    event('S'); mock.starts++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); mock.started = true; return mock.start_error;
+ed64_pro_ll_error_t ed64_pro_ll_drain (size_t *drained, uint32_t deadline) {
+    event('D'); mock.drains++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); *drained = 0; return mock.drain_error;
 }
-ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *t, uint32_t deadline) {
-    event('T'); mock.stops++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); mock.started = false; return mock.stop_error;
+ed64_pro_ll_error_t ed64_pro_ll_check_status (ed64_pro_status_t *status, uint32_t deadline) {
+    event('C'); mock.statuses++; TEST_CHECK((int32_t)(deadline - mock.ticks) > 0); *status = (ed64_pro_status_t){.key = 0x5A}; return mock.status_error;
 }
-ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *t, size_t *drained, uint32_t deadline) {
-    event('D'); mock.drains++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); *drained = 0; return mock.drain_error;
-}
-ed64_pro_ll_error_t ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *t, ed64_pro_status_t *status, uint32_t deadline) {
-    event('C'); mock.statuses++; TEST_CHECK(mock.owner == t && deadline <= t->deadline); *status = (ed64_pro_status_t){.key = 0x5A}; return mock.status_error;
-}
-uint32_t ed64_pro_ll_limit_deadline (uint32_t deadline, uint32_t ms) { (void)ms; return deadline; }
 
 static void fixture (void) {
-    mock.begin_error = mock.stop_error = mock.drain_error = mock.status_error = mock.end_error = ED64_PRO_LL_OK;
+    mock.stop_error = mock.drain_error = mock.status_error = ED64_PRO_LL_OK;
     ed64_pro_rtc_close();
     /* Each fixture is a new simulated boot; production failures remain latched. */
     pro_rtc_failed = pro_rtc_running = false;
@@ -94,9 +84,8 @@ static void test_native_services (void) {
     for (unsigned i = 0; i < 8; i++) TEST_CHECK(mock.config.reserved[i] == 0);
     TEST_CHECK(mock.starts == 1 && mock.inits == 1 && cart_type == CART_MAX);
     TEST_CHECK(rtc_get_source() == RTC_SOURCE_JOYBUS && rtc_is_source_available(RTC_SOURCE_JOYBUS));
-    TEST_CHECK(mock.owner == NULL && ed64_pro_rtc_get_error_message() == NULL);
-    unsigned begins = mock.begins;
-    TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_OK && mock.begins == begins && mock.inits == 1);
+    TEST_CHECK(ed64_pro_rtc_get_error_message() == NULL);
+    TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_OK && mock.configs == 1 && mock.starts == 1 && mock.inits == 1);
 }
 static void test_unavailable_native_clock (void) {
     for (unsigned failure = 0; failure < 2; failure++) {
@@ -107,7 +96,7 @@ static void test_unavailable_native_clock (void) {
         TEST_CHECK(mock.starts == 1 && mock.stops == 0);
         TEST_CHECK(mock.native_initialized && mock.started);
         TEST_CHECK(rtc_get_source() == RTC_SOURCE_NONE && mock.source_sets == 0);
-        TEST_CHECK(mock.owner == NULL && ed64_pro_rtc_get_error_message() == NULL);
+        TEST_CHECK(ed64_pro_rtc_get_error_message() == NULL);
         TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_OK);
         TEST_CHECK(mock.stops == 1 && !mock.started && !mock.native_initialized);
     }
@@ -122,22 +111,20 @@ static void test_invalid_native_calendar (void) {
     TEST_CHECK(mock.source_set_result == RTC_EBADTIME && mock.stops == 0);
 }
 static void test_init_faults (void) {
-    for (unsigned failure = 0; failure < 4; failure++) {
+    for (unsigned failure = 0; failure < 2; failure++) {
         fixture();
         switch (failure) {
-        case 0: mock.begin_error = ED64_PRO_LL_TIMEOUT; break;
-        case 1: mock.cfg_error = ED64_PRO_LL_MCU_ERROR; break;
-        case 2: mock.start_error = ED64_PRO_LL_TIMEOUT; break;
-        case 3: mock.end_error = ED64_PRO_LL_FRAME; break;
+        case 0: mock.cfg_error = ED64_PRO_LL_MCU_ERROR; break;
+        case 1: mock.start_error = ED64_PRO_LL_TIMEOUT; break;
         }
         TEST_CHECK(ed64_pro_rtc_init() != FLASHCART_OK);
         TEST_CHECK(mock.configs <= 1 && mock.starts <= 1 && mock.inits == 0);
-        TEST_CHECK(mock.owner == NULL && ed64_pro_rtc_get_error_message() != NULL);
-        unsigned begins = mock.begins, starts = mock.starts;
+        TEST_CHECK(ed64_pro_rtc_get_error_message() != NULL);
+        unsigned configs = mock.configs, starts = mock.starts;
         const char *error = ed64_pro_rtc_get_error_message();
         TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_ERR_INT);
         TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_ERR_INT);
-        TEST_CHECK(mock.begins == begins && mock.starts == starts && ed64_pro_rtc_get_error_message() == error);
+        TEST_CHECK(mock.configs == configs && mock.starts == starts && ed64_pro_rtc_get_error_message() == error);
     }
 }
 static void test_close_order (void) {
@@ -146,27 +133,25 @@ static void test_close_order (void) {
     TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_OK);
     TEST_CHECK(mock.events[0] == 'X');
     TEST_CHECK(strstr(mock.events, "TDC") != NULL);
-    TEST_CHECK(!mock.native_initialized && !mock.started && mock.owner == NULL);
+    TEST_CHECK(!mock.native_initialized && !mock.started);
     unsigned stops = mock.stops;
     TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_OK && mock.stops == stops);
 }
 static void test_close_faults (void) {
-    for (unsigned failure = 0; failure < 5; failure++) {
+    for (unsigned failure = 0; failure < 3; failure++) {
         fixture(); TEST_ASSERT(ed64_pro_rtc_init() == FLASHCART_OK);
         switch (failure) {
-        case 0: mock.begin_error = ED64_PRO_LL_TIMEOUT; break;
-        case 1: mock.stop_error = ED64_PRO_LL_TIMEOUT; break;
-        case 2: mock.drain_error = ED64_PRO_LL_TIMEOUT; break;
-        case 3: mock.status_error = ED64_PRO_LL_FRAME; break;
-        case 4: mock.end_error = ED64_PRO_LL_FRAME; break;
+        case 0: mock.stop_error = ED64_PRO_LL_TIMEOUT; break;
+        case 1: mock.drain_error = ED64_PRO_LL_TIMEOUT; break;
+        case 2: mock.status_error = ED64_PRO_LL_FRAME; break;
         }
         TEST_CHECK(ed64_pro_rtc_close() != FLASHCART_OK);
-        TEST_CHECK(!mock.native_initialized && mock.owner == NULL);
+        TEST_CHECK(!mock.native_initialized);
         TEST_CHECK(ed64_pro_rtc_get_error_message() != NULL);
-        unsigned stops = mock.stops, begins = mock.begins;
+        unsigned stops = mock.stops, configs = mock.configs;
         TEST_CHECK(ed64_pro_rtc_close() == FLASHCART_ERR_INT);
         TEST_CHECK(ed64_pro_rtc_init() == FLASHCART_ERR_INT);
-        TEST_CHECK(mock.stops == stops && mock.begins == begins); /* Never retry an ambiguous shutdown. */
+        TEST_CHECK(mock.stops == stops && mock.configs == configs); /* Never retry an ambiguous shutdown. */
     }
 }
 TEST_LIST = {

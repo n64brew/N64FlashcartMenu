@@ -591,7 +591,7 @@ void io_write (pi_addr_t pi, uint32_t value) {
 }
 
 void dma_wait (void) {
-    TEST_ASSERT(mock.irq_depth == 0 && pro_ll.owner != NULL && !mock.active);
+    TEST_ASSERT(mock.irq_depth == 0 && !mock.active);
     mock.waits++;
     flush_register_write();
 }
@@ -689,13 +689,6 @@ static uint32_t deadline_ms (uint32_t ms) {
 }
 
 /**
- * @brief Acquire a transport transaction with a 15-second test deadline.
- */
-static void begin (ed64_pro_ll_transaction_t *transaction) {
-    TEST_ASSERT(ed64_pro_ll_begin(transaction, deadline_ms(15000)) == ED64_PRO_LL_OK);
-}
-
-/**
  * @brief Complete passive identification and reset transfer traces for an isolated transport check.
  */
 static void identify (void) {
@@ -708,28 +701,16 @@ static void identify (void) {
 }
 
 /**
- * @brief Release a transaction and verify ownership and interrupt state are restored.
- */
-static void end (ed64_pro_ll_transaction_t *transaction) {
-    TEST_CHECK(ed64_pro_ll_end(transaction) == ED64_PRO_LL_OK);
-    TEST_CHECK(mock.irq_depth == 0);
-    TEST_CHECK(pro_ll.owner == NULL);
-}
-
-/**
  * @brief Read EDID through the public register API without staging or cache work.
  */
 static void test_register_read (void) {
     power_on();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     uint32_t output = 0xDEADBEEFu;
-    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &output, deadline_ms(1000)) == ED64_PRO_LL_OK);
+    TEST_CHECK(ed64_pro_ll_read_reg(ED64_PRO_REG_EDID, &output, deadline_ms(1000)) == ED64_PRO_LL_OK);
     TEST_CHECK(output == 0xED640127u);
     TEST_CHECK(mock.pi == 0x1F800014u && mock.length == 4);
     TEST_CHECK(mock.cache_length == 0 && mock.io_reads == 1 && mock.dma_reads == 0);
     TEST_CHECK(mock.accesses == 1 && strcmp(mock.events, "rF") == 0);
-    end(&transaction);
 }
 
 /**
@@ -738,41 +719,33 @@ static void test_register_read (void) {
 static void test_register_write (void) {
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     memset(pro_staging, 0xFF, sizeof(pro_staging));
-    TEST_CHECK(ed64_pro_ll_write_reg(&transaction, ED64_PRO_REG_MBX, 0, deadline_ms(1000)) == ED64_PRO_LL_OK);
+    TEST_CHECK(ed64_pro_ll_write_reg(ED64_PRO_REG_MBX, 0, deadline_ms(1000)) == ED64_PRO_LL_OK);
     TEST_CHECK(mock.pi == 0x1F800010u && mock.length == 4 && mock.ram[0] == 0);
     TEST_CHECK(mock.cache_length == 0 && mock.io_writes == 1 && mock.dma_writes == 0);
     TEST_CHECK(mock.waits == 1 && !mock.mailbox_write_pending && strcmp(mock.events, "wF") == 0);
-    end(&transaction);
 }
 
 /**
- * @brief Reject invalid ownership/register/length arguments without DMA or latched faults.
+ * @brief Reject invalid register/length arguments without DMA or latched faults.
  */
 static void test_invalid_input (void) {
     power_on();
-    ed64_pro_ll_transaction_t transaction;
     uint32_t output = 42;
-    TEST_CHECK(ed64_pro_ll_begin(NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &output, deadline_ms(1000)) == ED64_PRO_LL_BUSY);
-    begin(&transaction);
-    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_read_reg(ED64_PRO_REG_EDID, NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(
-        ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_FIFO, &output, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT
+        ed64_pro_ll_read_reg(ED64_PRO_REG_FIFO, &output, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT
     );
-    TEST_CHECK(ed64_pro_ll_write_reg(&transaction, ED64_PRO_REG_EDID, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_write_reg(&transaction, ED64_PRO_REG_MBX, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_write_reg(ED64_PRO_REG_EDID, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_write_reg(ED64_PRO_REG_MBX, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     const size_t lengths[] = {0, 1, 2, 3, 513, SIZE_MAX};
     for (size_t i = 0; i < sizeof(lengths) / sizeof(lengths[0]); i++) {
         TEST_CHECK(
-            pro_fifo_transfer(&transaction, lengths[i], false, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT
+            pro_fifo_transfer(lengths[i], false, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT
         );
     }
     TEST_CHECK(mock.accesses == 0 && mock.event_count == 0 && output == 42);
     TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 /**
@@ -781,17 +754,14 @@ static void test_invalid_input (void) {
 static void test_exact_deadline (void) {
     power_on();
     mock.tick_step = 0;
-    ed64_pro_ll_transaction_t transaction;
-    TEST_ASSERT(ed64_pro_ll_begin(&transaction, mock.now) == ED64_PRO_LL_OK);
     uint32_t output = 42;
     TEST_CHECK(
-        ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &output, deadline_ms(1000)) ==
+        ed64_pro_ll_read_reg(ED64_PRO_REG_EDID, &output, mock.now) ==
         ED64_PRO_LL_TIMEOUT
     );
     TEST_CHECK(mock.accesses == 0 && output == 42);
     const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
     TEST_CHECK(failure->code == ED64_PRO_LL_TIMEOUT && failure->transferred == 0);
-    end(&transaction);
 }
 
 static uint32_t finish_deadline;
@@ -811,84 +781,15 @@ static void test_completion_at_deadline (void) {
     mock.tick_step = 0;
     finish_deadline = deadline_ms(2);
     mock.sdk_hook = expire_on_completion;
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     uint32_t output = 42;
     TEST_CHECK(
-        ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &output, finish_deadline) == ED64_PRO_LL_OK
+        ed64_pro_ll_read_reg(ED64_PRO_REG_EDID, &output, finish_deadline) == ED64_PRO_LL_OK
     );
     TEST_CHECK(!mock.active && output == mock.register_value);
     const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
     TEST_CHECK(failure->code == ED64_PRO_LL_OK);
     TEST_CHECK(strcmp(mock.events, "rF") == 0);
-    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &output, finish_deadline) == ED64_PRO_LL_TIMEOUT);
-    end(&transaction);
-}
-
-/**
- * @brief Reject IRQ-disabled, exception, kernel, and uninitialized contexts without side effects.
- */
-static void test_invalid_context (void) {
-    for (unsigned mode = 0; mode < 6; mode++) {
-        power_on();
-        mock.irq_depth = mode == 0;
-        mock.cp0 = mode == 1   ? 0
-                   : mode == 2 ? C0_STATUS_IE | C0_STATUS_EXL
-                   : mode == 3 ? C0_STATUS_IE | C0_STATUS_ERL
-                               : C0_STATUS_IE;
-        mock.kernel = mode == 4;
-        mock.uninitialized = mode == 5;
-        unsigned depth = mock.irq_depth;
-        ed64_pro_ll_transaction_t transaction;
-        TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
-        TEST_CHECK(mock.irq_depth == depth && mock.accesses == 0 && mock.event_count == 0);
-        TEST_CHECK(pro_ll.owner == NULL && ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
-    }
-}
-
-/**
- * @brief Attempt nested and interrupt-disabled entry during DMA without changing owner or progress.
- */
-static void nested_entry (void) {
-    ed64_pro_ll_transaction_t nested;
-    ed64_pro_ll_transaction_t *owner = pro_ll.owner;
-    size_t transferred = pro_ll.transferred;
-    ed64_pro_diagnostics_t startup = pro_diagnostics;
-    unsigned accesses = mock.accesses;
-    ed64_pro_status_t status;
-    memset(&status, 0xCD, sizeof(status));
-    TEST_CHECK(ed64_pro_ll_begin(&nested, deadline_ms(1000)) == ED64_PRO_LL_BUSY);
-    TEST_CHECK(ed64_pro_ll_end(&nested) == ED64_PRO_LL_BUSY);
-    TEST_CHECK(ed64_pro_ll_read_status(&nested, &status, deadline_ms(1000)) == ED64_PRO_LL_BUSY);
-    TEST_CHECK(ed64_pro_probe().error == ED64_PRO_LL_BUSY);
-    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_BUSY);
-    mock.cp0 &= ~C0_STATUS_IE;
-    TEST_CHECK(ed64_pro_ll_begin(&nested, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
-    TEST_CHECK(ed64_pro_ll_read_status(owner, &status, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
-    TEST_CHECK(ed64_pro_probe().error == ED64_PRO_LL_CONTEXT);
-    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_CONTEXT);
-    mock.cp0 |= C0_STATUS_IE;
-    TEST_CHECK(pro_ll.owner == owner && mock.irq_depth == 0);
-    TEST_CHECK(pro_ll.transferred == transferred && mock.accesses == accesses && status.key == 0xCD);
-    TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
-    TEST_CHECK(memcmp(&startup.failure, &pro_diagnostics.failure, sizeof(startup.failure)) == 0);
-    if (startup.state == ED64_PRO_INITIALIZING) {
-        TEST_CHECK(memcmp(&startup, &pro_diagnostics, sizeof(startup)) == 0);
-    }
-}
-
-/**
- * @brief Preserve the original transaction while completion hooks attempt nested transport entry.
- */
-static void test_serialization (void) {
-    power_on();
-    mock.sdk_hook = nested_entry;
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
-    uint32_t output;
-    TEST_CHECK(ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &output, deadline_ms(1000)) == ED64_PRO_LL_OK);
-    TEST_CHECK(output == mock.register_value && mock.accesses == 1);
-    end(&transaction);
+    TEST_CHECK(ed64_pro_ll_read_reg(ED64_PRO_REG_EDID, &output, finish_deadline) == ED64_PRO_LL_TIMEOUT);
 }
 
 static struct {
@@ -917,14 +818,11 @@ static void test_cache_sharing (void) {
     shared_line.output = 42;
     shared_line.irq_updates = 0;
     mock.sdk_hook = neighboring_interrupt;
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     TEST_CHECK(
-        ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &shared_line.output, deadline_ms(1000)) == ED64_PRO_LL_OK
+        ed64_pro_ll_read_reg(ED64_PRO_REG_EDID, &shared_line.output, deadline_ms(1000)) == ED64_PRO_LL_OK
     );
     TEST_CHECK(shared_line.output == mock.register_value && shared_line.irq_updates == 1);
     TEST_CHECK(shared_line.before == 0x11223344u && shared_line.after == 0x55667788u);
-    end(&transaction);
 }
 
 /**
@@ -945,16 +843,14 @@ static void test_probe_identity (void) {
         TEST_CHECK(mock.cart_writes == 0);
         TEST_CHECK(ed64_pro_probe().outcome == result.outcome && mock.bus_count == 1);
         if (!matches) {
-            ed64_pro_ll_transaction_t transaction;
-            begin(&transaction);
+
             ed64_pro_status_t status;
             TEST_CHECK(
-                ed64_pro_ll_write_reg(&transaction, ED64_PRO_REG_MBX, 0, deadline_ms(1000)) ==
+                ed64_pro_ll_write_reg(ED64_PRO_REG_MBX, 0, deadline_ms(1000)) ==
                 ED64_PRO_LL_NOT_IDENTIFIED
             );
-            TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+            TEST_CHECK(ed64_pro_ll_read_status(&status, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
             TEST_CHECK(mock.cart_writes == 0 && mock.bus_count == 1);
-            end(&transaction);
         }
     }
 }
@@ -970,7 +866,7 @@ static void test_probe_deadline (void) {
     TEST_CHECK(!probe.id_valid && mock.accesses == 0 && mock.cart_writes == 0);
     probe = ed64_pro_ll_probe(deadline_ms(1000));
     TEST_CHECK(probe.outcome == ED64_PRO_PROBE_IO_ERROR && probe.error == ED64_PRO_LL_TIMEOUT);
-    TEST_CHECK(!probe.id_valid && mock.accesses == 0 && pro_ll.owner == NULL);
+    TEST_CHECK(!probe.id_valid && mock.accesses == 0);
 }
 
 /**
@@ -978,20 +874,17 @@ static void test_probe_deadline (void) {
  */
 static void test_unidentified_commands (void) {
     power_on();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     ed64_pro_status_t status;
     size_t drained;
-    TEST_CHECK(pro_send_command(&transaction, PRO_CMD_STATUS, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
-    TEST_CHECK(pro_send_command(&transaction, PRO_CMD_STOP, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
-    TEST_CHECK(pro_send_command(&transaction, PRO_CMD_SD_INIT, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
-    TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
-    TEST_CHECK(ed64_pro_ll_drain(&transaction, &drained, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
-    TEST_CHECK(ed64_pro_ll_stop(&transaction, deadline_ms(5000)) == ED64_PRO_LL_NOT_IDENTIFIED);
-    TEST_CHECK(ed64_pro_ll_init_sd(&transaction, &status, deadline_ms(5000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(pro_send_command(PRO_CMD_STATUS, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(pro_send_command(PRO_CMD_STOP, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(pro_send_command(PRO_CMD_SD_INIT, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(ed64_pro_ll_read_status(&status, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(ed64_pro_ll_drain(&drained, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(ed64_pro_ll_stop(deadline_ms(5000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(ed64_pro_ll_init_sd(&status, deadline_ms(5000)) == ED64_PRO_LL_NOT_IDENTIFIED);
     TEST_CHECK(mock.accesses == 0 && mock.cart_writes == 0);
     TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 /**
@@ -1007,17 +900,12 @@ static void test_command_words (void) {
     for (size_t i = 0; i < 3; i++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
-        TEST_CHECK(pro_send_command(&transaction, commands[i], deadline_ms(1000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(pro_send_command(commands[i], deadline_ms(1000)) == ED64_PRO_LL_OK);
         size_t length = i == 0 ? 16 : 20;
         TEST_CHECK(mock.bus_count == 1 && mock.bus[0].write);
         TEST_CHECK(mock.bus[0].address == 0x1F800000u && mock.bus[0].length == length);
         TEST_CHECK(memcmp(mock.bus[0].words, frames[i], length) == 0);
         TEST_CHECK(mock.cache_length == (i == 0 ? 16 : 32));
-        TEST_CHECK(pro_send_command(&transaction, (pro_command_t)0xFF, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-        TEST_CHECK(mock.bus_count == 1);
-        end(&transaction);
     }
 }
 
@@ -1032,10 +920,9 @@ static void test_status_frame (void) {
         mock.replies[0].bytes[1] = (uint8_t)i;
         mock.replies[0].bytes[2] = (uint8_t)(0xFF - i);
         mock.replies[0].bytes[3] = statuses[i];
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
+
         ed64_pro_status_t status;
-        TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(ed64_pro_ll_read_status(&status, deadline_ms(1000)) == ED64_PRO_LL_OK);
         TEST_CHECK(status.key == 0x5A && status.opaque[0] == i && status.opaque[1] == 0xFF - i);
         TEST_CHECK(status.mcu_status == statuses[i] && mock.rx_consumed == 4 && mock.rx_count == 0);
         TEST_CHECK(mock.bus_count == 5 && mock.status_requests == 1);
@@ -1046,7 +933,6 @@ static void test_status_frame (void) {
             TEST_CHECK(mock.bus[n].write == (n == 1));
         }
         TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
-        end(&transaction);
     }
 }
 
@@ -1065,9 +951,8 @@ static void test_fifo_boundaries (void) {
             }
             uint8_t output[2112];
             memset(output, 0xCD, sizeof(output));
-            ed64_pro_ll_transaction_t transaction;
-            begin(&transaction);
-            TEST_CHECK(pro_fifo_read(&transaction, output + offset, length, deadline_ms(1000)) == ED64_PRO_LL_OK);
+
+            TEST_CHECK(pro_fifo_read(output + offset, length, deadline_ms(1000)) == ED64_PRO_LL_OK);
             for (size_t i = 0; i < sizeof(output); i++) {
                 uint8_t expected = i >= offset && i - offset < length ? (uint8_t)((i - offset) * 37 + 19) : 0xCD;
                 TEST_CHECK(output[i] == expected);
@@ -1080,7 +965,6 @@ static void test_fifo_boundaries (void) {
                 TEST_CHECK(mock.bus[i * 2].address == 0x1F800004u && mock.bus[i * 2].length == 4);
                 TEST_CHECK(mock.bus[i * 2 + 1].address == 0x1F800000u && mock.bus[i * 2 + 1].length == chunk * 4);
             }
-            end(&transaction);
         }
     }
 }
@@ -1091,18 +975,15 @@ static void test_fifo_boundaries (void) {
 static void test_fifo_invalid_lengths (void) {
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     uint8_t output = 42;
-    TEST_CHECK(pro_fifo_read(&transaction, NULL, 0, deadline_ms(1000)) == ED64_PRO_LL_OK);
-    TEST_CHECK(pro_fifo_read(&transaction, NULL, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(pro_fifo_read(&transaction, &output, 2049, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(pro_fifo_read(&transaction, &output, SIZE_MAX / 4 + 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(pro_fifo_read(&transaction, &output, SIZE_MAX, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_read_status(&transaction, NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_drain(&transaction, NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(pro_fifo_read(NULL, 0, deadline_ms(1000)) == ED64_PRO_LL_OK);
+    TEST_CHECK(pro_fifo_read(NULL, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(pro_fifo_read(&output, 2049, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(pro_fifo_read(&output, SIZE_MAX / 4 + 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(pro_fifo_read(&output, SIZE_MAX, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_read_status(NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_drain(NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(mock.accesses == 0 && output == 42);
-    end(&transaction);
 }
 
 /**
@@ -1116,13 +997,11 @@ static void test_fifo_drains (void) {
         for (size_t i = 0; i < lengths[n]; i++) {
             rx_push((uint8_t)i);
         }
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
+
         size_t drained = SIZE_MAX;
-        TEST_CHECK(ed64_pro_ll_drain(&transaction, &drained, deadline_ms(1000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(ed64_pro_ll_drain(&drained, deadline_ms(1000)) == ED64_PRO_LL_OK);
         TEST_CHECK(drained == lengths[n] && mock.rx_count == 0 && mock.rx_consumed == lengths[n]);
         TEST_CHECK(mock.cart_writes == 0);
-        end(&transaction);
     }
 }
 
@@ -1141,17 +1020,16 @@ static void test_fifo_count_and_refill (void) {
                 rx_push(0xEE);
             }
         }
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
+
         size_t drained = SIZE_MAX;
         ed64_pro_ll_error_t expected = mode == 2 ? ED64_PRO_LL_DRAIN_LIMIT : ED64_PRO_LL_FIFO_COUNT;
-        TEST_CHECK(ed64_pro_ll_drain(&transaction, &drained, deadline_ms(1000)) == expected);
+        TEST_CHECK(ed64_pro_ll_drain(&drained, deadline_ms(1000)) == expected);
         TEST_CHECK(mock.rx_consumed == (mode == 2 ? 2048 : 0));
         TEST_CHECK(ed64_pro_ll_get_failure()->transferred == mock.rx_consumed && drained == SIZE_MAX);
         TEST_CHECK(mock.cart_writes == 0);
-        end(&transaction);
+
         unsigned accesses = mock.accesses;
-        TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == expected);
+        TEST_CHECK(ed64_pro_ll_drain(&drained, deadline_ms(1000)) == expected);
         TEST_CHECK(mock.accesses == accesses);
     }
 }
@@ -1172,14 +1050,12 @@ static void test_drain_deadline (void) {
     mock.tick_step = TICKS_FROM_MS(1) / 8;
     mock.refill = true;
     rx_push(0xEE);
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
+
     uint32_t start = mock.now;
     size_t drained = SIZE_MAX;
-    TEST_CHECK(is_deadline_error(ed64_pro_ll_drain(&transaction, &drained, deadline_ms(1000))));
+    TEST_CHECK(is_deadline_error(ed64_pro_ll_drain(&drained, deadline_ms(1000))));
     TEST_CHECK((uint32_t)(mock.now - start) <= TICKS_FROM_MS(101));
     TEST_CHECK(mock.rx_consumed > 0 && mock.rx_consumed < 2048 && drained == SIZE_MAX);
-    end(&transaction);
 }
 
 /**
@@ -1191,17 +1067,15 @@ static void test_partial_status (void) {
         identify();
         mock.tick_step = TICKS_FROM_MS(1) / 8;
         mock.replies[0].length = length;
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
+
         ed64_pro_status_t status;
         memset(&status, 0xCD, sizeof(status));
         uint32_t start = mock.now;
-        TEST_CHECK(is_deadline_error(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000))));
+        TEST_CHECK(is_deadline_error(ed64_pro_ll_read_status(&status, deadline_ms(1000))));
         TEST_CHECK((uint32_t)(mock.now - start) <= TICKS_FROM_MS(1001));
         TEST_CHECK(status.key == 0xCD && status.mcu_status == 0xCD);
         TEST_CHECK(ed64_pro_ll_get_failure()->transferred == length && mock.rx_consumed == length);
         TEST_CHECK(mock.status_requests == 1);
-        end(&transaction);
     }
 }
 
@@ -1220,25 +1094,23 @@ static void test_bad_status (void) {
         } else {
             rx_push(0x12);
         }
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
+
         ed64_pro_status_t status;
         memset(&status, 0xCD, sizeof(status));
         ed64_pro_ll_error_t expected = mode == 0 ? ED64_PRO_LL_FRAME : ED64_PRO_LL_TRAILING_DATA;
-        TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == expected);
+        TEST_CHECK(ed64_pro_ll_read_status(&status, deadline_ms(1000)) == expected);
         TEST_CHECK(status.key == 0xCD && status.mcu_status == 0xCD);
         TEST_CHECK(mock.rx_consumed == (mode == 2 ? 0 : 4) && mock.cart_writes == (mode == 2 ? 0 : 1));
         unsigned accesses = mock.accesses;
         size_t drained = SIZE_MAX;
-        TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == expected);
-        TEST_CHECK(ed64_pro_ll_drain(&transaction, &drained, deadline_ms(1000)) == expected);
+        TEST_CHECK(ed64_pro_ll_read_status(&status, deadline_ms(1000)) == expected);
+        TEST_CHECK(ed64_pro_ll_drain(&drained, deadline_ms(1000)) == expected);
         TEST_CHECK(mock.accesses == accesses && drained == SIZE_MAX);
-        end(&transaction);
     }
 }
 
 /**
- * @brief Preserve phase/transaction deadlines despite slow byte arrival and counter wrap.
+ * @brief Preserve caller deadlines despite slow byte arrival and counter wrap.
  */
 static void test_slow_partial_status (void) {
     const uint32_t budgets[] = {1000, 600};
@@ -1248,16 +1120,14 @@ static void test_slow_partial_status (void) {
         mock.now = UINT32_MAX - TICKS_FROM_MS(250);
         mock.tick_step = TICKS_FROM_MS(1) / 8;
         mock.reply_interval = TICKS_FROM_MS(400);
-        ed64_pro_ll_transaction_t transaction;
-        TEST_ASSERT(ed64_pro_ll_begin(&transaction, deadline_ms(budgets[i])) == ED64_PRO_LL_OK);
+
         ed64_pro_status_t status;
         memset(&status, 0xCD, sizeof(status));
         uint32_t start = mock.now;
-        TEST_CHECK(is_deadline_error(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000))));
+        TEST_CHECK(is_deadline_error(ed64_pro_ll_read_status(&status, deadline_ms(budgets[i]))));
         TEST_CHECK((uint32_t)(mock.now - start) <= TICKS_FROM_MS(budgets[i] + 1));
         TEST_CHECK(ed64_pro_ll_get_failure()->transferred == (i == 0 ? 2 : 1));
         TEST_CHECK(status.key == 0xCD && mock.status_requests == 1);
-        end(&transaction);
     }
 }
 
@@ -1280,35 +1150,18 @@ static void test_partial_fifo_timeout (void) {
         rx_push((uint8_t)i);
     }
     mock.sdk_hook = expire_after_chunk;
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     uint8_t output[129];
     memset(output, 0xCD, sizeof(output));
-    TEST_CHECK(pro_fifo_read(&transaction, output, sizeof(output), deadline_ms(1000)) == ED64_PRO_LL_TIMEOUT);
+    TEST_CHECK(pro_fifo_read(output, sizeof(output), deadline_ms(1000)) == ED64_PRO_LL_TIMEOUT);
     TEST_CHECK(ed64_pro_ll_get_failure()->transferred == 128 && mock.rx_consumed == 128);
     for (size_t i = 0; i < 128; i++) {
         TEST_CHECK(output[i] == (uint8_t)i);
     }
     TEST_CHECK(output[128] == 0xCD && mock.rx_count == 1 && !mock.active);
     unsigned accesses = mock.accesses;
-    end(&transaction);
-    TEST_CHECK(ed64_pro_ll_begin(&transaction, deadline_ms(1000)) == ED64_PRO_LL_TIMEOUT);
-    TEST_CHECK(mock.accesses == accesses && mock.rx_consumed == 128);
-}
 
-/**
- * @brief Prevent nested transport calls from interleaving a status command and its reply.
- */
-static void test_status_serialization (void) {
-    power_on();
-    identify();
-    mock.sdk_hook = nested_entry;
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
-    ed64_pro_status_t status;
-    TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == ED64_PRO_LL_OK);
-    TEST_CHECK(status.key == 0x5A && mock.status_requests == 1 && mock.cart_writes == 1 && mock.bus_count == 5);
-    end(&transaction);
+    TEST_CHECK(pro_fifo_read(output, sizeof(output), deadline_ms(1000)) == ED64_PRO_LL_TIMEOUT);
+    TEST_CHECK(mock.accesses == accesses && mock.rx_consumed == 128);
 }
 
 static const struct {
@@ -1393,7 +1246,7 @@ static void test_init_transcript (void) {
     }
     TEST_CHECK(diagnostics->attempt_ticks < TICKS_FROM_MS(15000));
     TEST_CHECK(strstr(ed64_pro_get_error_message(), "transport ready") != NULL);
-    TEST_CHECK(mock.irq_depth == 0 && pro_ll.owner == NULL);
+    TEST_CHECK(mock.irq_depth == 0);
 
     ed64_pro_diagnostics_t before = *diagnostics;
     size_t bus_count = mock.bus_count;
@@ -1570,61 +1423,10 @@ static void test_whole_attempt_deadline (void) {
 }
 
 /**
- * @brief Display cold-start ownership/context rejections without latching them or preventing retry.
+ * @brief Cache confirmed absence without MCU writes.
  */
-static void test_cold_start_rejections (void) {
-    static const struct {
-        const char *name;
-        ed64_pro_ll_error_t error;
-        const char *message;
-    } cases[] = {
-        {"busy", ED64_PRO_LL_BUSY, "Transport already in use"},
-        {"unsupported context", ED64_PRO_LL_CONTEXT, "Unsupported interrupt/thread context"},
-    };
-    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        for (unsigned initialize = 0; initialize < 2; initialize++) {
-            TEST_CASE_("%s via %s", cases[i].name, initialize ? "initialization" : "probe");
-            power_on();
-            ed64_pro_ll_transaction_t owner;
-            if (cases[i].error == ED64_PRO_LL_BUSY) {
-                begin(&owner);
-            } else {
-                mock.cp0 = 0;
-            }
-            ed64_pro_ll_error_t error = initialize ? ed64_pro_init_transport() : ed64_pro_probe().error;
-            TEST_CHECK(error == cases[i].error);
-            const ed64_pro_diagnostics_t *diagnostics = ed64_pro_get_diagnostics();
-            TEST_CHECK(diagnostics->state == ED64_PRO_COLD && diagnostics->phase == ED64_PRO_PHASE_PROBE);
-            TEST_CHECK(diagnostics->probe.error == cases[i].error && !diagnostics->probe.id_valid);
-            TEST_CHECK(diagnostics->failure.code == ED64_PRO_LL_OK);
-            TEST_CHECK(ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
-            TEST_CHECK(strstr(ed64_pro_get_error_message(), cases[i].message) != NULL);
-            TEST_CHECK(mock.accesses == 0 && mock.event_count == 0);
-            if (cases[i].error == ED64_PRO_LL_BUSY) {
-                TEST_CHECK(pro_ll.owner == &owner);
-                end(&owner);
-            } else {
-                mock.cp0 = C0_STATUS_IE;
-            }
-            TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_OK);
-            TEST_CHECK(diagnostics->state == ED64_PRO_READY && diagnostics->probe.error == ED64_PRO_LL_OK);
-            TEST_CHECK(diagnostics->failure.code == ED64_PRO_LL_OK);
-            unsigned accesses = mock.accesses;
-            TEST_CHECK(strstr(ed64_pro_get_error_message(), "transport ready") != NULL);
-            TEST_CHECK(mock.accesses == accesses);
-        }
-    }
-}
-
-/**
- * @brief Allow context rejection without probing and cache confirmed absence without MCU writes.
- */
-static void test_init_absent_and_context (void) {
+static void test_init_absent (void) {
     power_on();
-    mock.cp0 = 0;
-    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_CONTEXT);
-    TEST_CHECK(ed64_pro_get_diagnostics()->state == ED64_PRO_COLD && mock.accesses == 0);
-    mock.cp0 = C0_STATUS_IE;
     mock.register_value = 0xED640025u;
     TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_NOT_IDENTIFIED);
     TEST_CHECK(ed64_pro_get_diagnostics()->state == ED64_PRO_ABSENT && mock.accesses == 1);
@@ -1636,36 +1438,23 @@ static void test_init_absent_and_context (void) {
 }
 
 /**
- * @brief Enforce one owner through the complete handoff against nested completion hooks.
- */
-static void test_init_serialization (void) {
-    handoff_fixture();
-    mock.sdk_hook = nested_entry;
-    TEST_CHECK(ed64_pro_init_transport() == ED64_PRO_LL_OK);
-    TEST_CHECK(ed64_pro_get_diagnostics()->state == ED64_PRO_READY && mock.bus_count == 27);
-    TEST_CHECK(mock.stop_commands == 1 && mock.sd_commands == 1 && mock.irq_depth == 0);
-}
-
-/**
  * @brief Avoid attributing a protocol-only fault to the last successful PI access.
  */
 static void test_protocol_fault_context (void) {
     power_on();
     identify();
     mock.replies[0].bytes[0] = 0;
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
+
     ed64_pro_status_t status;
     memset(&status, 0xAA, sizeof(status));
-    TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == ED64_PRO_LL_FRAME);
+    TEST_CHECK(ed64_pro_ll_read_status(&status, deadline_ms(1000)) == ED64_PRO_LL_FRAME);
     const ed64_pro_ll_failure_t *failure = ed64_pro_ll_get_failure();
     TEST_CHECK(failure->code == ED64_PRO_LL_FRAME && failure->transferred == 4);
     ed64_pro_ll_failure_t first = *failure;
     unsigned accesses = mock.accesses;
-    TEST_CHECK(ed64_pro_ll_read_status(&transaction, &status, deadline_ms(1000)) == ED64_PRO_LL_FRAME);
+    TEST_CHECK(ed64_pro_ll_read_status(&status, deadline_ms(1000)) == ED64_PRO_LL_FRAME);
     TEST_CHECK(memcmp(&first, failure, sizeof(first)) == 0 && mock.accesses == accesses);
     TEST_CHECK(mock.accesses == 4 && mock.rx_consumed == 4 && status.key == 0xAA);
-    end(&transaction);
 }
 
 /**
@@ -1815,22 +1604,19 @@ int fat_unmount (int volume_id) {
 static void test_frame_limits (void) {
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     mock.raw_frames = true;
     uint8_t payload[ED64_PRO_FRAME_MAX];
     for (size_t i = 0; i < sizeof(payload); i++) {
         payload[i] = (uint8_t)(i * 19);
     }
     TEST_CHECK(
-        pro_send_frame(&transaction, PRO_CMD_SYS, 0x10, payload, ED64_PRO_FRAME_MAX - 4, deadline_ms(1000)) ==
+        pro_send_frame(PRO_CMD_SYS, 0x10, payload, ED64_PRO_FRAME_MAX - 4, deadline_ms(1000)) ==
         ED64_PRO_LL_ARGUMENT
     );
-    TEST_CHECK(pro_send_frame(&transaction, PRO_CMD_SYS, 0x11, payload, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(pro_send_frame(&transaction, PRO_CMD_SYS, 0x10, NULL, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(pro_send_frame(PRO_CMD_SYS, 0x10, NULL, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(mock.accesses == 0);
     TEST_CHECK(
-        pro_send_frame(&transaction, PRO_CMD_SYS, 0x10, payload, ED64_PRO_FRAME_MAX - 5, deadline_ms(1000)) ==
+        pro_send_frame(PRO_CMD_SYS, 0x10, payload, ED64_PRO_FRAME_MAX - 5, deadline_ms(1000)) ==
         ED64_PRO_LL_OK
     );
     TEST_CHECK(mock.tx_count == ED64_PRO_FRAME_MAX && mock.bus_count == ED64_PRO_FRAME_MAX / ED64_PRO_FIFO_CHUNK);
@@ -1840,7 +1626,6 @@ static void test_frame_limits (void) {
     for (size_t i = 0; i < mock.bus_count; i++) {
         TEST_CHECK(mock.bus[i].length == ED64_PRO_FIFO_CHUNK * 4 && mock.bus[i].write);
     }
-    end(&transaction);
 }
 
 /**
@@ -1849,42 +1634,27 @@ static void test_frame_limits (void) {
 static void test_rtc_frames (void) {
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     uint8_t output[ED64_PRO_RTC_SIZE];
     const uint8_t initial[] = {0x26, 0x11, 0x16, 0x12, 0x34, 0x56, 0x02, 0xA5};
-    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000)) == ED64_PRO_LL_OK);
+    TEST_CHECK(ed64_pro_ll_rtc_get(output, deadline_ms(1000)) == ED64_PRO_LL_OK);
     TEST_CHECK(memcmp(output, initial, sizeof(output)) == 0);
     const uint8_t get_frame[] = {0x2B, 0xD4, 0x83, 0x7C, 0x10};
     TEST_CHECK(mock.tx_count == sizeof(get_frame) && memcmp(mock.tx_bytes, get_frame, sizeof(get_frame)) == 0);
     TEST_CHECK(mock.bus[1].write && mock.bus[1].length == 20);
     TEST_CHECK(mock.rtc_get_commands == 1 && mock.status_requests == 0);
-    end(&transaction);
 }
 
 /**
- * @brief Reject invalid arguments, context, and ownership before issuing RTC commands.
+ * @brief Reject invalid arguments and unidentified hardware before issuing RTC commands.
  */
 static void test_rtc_rejections (void) {
     power_on();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     uint8_t bytes[ED64_PRO_RTC_SIZE] = {0};
-    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
+    TEST_CHECK(ed64_pro_ll_rtc_get(bytes, deadline_ms(1000)) == ED64_PRO_LL_NOT_IDENTIFIED);
     TEST_CHECK(mock.accesses == 0);
-    end(&transaction);
     identify();
-    begin(&transaction);
-    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    ed64_pro_ll_transaction_t other;
-    TEST_CHECK(ed64_pro_ll_rtc_get(&other, bytes, deadline_ms(1000)) == ED64_PRO_LL_BUSY);
-    mock.kernel = true;
-    TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, bytes, deadline_ms(1000)) == ED64_PRO_LL_CONTEXT);
-    mock.kernel = false;
-    TEST_CHECK(pro_send_frame(&transaction, PRO_CMD_RTC, 0x11, NULL, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(pro_send_frame(&transaction, PRO_CMD_RTC, 0x12, NULL, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_rtc_get(NULL, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 /**
@@ -1894,8 +1664,6 @@ static void test_rtc_reply_faults (void) {
     for (unsigned fault = 0; fault < 4; fault++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         uint8_t output[ED64_PRO_RTC_SIZE];
         memset(output, 0xAA, sizeof(output));
         mock.tick_step = TICKS_FROM_MS(1) / 8;
@@ -1904,16 +1672,15 @@ static void test_rtc_reply_faults (void) {
         if (fault == 3) {
             rx_push(0x00); /* Unsolicited data must not be consumed as a fresh reply. */
         }
-        ed64_pro_ll_error_t error = ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000));
+        ed64_pro_ll_error_t error = ed64_pro_ll_rtc_get(output, deadline_ms(1000));
         TEST_CHECK(fault < 2 ? is_deadline_error(error) : error == ED64_PRO_LL_TRAILING_DATA);
         for (size_t i = 0; i < sizeof(output); i++) {
             TEST_CHECK(output[i] == 0xAA);
         }
         TEST_CHECK(mock.rtc_get_commands == (fault == 3 ? 0u : 1u));
         unsigned accesses = mock.accesses;
-        TEST_CHECK(ed64_pro_ll_rtc_get(&transaction, output, deadline_ms(1000)) == error);
+        TEST_CHECK(ed64_pro_ll_rtc_get(output, deadline_ms(1000)) == error);
         TEST_CHECK(mock.accesses == accesses);
-        end(&transaction);
     }
 }
 
@@ -1924,17 +1691,14 @@ static void test_sys_info (void) {
     for (size_t count = 1; count <= 2; count++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         const uint32_t ids[] = {ED64_PRO_INFS_TS_FW, ED64_PRO_INFS_MAX_ROM_SIZE};
         uint32_t values[2] = {0, 0xDEADBEEF};
-        TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, count, deadline_ms(1000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(ed64_pro_ll_get_sys_info(ids, values, count, deadline_ms(1000)) == ED64_PRO_LL_OK);
         TEST_CHECK(values[0] == 0x90555D4E);
         TEST_CHECK(values[1] == (count == 2 ? 0x04000000 : 0xDEADBEEF));
         const uint8_t frame[] = {0x2B, 0xD4, 0x84, 0x7B, 0x10, count, 0, 0, 0, 6, 0, 0, 0, 9};
         TEST_CHECK(mock.tx_count == 6 + count * 4 && memcmp(mock.tx_bytes, frame, mock.tx_count) == 0);
         TEST_CHECK(mock.info_requests == 1 && mock.rx_count == 0 && mock.status_requests == 0);
-        end(&transaction);
     }
 }
 
@@ -1947,7 +1711,7 @@ static void test_voltage_get_info (void) {
     const uint8_t frame[] = {0x2B, 0xD4, 0x84, 0x7B, 0x10, 1, 0, 0, 0, 139};
     TEST_CHECK(mock.tx_count == sizeof(frame) && memcmp(mock.tx_bytes, frame, sizeof(frame)) == 0);
     TEST_CHECK(mock.info_requests == 1 && mock.status_requests == 0 && mock.nresp_requests == 0);
-    TEST_CHECK(mock.rx_count == 0 && pro_ll.owner == NULL);
+    TEST_CHECK(mock.rx_count == 0);
     unsigned accesses = mock.accesses;
     TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK && output == 3300 && mock.accesses == accesses);
     mock.now = pro_voltage.ticks + TICKS_FROM_MS(PRO_VOLTAGE_REFRESH_MS);
@@ -1975,7 +1739,7 @@ static void test_voltage_get_info_faults (void) {
             ed64_pro_ll_failure_t failure = *ed64_pro_ll_get_failure();
             TEST_CHECK(length == 4 ? failure.code == ED64_PRO_LL_TRAILING_DATA : is_deadline_error(failure.code));
             TEST_CHECK(failure.transferred == length);
-            TEST_CHECK(mock.info_requests == after_sample + 1 && pro_ll.owner == NULL);
+            TEST_CHECK(mock.info_requests == after_sample + 1);
             unsigned accesses = mock.accesses;
             /* Even an unexpired successful cache cannot mask the terminal fault. */
             pro_voltage.result = FLASHCART_OK;
@@ -1988,7 +1752,7 @@ static void test_voltage_get_info_faults (void) {
     }
 }
 
-/** @brief Read the actual full-width register and reject foreground ownership conflicts. */
+/** @brief Read the full-width button register and preserve arguments/output on failure. */
 static void test_button_register (void) {
     power_on();
     identify();
@@ -2002,21 +1766,32 @@ static void test_button_register (void) {
         TEST_CHECK(!mock.bus[i].write && mock.sysstat_reads == i + 1);
         TEST_CHECK(mock.tx_count == 0 && mock.dma_reads == 0 && mock.dma_writes == 0);
     }
-    uint16_t voltage = 0xBEEF;
-    TEST_ASSERT(pro_get_voltage(&voltage) == FLASHCART_OK);
     unsigned accesses = mock.accesses;
+    TEST_CHECK(pro_get_button_state(NULL) == FLASHCART_ERR_ARGS);
+    TEST_CHECK(mock.accesses == accesses);
+    pro_fail(ED64_PRO_LL_TIMEOUT);
     bool pressed = true;
-    mock.kernel = true;
     TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_ERR_INT && pressed);
-    TEST_CHECK(pro_get_voltage(&voltage) == FLASHCART_ERR_INT && voltage == 3300);
     TEST_CHECK(mock.accesses == accesses);
-    mock.kernel = false;
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
-    TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_ERR_INT && pressed);
-    TEST_CHECK(pro_get_voltage(&voltage) == FLASHCART_ERR_INT && voltage == 3300);
-    TEST_CHECK(mock.accesses == accesses);
-    end(&transaction);
+}
+
+/**
+ * @brief Attribute preexisting FIFO data to the new request, without stale receive progress.
+ */
+static void test_new_request_progress (void) {
+    power_on();
+    identify();
+    ed64_pro_status_t status;
+    TEST_ASSERT(ed64_pro_ll_read_status(&status, deadline_ms(1000)) == ED64_PRO_LL_OK);
+    TEST_ASSERT(pro_ll.transferred == sizeof(status));
+    rx_push(0xEE);
+    unsigned writes = mock.cart_writes;
+    const uint32_t id = ED64_PRO_INFS_TS_FW;
+    uint32_t value = 0xDEADBEEF;
+    TEST_CHECK(ed64_pro_ll_get_sys_info(&id, &value, 1, deadline_ms(1000)) == ED64_PRO_LL_TRAILING_DATA);
+    TEST_CHECK(ed64_pro_ll_get_failure()->transferred == 0);
+    TEST_CHECK(mock.cart_writes == writes && mock.info_requests == 0 && mock.rx_count == 1);
+    TEST_CHECK(value == 0xDEADBEEF);
 }
 
 /**
@@ -2025,19 +1800,16 @@ static void test_button_register (void) {
 static void test_sys_info_invalid (void) {
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     uint32_t ids[] = {ED64_PRO_INFS_TS_FW, 8};
     uint32_t values[2] = {0};
-    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, NULL, values, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, NULL, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, 3, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, 2, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_get_sys_info(NULL, values, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_get_sys_info(ids, NULL, 1, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_get_sys_info(ids, values, 0, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_get_sys_info(ids, values, 3, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_get_sys_info(ids, values, 2, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     uint8_t detail;
-    TEST_CHECK(ed64_pro_ll_read_nresp(&transaction, 0xB0, &detail, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_read_nresp(0xB0, &detail, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 /**
@@ -2047,21 +1819,18 @@ static void test_sys_info_faults (void) {
     for (unsigned trailing = 0; trailing < 2; trailing++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         const uint32_t ids[] = {ED64_PRO_INFS_TS_FW, ED64_PRO_INFS_MAX_ROM_SIZE};
         uint32_t values[] = {0xDEADBEEF, 0xDEADBEEF};
         mock.info_reply_limit = trailing ? 8 : 7;
         mock.info_trailing = trailing;
         mock.tick_step = TICKS_FROM_MS(1) / 8;
-        ed64_pro_ll_error_t error = ed64_pro_ll_get_sys_info(&transaction, ids, values, 2, deadline_ms(1000));
+        ed64_pro_ll_error_t error = ed64_pro_ll_get_sys_info(ids, values, 2, deadline_ms(1000));
         TEST_CHECK(trailing ? error == ED64_PRO_LL_TRAILING_DATA : is_deadline_error(error));
         TEST_CHECK(values[0] == 0xDEADBEEF && values[1] == 0xDEADBEEF);
         TEST_CHECK(mock.info_requests == 1 && mock.nresp_requests == 0);
         unsigned accesses = mock.accesses;
-        TEST_CHECK(ed64_pro_ll_get_sys_info(&transaction, ids, values, 2, deadline_ms(1000)) == error);
+        TEST_CHECK(ed64_pro_ll_get_sys_info(ids, values, 2, deadline_ms(1000)) == error);
         TEST_CHECK(mock.accesses == accesses);
-        end(&transaction);
     }
 }
 
@@ -2072,15 +1841,13 @@ static void test_nresp (void) {
     for (unsigned fault = 0; fault < 4; fault++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         mock.replies[0].bytes[3] = 0xB0;
         mock.replies[0].bytes[0] = fault == 1 ? 0xEE : 0x5A;
         mock.nresp_missing = fault == 2;
         mock.nresp_trailing = fault == 3;
         mock.tick_step = TICKS_FROM_MS(1) / 8;
         ed64_pro_status_t status;
-        ed64_pro_ll_error_t error = ed64_pro_ll_check_status(&transaction, &status, deadline_ms(1000));
+        ed64_pro_ll_error_t error = ed64_pro_ll_check_status(&status, deadline_ms(1000));
         TEST_CHECK(
             fault == 0   ? error == ED64_PRO_LL_MCU_ERROR
             : fault == 1 ? error == ED64_PRO_LL_FRAME
@@ -2096,9 +1863,8 @@ static void test_nresp (void) {
             TEST_CHECK(mock.tx_count == sizeof(wire) && memcmp(mock.tx_bytes, wire, sizeof(wire)) == 0);
         }
         unsigned accesses = mock.accesses;
-        TEST_CHECK(ed64_pro_ll_check_status(&transaction, &status, deadline_ms(1000)) == error);
+        TEST_CHECK(ed64_pro_ll_check_status(&status, deadline_ms(1000)) == error);
         TEST_CHECK(mock.accesses == accesses);
-        end(&transaction);
     }
 }
 
@@ -2112,8 +1878,6 @@ static void test_ack_helpers (void) {
         for (size_t i = 0; i < sizeof(lengths) / sizeof(lengths[0]); i++) {
             power_on();
             identify();
-            ed64_pro_ll_transaction_t transaction;
-            begin(&transaction);
             mock.transfer_active = true;
             mock.transfer_write = write;
             mock.transfer_lba = 3;
@@ -2124,13 +1888,12 @@ static void test_ack_helpers (void) {
             }
             memset(buffer, 0xC6, sizeof(buffer));
             ed64_pro_ll_error_t error =
-                write ? pro_fifo_write_ack(&transaction, buffer, lengths[i], false, deadline_ms(5000))
-                      : pro_fifo_read_ack(&transaction, buffer, lengths[i], deadline_ms(5000));
+                write ? pro_fifo_write_ack(buffer, lengths[i], false, deadline_ms(5000))
+                      : pro_fifo_read_ack(buffer, lengths[i], deadline_ms(5000));
             TEST_CHECK(error == ED64_PRO_LL_OK);
             TEST_CHECK(memcmp(buffer, mock.sectors + 3 * 512, lengths[i]) == 0);
             TEST_CHECK((write ? mock.write_acks : mock.read_acks) == (lengths[i] + 1023) / 1024);
             TEST_CHECK(!mock.transfer_active && mock.rx_count == 0 && mock.status_requests == 0);
-            end(&transaction);
         }
     }
 }
@@ -2145,13 +1908,11 @@ static void test_sd_read_write (void) {
         for (size_t i = 0; i < sizeof(counts) / sizeof(counts[0]); i++) {
             power_on();
             identify();
-            ed64_pro_ll_transaction_t transaction;
-            begin(&transaction);
             uint32_t count = counts[i];
             size_t length = count * 512;
             memset(buffer, 0xA5, sizeof(buffer));
-            ed64_pro_ll_error_t error = write ? ed64_pro_ll_sd_write(&transaction, buffer, 3, count, deadline_ms(5000))
-                                              : ed64_pro_ll_sd_read(&transaction, buffer, 3, count, deadline_ms(5000));
+            ed64_pro_ll_error_t error = write ? ed64_pro_ll_sd_write(buffer, 3, count, deadline_ms(5000))
+                                              : ed64_pro_ll_sd_read(buffer, 3, count, deadline_ms(5000));
             TEST_CHECK(error == ED64_PRO_LL_OK);
             TEST_CHECK(memcmp(buffer, mock.sectors + 3 * 512, length) == 0);
             TEST_CHECK(mock.sectors[3 * 512 - 1] == (uint8_t)((3 * 512 - 1) * 37 + 2));
@@ -2173,7 +1934,6 @@ static void test_sd_read_write (void) {
                 mock.tx_bytes[frame_offset + 21] == 0
             );
             TEST_CHECK(mock.rx_count == 0 && !mock.transfer_active);
-            end(&transaction);
         }
     }
 }
@@ -2184,8 +1944,6 @@ static void test_sd_read_write (void) {
 static void test_sd_invalid (void) {
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     uint8_t byte;
     for (unsigned write = 0; write < 2; write++) {
         const struct {
@@ -2196,16 +1954,15 @@ static void test_sd_invalid (void) {
         for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
             ed64_pro_ll_error_t error =
                 write ? ed64_pro_ll_sd_write(
-                            &transaction, cases[i].buffer, cases[i].lba, cases[i].count, deadline_ms(5000)
+                            cases[i].buffer, cases[i].lba, cases[i].count, deadline_ms(5000)
                         )
                       : ed64_pro_ll_sd_read(
-                            &transaction, cases[i].buffer, cases[i].lba, cases[i].count, deadline_ms(5000)
+                            cases[i].buffer, cases[i].lba, cases[i].count, deadline_ms(5000)
                         );
             TEST_CHECK(error == ED64_PRO_LL_ARGUMENT);
         }
     }
     TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 /**
@@ -2217,22 +1974,19 @@ static void test_sd_ack_timeouts (void) {
         for (unsigned block = 1; block <= 4; block++) {
             power_on();
             identify();
-            ed64_pro_ll_transaction_t transaction;
-            begin(&transaction);
             mock.stall_read_ack = write ? 0 : block;
             mock.stall_write_ack = write ? block : 0;
             mock.tick_step = TICKS_FROM_MS(1) / 64;
             uint32_t deadline = deadline_ms(1000);
-            ed64_pro_ll_error_t error = write ? ed64_pro_ll_sd_write(&transaction, buffer, 0, 8, deadline)
-                                              : ed64_pro_ll_sd_read(&transaction, buffer, 0, 8, deadline);
+            ed64_pro_ll_error_t error = write ? ed64_pro_ll_sd_write(buffer, 0, 8, deadline)
+                                              : ed64_pro_ll_sd_read(buffer, 0, 8, deadline);
             TEST_CHECK(is_deadline_error(error));
             TEST_CHECK((int32_t)(mock.now - deadline) >= 0 && mock.now - deadline < TICKS_FROM_MS(2));
             TEST_CHECK((write ? mock.write_acks : mock.read_acks) == block);
             TEST_CHECK(mock.status_requests == 0);
             unsigned accesses = mock.accesses;
-            TEST_CHECK(ed64_pro_ll_sd_read(&transaction, buffer, 0, 1, deadline_ms(5000)) == error);
+            TEST_CHECK(ed64_pro_ll_sd_read(buffer, 0, 1, deadline_ms(5000)) == error);
             TEST_CHECK(mock.accesses == accesses);
-            end(&transaction);
         }
     }
 }
@@ -2245,15 +1999,13 @@ static void test_sd_faults (void) {
     for (unsigned fault = 0; fault < 5; fault++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         mock.wre_reply = fault == 0;
         mock.data_trailing = fault == 1;
         mock.replies[0].bytes[0] = fault == 2 ? 0xEE : 0x5A;
         mock.replies[0].bytes[3] = fault == 3 ? 0xB0 : 0;
         mock.replies[0].length = fault == 4 ? 3 : 4;
         mock.tick_step = TICKS_FROM_MS(1) / 64;
-        ed64_pro_ll_error_t error = ed64_pro_ll_sd_write(&transaction, buffer, 0, 3, deadline_ms(1000));
+        ed64_pro_ll_error_t error = ed64_pro_ll_sd_write(buffer, 0, 3, deadline_ms(1000));
         TEST_CHECK(
             fault <= 1   ? error == ED64_PRO_LL_TRAILING_DATA
             : fault == 2 ? error == ED64_PRO_LL_FRAME
@@ -2264,9 +2016,8 @@ static void test_sd_faults (void) {
         TEST_CHECK(mock.nresp_requests == (fault == 3 ? 1 : 0));
         TEST_CHECK(mock.transfer_done == (fault == 0 ? 0 : sizeof(buffer)));
         unsigned accesses = mock.accesses;
-        TEST_CHECK(ed64_pro_ll_sd_write(&transaction, buffer, 0, 3, deadline_ms(5000)) == error);
+        TEST_CHECK(ed64_pro_ll_sd_write(buffer, 0, 3, deadline_ms(5000)) == error);
         TEST_CHECK(mock.accesses == accesses);
-        end(&transaction);
     }
 }
 
@@ -2279,15 +2030,13 @@ static void test_fci_transfers (void) {
         for (unsigned swap = 0; swap < 2; swap++) {
             power_on();
             identify();
-            ed64_pro_ll_transaction_t transaction;
-            begin(&transaction);
             uint32_t count = counts[i];
             uint32_t fci = 0x10000;
             TEST_ASSERT(
-                ed64_pro_ll_set_flags(&transaction, ED64_PRO_FLAG_WRSW, swap, deadline_ms(5000)) == ED64_PRO_LL_OK
+                ed64_pro_ll_set_flags(ED64_PRO_FLAG_WRSW, swap, deadline_ms(5000)) == ED64_PRO_LL_OK
             );
             size_t frame_start = mock.tx_count;
-            TEST_CHECK(ed64_pro_ll_sd_read_fci(&transaction, fci, 0, count, deadline_ms(5000)) == ED64_PRO_LL_OK);
+            TEST_CHECK(ed64_pro_ll_sd_read_fci(fci, 0, count, deadline_ms(5000)) == ED64_PRO_LL_OK);
             TEST_CHECK(mock.fci_transfers == 1 && mock.fci_address == fci && mock.transfer_done == count * 512);
             const uint8_t header[] = {0x2B, 0xD4, 0x81, 0x7E, 0x10, 0, 0, 0, 0, 0, 1, 0, 0};
             TEST_CHECK(memcmp(mock.tx_bytes + frame_start, header, sizeof(header)) == 0);
@@ -2305,10 +2054,9 @@ static void test_fci_transfers (void) {
             }
             TEST_CHECK(mock.read_acks == 0 && mock.write_acks == 0 && mock.status_requests == 1);
             TEST_ASSERT(
-                ed64_pro_ll_set_flags(&transaction, ED64_PRO_FLAG_WRSW, 0, deadline_ms(5000)) == ED64_PRO_LL_OK
+                ed64_pro_ll_set_flags(ED64_PRO_FLAG_WRSW, 0, deadline_ms(5000)) == ED64_PRO_LL_OK
             );
             TEST_CHECK(mock.flags == 0 && mock.flag_commands == 2 && mock.status_requests == 1);
-            end(&transaction);
         }
     }
 }
@@ -2319,8 +2067,6 @@ static void test_fci_transfers (void) {
 static void test_fci_invalid (void) {
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     const struct {
         uint32_t fci;
         uint32_t lba;
@@ -2336,15 +2082,14 @@ static void test_fci_invalid (void) {
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         TEST_CHECK(
-            ed64_pro_ll_sd_read_fci(&transaction, cases[i].fci, cases[i].lba, cases[i].count, deadline_ms(5000)) ==
+            ed64_pro_ll_sd_read_fci(cases[i].fci, cases[i].lba, cases[i].count, deadline_ms(5000)) ==
             ED64_PRO_LL_ARGUMENT
         );
     }
-    TEST_CHECK(ed64_pro_ll_set_flags(&transaction, 0, 0, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_set_flags(&transaction, 2, 2, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
-    TEST_CHECK(ed64_pro_ll_set_flags(&transaction, 1, 2, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_set_flags(0, 0, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_set_flags(2, 2, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_set_flags(1, 2, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 /**
@@ -2354,13 +2099,11 @@ static void test_flag_frames_and_faults (void) {
     for (unsigned fault = 0; fault < 4; fault++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         mock.sysstat_busy = fault == 1;
         mock.sysstat_unstable = fault == 2;
         mock.flags_trailing = fault == 3;
         mock.tick_step = TICKS_FROM_MS(1) / 8;
-        ed64_pro_ll_error_t error = ed64_pro_ll_set_flags(&transaction, 1, 1, deadline_ms(1000));
+        ed64_pro_ll_error_t error = ed64_pro_ll_set_flags(1, 1, deadline_ms(1000));
         TEST_CHECK(
             fault == 0   ? error == ED64_PRO_LL_OK
             : fault == 3 ? error == ED64_PRO_LL_TRAILING_DATA
@@ -2371,10 +2114,9 @@ static void test_flag_frames_and_faults (void) {
         TEST_CHECK(mock.flag_commands == 1 && mock.status_requests == 0 && mock.sysstat_reads >= 2);
         if (fault) {
             unsigned accesses = mock.accesses;
-            TEST_CHECK(ed64_pro_ll_set_flags(&transaction, 1, 0, deadline_ms(1000)) == error);
+            TEST_CHECK(ed64_pro_ll_set_flags(1, 0, deadline_ms(1000)) == error);
             TEST_CHECK(mock.accesses == accesses);
         }
-        end(&transaction);
     }
 }
 
@@ -2385,17 +2127,14 @@ static void test_fci_status_failure (void) {
     for (unsigned malformed = 0; malformed < 2; malformed++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         mock.replies[0].bytes[0] = malformed ? 0xEE : 0x5A;
         mock.replies[0].bytes[3] = 0xB0;
-        ed64_pro_ll_error_t error = ed64_pro_ll_sd_read_fci(&transaction, 0, 0, 1, deadline_ms(5000));
+        ed64_pro_ll_error_t error = ed64_pro_ll_sd_read_fci(0, 0, 1, deadline_ms(5000));
         TEST_CHECK(error == (malformed ? ED64_PRO_LL_FRAME : ED64_PRO_LL_MCU_ERROR));
         TEST_CHECK(mock.nresp_requests == (malformed ? 0 : 1));
         unsigned accesses = mock.accesses;
-        TEST_CHECK(ed64_pro_ll_sd_read_fci(&transaction, 0, 0, 1, deadline_ms(5000)) == error);
+        TEST_CHECK(ed64_pro_ll_sd_read_fci(0, 0, 1, deadline_ms(5000)) == error);
         TEST_CHECK(mock.accesses == accesses && mock.fci_transfers == 1);
-        end(&transaction);
     }
 }
 
@@ -2405,10 +2144,8 @@ static void test_fci_status_failure (void) {
 static void test_menu_config (void) {
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     ed64_pro_dev_cfg_t config = {.rtc_mode = ED64_PRO_RTC_STD};
-    TEST_ASSERT(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_OK);
+    TEST_ASSERT(ed64_pro_ll_dev_set_cfg(&config, deadline_ms(5000)) == ED64_PRO_LL_OK);
     const uint8_t expected[] = {
         0x2B, 0xD4, 0x85, 0x7A, 0x20,
         0, 0, 0, 0, 0, 0, 0, 0,
@@ -2421,11 +2158,9 @@ static void test_menu_config (void) {
     const uint8_t status[] = {0x2B, 0xD4, 0x10, 0xEF};
     TEST_CHECK(memcmp(mock.tx_bytes + 69, status, sizeof(status)) == 0);
     TEST_CHECK(mock.config_commands == 1 && mock.start_commands == 0 && mock.status_requests == 1);
-    end(&transaction);
 
     power_on();
     identify();
-    begin(&transaction);
     for (unsigned fault = 0; fault < 20; fault++) {
         config = (ed64_pro_dev_cfg_t){.rtc_mode = ED64_PRO_RTC_STD};
         switch (fault) {
@@ -2443,13 +2178,12 @@ static void test_menu_config (void) {
         case 11: config.gpak_key = 1; break;
         default: config.reserved[fault - 12] = 1; break;
         }
-        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&config, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     }
     ed64_pro_dev_cfg_t unsafe = {.brom_type = ED64_PRO_ROM_GPAK, .gpak_size = 512,
                                .brm_type = ED64_PRO_BRM_SRM32K, .brm_size = 32768, .rtc_mode = ED64_PRO_RTC_STD};
-    TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &unsafe, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_dev_set_cfg(&unsafe, deadline_ms(1000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(mock.accesses == 0 && ed64_pro_ll_get_failure()->code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 /**
@@ -2473,10 +2207,8 @@ static void test_dev_path_frames (void) {
     for (unsigned type = 0; type < 3; type++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         ed64_pro_path_t path_type = type == 0 ? ED64_PRO_PATH_GPAK : type == 1 ? ED64_PRO_PATH_BRM : ED64_PRO_PATH_DISK;
-        TEST_CHECK(ed64_pro_ll_dev_set_path(&transaction, path_type, paths[type], deadline_ms(5000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(ed64_pro_ll_dev_set_path(path_type, paths[type], deadline_ms(5000)) == ED64_PRO_LL_OK);
         const uint8_t header[] = {0x2B, 0xD4, 0x85, 0x7A, 0x21, type * 2, 0, strlen(paths[type])};
         TEST_CHECK(memcmp(mock.tx_bytes, header, sizeof(header)) == 0);
         TEST_CHECK(memcmp(mock.tx_bytes + sizeof(header), paths[type], strlen(paths[type])) == 0);
@@ -2486,17 +2218,14 @@ static void test_dev_path_frames (void) {
         TEST_CHECK(
             strcmp(mock.dev_paths[type], paths[type]) == 0 && mock.path_commands == 1 && mock.status_requests == 1
         );
-        end(&transaction);
     }
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     char path[ED64_PRO_PATH_MAX + 1];
     memset(path, 'a', sizeof(path));
     path[0] = '/';
     path[ED64_PRO_PATH_MAX] = '\0';
-    TEST_CHECK(ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_GPAK, path, deadline_ms(5000)) == ED64_PRO_LL_OK);
+    TEST_CHECK(ed64_pro_ll_dev_set_path(ED64_PRO_PATH_GPAK, path, deadline_ms(5000)) == ED64_PRO_LL_OK);
     TEST_CHECK(strcmp(mock.dev_paths[0], path) == 0 && mock.tx_count == ED64_PRO_PATH_MAX + 12);
     size_t frame_bytes = 0;
     unsigned frame_dmas = 0;
@@ -2508,7 +2237,6 @@ static void test_dev_path_frames (void) {
         }
     }
     TEST_CHECK(frame_bytes == ED64_PRO_PATH_MAX + 8 && frame_dmas == 9);
-    end(&transaction);
 }
 
 /**
@@ -2517,12 +2245,10 @@ static void test_dev_path_frames (void) {
 static void test_dev_invalid_arguments (void) {
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     const char *paths[] = {NULL, "", "relative/file", "sd:/game.z64"};
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
         TEST_CHECK(
-            ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_GPAK, paths[i], deadline_ms(5000)) ==
+            ed64_pro_ll_dev_set_path(ED64_PRO_PATH_GPAK, paths[i], deadline_ms(5000)) ==
             ED64_PRO_LL_ARGUMENT
         );
     }
@@ -2531,18 +2257,18 @@ static void test_dev_invalid_arguments (void) {
     path[0] = '/';
     path[sizeof(path) - 1] = '\0';
     TEST_CHECK(
-        ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_GPAK, path, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
+        ed64_pro_ll_dev_set_path(ED64_PRO_PATH_GPAK, path, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
     );
     TEST_CHECK(
-        ed64_pro_ll_dev_set_path(&transaction, (ed64_pro_path_t)1, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
+        ed64_pro_ll_dev_set_path((ed64_pro_path_t)1, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
     );
     TEST_CHECK(
-        ed64_pro_ll_dev_set_path(&transaction, (ed64_pro_path_t)3, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
+        ed64_pro_ll_dev_set_path((ed64_pro_path_t)3, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
     );
     TEST_CHECK(
-        ed64_pro_ll_dev_set_path(&transaction, (ed64_pro_path_t)5, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
+        ed64_pro_ll_dev_set_path((ed64_pro_path_t)5, "/file", deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT
     );
-    TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, NULL, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_dev_set_cfg(NULL, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
     for (unsigned invalid = 0; invalid < 12; invalid++) {
         ed64_pro_dev_cfg_t config = launch_config();
         switch (invalid) {
@@ -2559,10 +2285,9 @@ static void test_dev_invalid_arguments (void) {
         case 10: config.reserved[0] = 1; break;
         case 11: config.reserved[7] = 1; break;
         }
-        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&config, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
     }
     TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 /**
@@ -2573,12 +2298,10 @@ static void test_dev_config_frame (void) {
     for (unsigned type = 0; type < sizeof(sizes) / sizeof(sizes[0]); type++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         ed64_pro_dev_cfg_t config = launch_config();
         config.brm_type = type;
         config.brm_size = sizes[type];
-        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&config, deadline_ms(5000)) == ED64_PRO_LL_OK);
         const uint8_t header[] = {0x2B, 0xD4, 0x85, 0x7A, 0x20, 0, 0, 0, 2, 1, 0, 2, 0};
         TEST_CHECK(memcmp(mock.tx_bytes, header, sizeof(header)) == 0 && mock.tx_count == 73);
         TEST_CHECK(
@@ -2597,7 +2320,6 @@ static void test_dev_config_frame (void) {
             TEST_CHECK(mock.config_bytes[i] == 0);
         }
         TEST_CHECK(mock.config_commands == 1 && mock.status_requests == 1);
-        end(&transaction);
     }
 }
 
@@ -2608,22 +2330,20 @@ static void test_dev_order_and_faults (void) {
     for (unsigned failed_step = 0; failed_step <= 4; failed_step++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         if (failed_step < 4) {
             mock.replies[failed_step].bytes[3] = 0xB0;
         }
         ed64_pro_dev_cfg_t config = launch_config();
         ed64_pro_ll_error_t error =
-            ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_GPAK, "/game.z64", deadline_ms(5000));
+            ed64_pro_ll_dev_set_path(ED64_PRO_PATH_GPAK, "/game.z64", deadline_ms(5000));
         if (error == ED64_PRO_LL_OK) {
-            error = ed64_pro_ll_dev_set_path(&transaction, ED64_PRO_PATH_BRM, "/saves/game.sav", deadline_ms(5000));
+            error = ed64_pro_ll_dev_set_path(ED64_PRO_PATH_BRM, "/saves/game.sav", deadline_ms(5000));
         }
         if (error == ED64_PRO_LL_OK) {
-            error = ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000));
+            error = ed64_pro_ll_dev_set_cfg(&config, deadline_ms(5000));
         }
         if (error == ED64_PRO_LL_OK) {
-            error = ed64_pro_ll_dev_start(&transaction, deadline_ms(5000));
+            error = ed64_pro_ll_dev_start(deadline_ms(5000));
         }
         TEST_CHECK(error == (failed_step == 4 ? ED64_PRO_LL_OK : ED64_PRO_LL_MCU_ERROR));
         size_t steps = failed_step == 4 ? 4 : failed_step + 1;
@@ -2637,10 +2357,9 @@ static void test_dev_order_and_faults (void) {
             );
         } else {
             unsigned accesses = mock.accesses;
-            TEST_CHECK(ed64_pro_ll_dev_start(&transaction, deadline_ms(5000)) == error);
+            TEST_CHECK(ed64_pro_ll_dev_start(deadline_ms(5000)) == error);
             TEST_CHECK(mock.accesses == accesses);
         }
-        end(&transaction);
     }
 }
 
@@ -2653,22 +2372,20 @@ static void test_sd_injected_write_failure (void) {
     identify();
     uint8_t buffer[1536];
     memset(buffer, 0x69, sizeof(buffer));
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
+
     for (unsigned i = 1; i < ED64_PRO_TEST_FAIL_WRITE_N; i++) {
-        TEST_ASSERT(ed64_pro_ll_sd_write(&transaction, buffer, 0, 3, deadline_ms(5000)) == ED64_PRO_LL_OK);
+        TEST_ASSERT(ed64_pro_ll_sd_write(buffer, 0, 3, deadline_ms(5000)) == ED64_PRO_LL_OK);
     }
     uint8_t original[512];
     memcpy(original, mock.sectors + 1024, sizeof(original));
     memset(buffer, 0xA6, sizeof(buffer));
-    TEST_CHECK(ed64_pro_ll_sd_write(&transaction, buffer, 0, 3, deadline_ms(5000)) == ED64_PRO_LL_TIMEOUT);
+    TEST_CHECK(ed64_pro_ll_sd_write(buffer, 0, 3, deadline_ms(5000)) == ED64_PRO_LL_TIMEOUT);
     TEST_CHECK(memcmp(mock.sectors, buffer, 1024) == 0);
     TEST_CHECK(memcmp(mock.sectors + 1024, original, sizeof(original)) == 0);
     TEST_CHECK(mock.transfer_done == 1024 && mock.status_requests == ED64_PRO_TEST_FAIL_WRITE_N - 1);
     unsigned accesses = mock.accesses;
-    TEST_CHECK(ed64_pro_ll_sd_read(&transaction, buffer, 0, 1, deadline_ms(5000)) == ED64_PRO_LL_TIMEOUT);
+    TEST_CHECK(ed64_pro_ll_sd_read(buffer, 0, 1, deadline_ms(5000)) == ED64_PRO_LL_TIMEOUT);
     TEST_CHECK(mock.accesses == accesses);
-    end(&transaction);
 }
 #endif
 
@@ -2678,9 +2395,7 @@ static void test_dd_ipl_fci_frames_and_bounds (void) {
     for (unsigned i = 0; i < 2; i++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
-        TEST_CHECK(ed64_pro_ll_sd_read_ipl_fci(&transaction, destinations[i], 1, 1, deadline_ms(5000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(ed64_pro_ll_sd_read_ipl_fci(destinations[i], 1, 1, deadline_ms(5000)) == ED64_PRO_LL_OK);
         const uint8_t prefix[] = {0x2B, 0xD4, 0x81, 0x7E, 0x10, 0, 0, 0, 1};
         TEST_CHECK(memcmp(mock.tx_bytes, prefix, sizeof(prefix)) == 0);
         TEST_CHECK(mock.tx_bytes[9] == (uint8_t)(destinations[i] >> 24));
@@ -2691,12 +2406,9 @@ static void test_dd_ipl_fci_frames_and_bounds (void) {
         TEST_CHECK(memcmp(mock.tx_bytes + 13, tail, sizeof(tail)) == 0 && mock.tx_count == 26);
         TEST_CHECK(mock.fci_address == destinations[i] && mock.fci_transfers == 1);
         TEST_CHECK(memcmp(mock.fci + (destinations[i] - ED64_PRO_FCI_IPL), mock.sectors + 512, 512) == 0);
-        end(&transaction);
     }
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     static const struct { uint32_t address, lba, count; } invalid[] = {
         {0, 0, 1}, {ED64_PRO_FCI_IPL - 512, 0, 1}, {ED64_PRO_FCI_IPL + 1, 0, 1},
         {ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE, 0, 1},
@@ -2705,12 +2417,11 @@ static void test_dd_ipl_fci_frames_and_bounds (void) {
         {ED64_PRO_FCI_IPL, UINT32_MAX, 2}, {ED64_PRO_FCI_IPL, 0, UINT32_MAX}
     };
     for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
-        TEST_CHECK(ed64_pro_ll_sd_read_ipl_fci(&transaction, invalid[i].address, invalid[i].lba,
+        TEST_CHECK(ed64_pro_ll_sd_read_ipl_fci(invalid[i].address, invalid[i].lba,
                                             invalid[i].count, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
     }
-    TEST_CHECK(ed64_pro_ll_sd_read_fci(&transaction, ED64_PRO_FCI_IPL, 0, 1, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+    TEST_CHECK(ed64_pro_ll_sd_read_fci(ED64_PRO_FCI_IPL, 0, 1, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
     TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 /** @brief Disk-only and combo profiles encode documented firmware DD and writable RTC settings. */
@@ -2718,21 +2429,16 @@ static void test_dd_config_profiles (void) {
     for (unsigned combo = 0; combo < 2; combo++) {
         power_on();
         identify();
-        ed64_pro_ll_transaction_t transaction;
-        begin(&transaction);
         ed64_pro_dev_cfg_t config = combo ? launch_config() : (ed64_pro_dev_cfg_t){.brom_type = ED64_PRO_ROM_IPL};
         config.dd_en = 1;
         config.rtc_mode = ED64_PRO_RTC_STD;
-        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_OK);
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&config, deadline_ms(5000)) == ED64_PRO_LL_OK);
         TEST_CHECK(mock.config_bytes[3] == (combo ? ED64_PRO_ROM_GPAK : ED64_PRO_ROM_IPL));
         TEST_CHECK(mock.config_bytes[19] == ED64_PRO_RTC_STD && mock.config_bytes[23] == 1);
         TEST_CHECK(mock.config_bytes[15] == (combo ? ED64_PRO_BRM_EEP4K : ED64_PRO_BRM_OFF));
-        end(&transaction);
     }
     power_on();
     identify();
-    ed64_pro_ll_transaction_t transaction;
-    begin(&transaction);
     for (unsigned fault = 0; fault < 7; fault++) {
         ed64_pro_dev_cfg_t config = {.brom_type = ED64_PRO_ROM_IPL, .rtc_mode = ED64_PRO_RTC_STD, .dd_en = 1};
         switch (fault) {
@@ -2744,21 +2450,20 @@ static void test_dd_config_profiles (void) {
         case 5: config.brom_type = ED64_PRO_ROM_OFF; break;
         case 6: config.brom_type = ED64_PRO_ROM_GPAK; config.gpak_size = ED64_PRO_DD_ROM_LIMIT + 512; break;
         }
-        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
+        TEST_CHECK(ed64_pro_ll_dev_set_cfg(&config, deadline_ms(5000)) == ED64_PRO_LL_ARGUMENT);
     }
     TEST_CHECK(mock.accesses == 0 && pro_ll.failure.code == ED64_PRO_LL_OK);
-    end(&transaction);
 }
 
 TEST_LIST = {
     {"voltage-only exact GET_INF and cached refresh", test_voltage_get_info},
     {"voltage missing partial trailing replies and retained failure", test_voltage_get_info_faults},
-    {"button full-width SYSSTAT and foreground guards", test_button_register},
+    {"button full-width SYSSTAT, arguments and latched failure", test_button_register},
     {"native DD IPL FCI frames and independent bounds", test_dd_ipl_fci_frames_and_bounds},
     {"native DD standalone and combo configuration profiles", test_dd_config_profiles},
     {"RTC physical observation framing", test_rtc_frames},
     {"menu RTC configuration uses OFF/zero and disables storage services", test_menu_config},
-    {"RTC invalid inputs and contexts never write", test_rtc_rejections},
+    {"RTC invalid inputs and unidentified hardware never write", test_rtc_rejections},
     {"RTC partial and unexpected replies latch", test_rtc_reply_faults},
     {"device paths encode lengths and long UTF8 bytes", test_dev_path_frames},
     {"device paths and configuration whitelist reject before I/O", test_dev_invalid_arguments},
@@ -2774,6 +2479,7 @@ TEST_LIST = {
     {"bounded frame chunks and zero-I/O rejection", test_frame_limits},
     {"byte-exact whitelisted system info", test_sys_info},
     {"system info and NRESP invalid arguments", test_sys_info_invalid},
+    {"new request fault resets previous receive progress", test_new_request_progress},
     {"system info partial and trailing replies latch", test_sys_info_faults},
     {"NRESP only follows well-formed nonzero status", test_nresp},
     {"ACK helper read and write block boundaries", test_ack_helpers},
@@ -2786,8 +2492,6 @@ TEST_LIST = {
     {"invalid input never submits DMA", test_invalid_input},
     {"exact deadline is expired", test_exact_deadline},
     {"synchronous completion precedes next protocol timeout", test_completion_at_deadline},
-    {"unsupported contexts preserve IRQ state", test_invalid_context},
-    {"nested transaction and ISR exclusion", test_serialization},
     {"caller cache-line interrupt sharing", test_cache_sharing},
     {"Pro family and device identity fixtures", test_probe_identity},
     {"expired probe stays indeterminate without bus traffic", test_probe_deadline},
@@ -2803,7 +2507,6 @@ TEST_LIST = {
     {"malformed and trailing status are sticky", test_bad_status},
     {"slow partial progress preserves original deadlines", test_slow_partial_status},
     {"partial FIFO timeout preserves completed chunks", test_partial_fifo_timeout},
-    {"command and reply cannot interleave", test_status_serialization},
     {"Pro adapter maps startup through shared errors", test_adapter_initialization},
     {"Pro adapter operations remain unavailable without bus traffic", test_adapter_unavailable_operations},
     {"golden one-shot MCU initialization transcript", test_init_transcript},
@@ -2814,9 +2517,7 @@ TEST_LIST = {
     {"both handoff cleanup phases are bounded", test_init_cleanup_limits},
     {"SD initialization uses its original five-second budget", test_sd_deadline},
     {"whole attempt budget spans probe and initialization", test_whole_attempt_deadline},
-    {"cold-start rejections retain diagnostics and remain retryable", test_cold_start_rejections},
-    {"absent and unsupported context never initialize", test_init_absent_and_context},
-    {"initialization guard covers the complete handoff", test_init_serialization},
+    {"absent cartridges never initialize", test_init_absent},
     {"protocol fault retains confirmed progress and first failure", test_protocol_fault_context},
     {NULL, NULL},
 };

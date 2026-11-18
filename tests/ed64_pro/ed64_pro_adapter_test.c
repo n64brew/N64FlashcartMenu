@@ -231,9 +231,8 @@ static struct {
     unsigned info_calls;
     uint32_t voltage_bcd, sysstat;
     unsigned voltage_calls, button_reads;
-    ed64_pro_ll_error_t register_error, end_error;
-    unsigned begin_calls;
-    unsigned end_calls;
+    ed64_pro_ll_error_t register_error;
+    unsigned transport_calls;
     unsigned reads;
     unsigned writes;
     uint32_t lbas[128];
@@ -241,7 +240,6 @@ static struct {
     unsigned operations;
     unsigned fail_operation;
     ed64_pro_ll_error_t io_error;
-    ed64_pro_ll_error_t begin_error;
     ed64_pro_ll_error_t info_error;
     ed64_pro_ll_error_t init_error;
     ed64_pro_ll_failure_t failure;
@@ -294,28 +292,10 @@ const ed64_pro_ll_failure_t *ed64_pro_ll_get_failure (void) {
 }
 
 /**
- * @brief Record transaction acquisition and return the configured result.
- */
-ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
-    transaction->deadline = deadline;
-    mock.begin_calls++;
-    return mock.begin_error;
-}
-
-/**
- * @brief Record transaction release and report success.
- */
-ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
-    (void)transaction;
-    mock.end_calls++;
-    return mock.end_error;
-}
-
-/**
  * @brief Simulate an empty receive FIFO.
  */
-ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, size_t *drained, uint32_t deadline) {
-    (void)transaction;
+ed64_pro_ll_error_t ed64_pro_ll_drain (size_t *drained, uint32_t deadline) {
+    mock.transport_calls++;
     (void)deadline;
     *drained = 0;
     return ED64_PRO_LL_OK;
@@ -325,8 +305,8 @@ ed64_pro_ll_error_t ed64_pro_ll_drain (ed64_pro_ll_transaction_t *transaction, s
  * @brief Return a valid mock MCU status key.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
-    (void)transaction;
+ed64_pro_ll_read_status (ed64_pro_status_t *status, uint32_t deadline) {
+    mock.transport_calls++;
     (void)deadline;
     *status = (ed64_pro_status_t){.key = 0x5A};
     return ED64_PRO_LL_OK;
@@ -336,15 +316,15 @@ ed64_pro_ll_read_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status
  * @brief Delegate status validation to the mock status reader.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_check_status (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
-    return ed64_pro_ll_read_status(transaction, status, deadline);
+ed64_pro_ll_check_status (ed64_pro_status_t *status, uint32_t deadline) {
+    return ed64_pro_ll_read_status(status, deadline);
 }
 
 /**
  * @brief Simulate a successful stop command.
  */
-ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
-    (void)transaction;
+ed64_pro_ll_error_t ed64_pro_ll_stop (uint32_t deadline) {
+    mock.transport_calls++;
     (void)deadline;
     if (mock.rtc_running) {
         mock.rtc_stops++;
@@ -359,8 +339,8 @@ ed64_pro_ll_error_t ed64_pro_ll_stop (ed64_pro_ll_transaction_t *transaction, ui
  * @brief Record MCU filesystem initialization and return its configured result.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *status, uint32_t deadline) {
-    (void)transaction;
+ed64_pro_ll_init_sd (ed64_pro_status_t *status, uint32_t deadline) {
+    mock.transport_calls++;
     (void)deadline;
     mock.fs_inits++;
     mock.events[mock.events_count++] = 'F';
@@ -372,13 +352,12 @@ ed64_pro_ll_init_sd (ed64_pro_ll_transaction_t *transaction, ed64_pro_status_t *
  * @brief Check the requested information IDs and return mock firmware data.
  */
 ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
-    ed64_pro_ll_transaction_t *transaction,
     const uint32_t *ids,
     uint32_t *values,
     size_t count,
     uint32_t deadline
 ) {
-    (void)transaction;
+    mock.transport_calls++;
     (void)deadline;
     if (count == 1 && ids[0] == ED64_PRO_INFD_VCC_3V3) {
         mock.voltage_calls++;
@@ -393,9 +372,11 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
 
 /** @brief Preserve the full-width button status supplied by the fixture. */
 ed64_pro_ll_error_t ed64_pro_ll_read_reg (
-    ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg, uint32_t *value, uint32_t deadline
+    ed64_pro_reg_t reg, uint32_t *value, uint32_t deadline
 ) {
-    TEST_CHECK(transaction->deadline == deadline && reg == ED64_PRO_REG_SYSSTAT);
+    mock.transport_calls++;
+    (void)deadline;
+    TEST_CHECK(reg == ED64_PRO_REG_SYSSTAT);
     mock.button_reads++;
     *value = mock.sysstat;
     return mock.register_error;
@@ -405,6 +386,7 @@ ed64_pro_ll_error_t ed64_pro_ll_read_reg (
  * @brief Record sector ranges and inject the configured transfer failure.
  */
 static ed64_pro_ll_error_t sector_transfer (uint32_t lba, uint32_t count, bool write) {
+    mock.transport_calls++;
     TEST_ASSERT(mock.operations < 128);
     mock.lbas[mock.operations] = lba;
     mock.counts[mock.operations++] = count;
@@ -420,13 +402,11 @@ static ed64_pro_ll_error_t sector_transfer (uint32_t lba, uint32_t count, bool w
  * @brief Record a sector read and fill successful reads with test data.
  */
 ed64_pro_ll_error_t ed64_pro_ll_sd_read (
-    ed64_pro_ll_transaction_t *transaction,
     void *buffer,
     uint32_t lba,
     uint32_t count,
     uint32_t deadline
 ) {
-    (void)transaction;
     (void)deadline;
     ed64_pro_ll_error_t result = sector_transfer(lba, count, false);
     if (result == ED64_PRO_LL_OK) {
@@ -439,13 +419,11 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read (
  * @brief Record a sector write and return the configured transfer result.
  */
 ed64_pro_ll_error_t ed64_pro_ll_sd_write (
-    ed64_pro_ll_transaction_t *transaction,
     const void *buffer,
     uint32_t lba,
     uint32_t count,
     uint32_t deadline
 ) {
-    (void)transaction;
     (void)buffer;
     (void)deadline;
     return sector_transfer(lba, count, true);
@@ -555,8 +533,8 @@ char *strip_fs_prefix (char *path) {
  * @brief Record byte-swap flag changes and inject the configured failure.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, uint16_t value, uint32_t deadline) {
-    (void)transaction;
+ed64_pro_ll_set_flags (uint16_t mask, uint16_t value, uint32_t deadline) {
+    mock.transport_calls++;
     (void)deadline;
     TEST_CHECK(mask == ED64_PRO_FLAG_WRSW);
     mock.flag_calls++;
@@ -572,13 +550,11 @@ ed64_pro_ll_set_flags (ed64_pro_ll_transaction_t *transaction, uint16_t mask, ui
  * @brief Check byte-swap state and record a transfer to cartridge memory.
  */
 ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
-    ed64_pro_ll_transaction_t *transaction,
     uint32_t fci,
     uint32_t lba,
     uint32_t count,
     uint32_t deadline
 ) {
-    (void)transaction;
     (void)deadline;
     TEST_CHECK(mock.flags == (pro_diagnostics.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0));
     mock.fci[mock.operations] = fci;
@@ -587,10 +563,10 @@ ed64_pro_ll_error_t ed64_pro_ll_sd_read_fci (
 }
 
 ed64_pro_ll_error_t ed64_pro_ll_sd_read_ipl_fci (
-    ed64_pro_ll_transaction_t *transaction, uint32_t fci, uint32_t lba, uint32_t count, uint32_t deadline
+    uint32_t fci, uint32_t lba, uint32_t count, uint32_t deadline
 ) {
     TEST_CHECK(fci >= ED64_PRO_FCI_IPL && fci + count * 512 <= ED64_PRO_FCI_IPL + ED64_PRO_IPL_SIZE);
-    return ed64_pro_ll_sd_read_fci(transaction, fci, lba, count, deadline);
+    return ed64_pro_ll_sd_read_fci(fci, lba, count, deadline);
 }
 
 uint32_t io_read (pi_addr_t pi) {
@@ -621,12 +597,11 @@ static ed64_pro_ll_error_t launch_command (char event) {
  * @brief Capture a launch path and record its command result.
  */
 ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
-    ed64_pro_ll_transaction_t *transaction,
     ed64_pro_path_t type,
     const char *path,
     uint32_t deadline
 ) {
-    (void)transaction;
+    mock.transport_calls++;
     (void)deadline;
     unsigned index = type == ED64_PRO_PATH_GPAK ? 0 : type == ED64_PRO_PATH_BRM ? 1 : 2;
     snprintf(mock.launch_paths[index], sizeof(mock.launch_paths[index]), "%s", path);
@@ -637,8 +612,8 @@ ed64_pro_ll_error_t ed64_pro_ll_dev_set_path (
  * @brief Capture the launch configuration and record its command result.
  */
 ed64_pro_ll_error_t
-ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
-    (void)transaction;
+ed64_pro_ll_dev_set_cfg (const ed64_pro_dev_cfg_t *config, uint32_t deadline) {
+    mock.transport_calls++;
     (void)deadline;
     if (config->brom_type == ED64_PRO_ROM_OFF && config->rtc_mode == ED64_PRO_RTC_STD) {
         mock.rtc_config = *config;
@@ -652,8 +627,8 @@ ed64_pro_ll_dev_set_cfg (ed64_pro_ll_transaction_t *transaction, const ed64_pro_
 /**
  * @brief Record the game-start command and return its configured result.
  */
-ed64_pro_ll_error_t ed64_pro_ll_dev_start (ed64_pro_ll_transaction_t *transaction, uint32_t deadline) {
-    (void)transaction;
+ed64_pro_ll_error_t ed64_pro_ll_dev_start (uint32_t deadline) {
+    mock.transport_calls++;
     (void)deadline;
     if (mock.rtc_pending) {
         mock.rtc_pending = false;
@@ -710,7 +685,7 @@ static uint32_t fat_date (unsigned year, unsigned month, unsigned day) {
  * @brief Reset adapter state and configure successful mock defaults.
  */
 static void fixture (void) {
-    mock.begin_error = mock.rtc_stop_error = ED64_PRO_LL_OK;
+    mock.rtc_stop_error = ED64_PRO_LL_OK;
     ed64_pro_rtc_close();
     /* Separate fixtures represent fresh console boots, including RTC latches. */
     pro_rtc_failed = pro_rtc_running = false;
@@ -751,7 +726,7 @@ static void mounted_fixture (void) {
     TEST_ASSERT(ed64_pro_init_sdfs("sd:/", 4));
     mock.operations = 0;
     mock.reads = 0;
-    mock.begin_calls = 0;
+    mock.transport_calls = 0;
     mock.events_count = mock.command_calls = 0;
     memset(mock.events, 0, sizeof(mock.events));
 }
@@ -771,7 +746,7 @@ static void test_voltage_bcd (void) {
         uint16_t output = 0xBEEF;
         TEST_CHECK(pro_get_voltage(&output) == (cases[i].valid ? FLASHCART_OK : FLASHCART_ERR_INT));
         TEST_CHECK(output == (cases[i].valid ? cases[i].mv : 0xBEEF));
-        TEST_CHECK(mock.voltage_calls == 1 && mock.begin_calls == 1 && mock.end_calls == 1);
+        TEST_CHECK(mock.voltage_calls == 1 && mock.transport_calls == 1);
     }
 }
 
@@ -800,63 +775,40 @@ static void test_voltage_cache (void) {
     TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK && output == 3310 && mock.voltage_calls == 2);
 }
 
-/** @brief Keep argument, ownership, query, and release failures from publishing output. */
+/** @brief Keep invalid arguments and failed MCU queries from publishing output. */
 static void test_voltage_failures (void) {
     fixture();
-    TEST_CHECK(pro_get_voltage(NULL) == FLASHCART_ERR_ARGS && mock.begin_calls == 0);
-    const ed64_pro_ll_error_t errors[] = {ED64_PRO_LL_CONTEXT, ED64_PRO_LL_BUSY, ED64_PRO_LL_TIMEOUT};
+    TEST_CHECK(pro_get_voltage(NULL) == FLASHCART_ERR_ARGS && mock.transport_calls == 0);
+    const ed64_pro_ll_error_t errors[] = {ED64_PRO_LL_TIMEOUT, ED64_PRO_LL_MCU_ERROR, ED64_PRO_LL_FRAME};
     for (size_t i = 0; i < sizeof(errors) / sizeof(errors[0]); i++) {
         fixture();
         uint16_t output = 0xBEEF;
-        mock.begin_error = errors[i];
+        mock.info_error = errors[i];
         TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
-        TEST_CHECK(mock.voltage_calls == 0 && mock.end_calls == 0);
+        TEST_CHECK(mock.voltage_calls == 1 && mock.transport_calls == 1);
+        /* A cached failure must not retry or publish a stale sample. */
+        mock.info_error = ED64_PRO_LL_OK;
+        TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
+        TEST_CHECK(mock.voltage_calls == 1 && mock.transport_calls == 1);
     }
-    fixture();
-    uint16_t output = 0xBEEF;
-    mock.info_error = ED64_PRO_LL_TIMEOUT;
-    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
-    TEST_CHECK(mock.voltage_calls == 1 && mock.end_calls == 1);
-    fixture();
-    mock.end_error = ED64_PRO_LL_BUSY;
-    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
-    fixture();
-    TEST_ASSERT(pro_get_voltage(&output) == FLASHCART_OK);
-    output = 0xBEEF;
-    mock.begin_error = ED64_PRO_LL_TIMEOUT;
-    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF && mock.voltage_calls == 1);
-}
-
-/** @brief A release failure also keeps the caller output and cached result unavailable. */
-static void test_voltage_release_failure (void) {
-    fixture();
-    uint16_t output = 0xBEEF;
-    mock.end_error = ED64_PRO_LL_CONTEXT;
-    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
-    mock.end_error = ED64_PRO_LL_OK;
-    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
-    TEST_CHECK(mock.voltage_calls == 1);
 }
 
 /** @brief Read bit 16 on every call despite unrelated status changes and failure. */
 static void test_live_button (void) {
     fixture();
-    TEST_CHECK(pro_get_button_state(NULL) == FLASHCART_ERR_ARGS && mock.begin_calls == 0);
+    TEST_CHECK(pro_get_button_state(NULL) == FLASHCART_ERR_ARGS && mock.transport_calls == 0);
     const uint32_t statuses[] = {0, 0xFFFF, 0xFFFEFFFF, 0x00010000, 0xFFFFFFFF, 0x000100A8, 0xA8};
     for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++) {
         mock.sysstat = statuses[i];
         bool pressed = (statuses[i] & ED64_PRO_SYSSTAT_BTN) == 0;
         TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_OK);
         TEST_CHECK(pressed == ((statuses[i] & ED64_PRO_SYSSTAT_BTN) != 0));
-        TEST_CHECK(mock.button_reads == i + 1 && mock.begin_calls == i + 1 && mock.end_calls == i + 1);
+        TEST_CHECK(mock.button_reads == i + 1 && mock.transport_calls == i + 1);
     }
     mock.register_error = ED64_PRO_LL_TIMEOUT;
     bool pressed = true;
     mock.sysstat = 0;
     TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_ERR_INT && pressed);
-    mock.begin_error = ED64_PRO_LL_CONTEXT;
-    unsigned reads = mock.button_reads;
-    TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_ERR_INT && pressed && mock.button_reads == reads);
 }
 
 /**
@@ -1014,7 +966,7 @@ static void test_sector_arguments (void) {
     TEST_CHECK(pro_disk.disk_read(data, UINT32_MAX, 2) == RES_PARERR);
     TEST_CHECK(pro_disk.disk_read((void *)0x10000001u, 0, 1) == RES_PARERR);
     TEST_CHECK(pro_disk.disk_write((void *)0x807FFF00u, 0, 1) == RES_PARERR);
-    TEST_CHECK(mock.begin_calls == 0);
+    TEST_CHECK(mock.transport_calls == 0);
     TEST_CHECK(pro_disk.disk_read(data, UINT32_MAX, 1) == RES_OK);
 }
 
@@ -1041,8 +993,8 @@ static void test_sector_rdram_bounds (void) {
 
     mock.memory_size = 4 * 1024 * 1024;
     /* Keep a defective guard from dereferencing synthetic host addresses. */
-    mock.begin_error = ED64_PRO_LL_CONTEXT;
-    mock.begin_calls = 0;
+    mock.fail_operation = 1;
+    mock.transport_calls = 0;
     static const uintptr_t invalid[] = {
         0x803FFF00u, 0x80400000u, 0x807FFE00u,
         0xA03FFF00u, 0xA0400000u, 0xA07FFE00u,
@@ -1051,7 +1003,7 @@ static void test_sector_rdram_bounds (void) {
         TEST_CHECK(pro_disk.disk_read((void *)invalid[i], 0, 1) == RES_PARERR);
         TEST_CHECK(pro_disk.disk_write((void *)invalid[i], 0, 1) == RES_PARERR);
     }
-    TEST_CHECK(mock.begin_calls == 0 && mock.operations == 0);
+    TEST_CHECK(mock.transport_calls == 0 && mock.operations == 0);
     TEST_CHECK(!pro_diagnostics.storage_failed);
 }
 
@@ -1075,22 +1027,11 @@ static void test_storage_latch (void) {
     TEST_CHECK(pro_disk.disk_write(data, 0, 1) == RES_NOTRDY);
     TEST_CHECK(pro_disk.disk_ioctl(CTRL_SYNC, NULL) == RES_NOTRDY);
     TEST_CHECK(mock.operations == 2);
-    unsigned calls = mock.begin_calls;
+    unsigned calls = mock.transport_calls;
     TEST_CHECK(pro_release_storage() == FLASHCART_ERR_SD_CARD);
-    TEST_CHECK(mock.begin_calls == calls && mock.unmounts == 0);
+    TEST_CHECK(mock.transport_calls == calls && mock.unmounts == 0);
     TEST_CHECK(strstr(ed64_pro_get_error_message(), "LBA 187") != NULL);
     TEST_CHECK(strstr(ed64_pro_get_error_message(), "MCU status 0x31, NRESP 0xA3") != NULL);
-}
-
-/**
- * @brief Verify unsupported contexts reject I/O without disabling storage.
- */
-static void test_unsupported_context (void) {
-    mounted_fixture();
-    uint8_t data[512];
-    mock.begin_error = ED64_PRO_LL_CONTEXT;
-    TEST_CHECK(pro_disk.disk_read(data, 0, 1) == RES_NOTRDY);
-    TEST_CHECK(mock.operations == 0 && !pro_diagnostics.storage_failed && pro_disk.disk_status() == 0);
 }
 
 /**
@@ -1235,7 +1176,7 @@ static void test_save_mapping (void) {
         ED64_PRO_BRM_FLASH
     };
     mounted_fixture();
-    unsigned traffic = mock.begin_calls;
+    unsigned traffic = mock.transport_calls;
     for (unsigned type = 0; type < __FLASHCART_SAVE_TYPE_END; type++) {
         TEST_CHECK(pro_set_save_type(type) == FLASHCART_OK);
         TEST_CHECK(pro_diagnostics.brm_type == types[type] && pro_diagnostics.brm_size == SAVE_SIZE[type]);
@@ -1247,7 +1188,7 @@ static void test_save_mapping (void) {
             TEST_CHECK(pro_diagnostics.save_ready && pro_diagnostics.save_path[0] == '\0');
         }
     }
-    TEST_CHECK(mock.begin_calls == traffic && mock.opens == 0);
+    TEST_CHECK(mock.transport_calls == traffic && mock.opens == 0);
     TEST_CHECK(pro_set_save_type(__FLASHCART_SAVE_TYPE_END) == FLASHCART_ERR_ARGS);
     TEST_CHECK(pro_set_save_type((flashcart_save_type_t)-1) == FLASHCART_ERR_ARGS);
     TEST_CHECK(!pro_diagnostics.save_ready);
@@ -1283,7 +1224,7 @@ static void staged_game_fixture (bool save) {
     }
     mock.events_count = 0;
     memset(mock.events, 0, sizeof(mock.events));
-    mock.begin_calls = 0;
+    mock.transport_calls = 0;
 }
 
 /**
@@ -1458,10 +1399,10 @@ static void test_invalid_utf8_paths (void) {
         TEST_ASSERT(pro_load_rom("sd:/old.z64", NULL) == FLASHCART_OK);
         unsigned opens = mock.opens;
         unsigned reads = mock.file_reads;
-        unsigned io = mock.begin_calls;
+        unsigned io = mock.transport_calls;
         TEST_CHECK(pro_load_rom((char *)paths[i], NULL) == FLASHCART_ERR_ARGS);
         TEST_CHECK(!pro_diagnostics.launch_ready && !pro_diagnostics.save_ready && pro_diagnostics.rom_path[0] == '\0');
-        TEST_CHECK(mock.opens == opens && mock.file_reads == reads && mock.stats == 0 && mock.begin_calls == io);
+        TEST_CHECK(mock.opens == opens && mock.file_reads == reads && mock.stats == 0 && mock.transport_calls == io);
         TEST_CHECK(strstr(pro_get_error_message(FLASHCART_ERR_ARGS), "invalid UTF-8") != NULL);
         TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
     }
@@ -1475,10 +1416,10 @@ static void test_invalid_utf8_save_path (void) {
     TEST_ASSERT(pro_load_rom("/game.z64", NULL) == FLASHCART_OK);
     TEST_ASSERT(pro_set_save_type(FLASHCART_SAVE_TYPE_EEPROM_4KBIT) == FLASHCART_OK);
     TEST_ASSERT(pro_load_save("/old.sav") == FLASHCART_OK);
-    unsigned io = mock.begin_calls;
+    unsigned io = mock.transport_calls;
     TEST_CHECK(pro_load_save("/日本語/\xED\xA0\x80.sav") == FLASHCART_ERR_ARGS);
     TEST_CHECK(!pro_diagnostics.save_ready && pro_diagnostics.save_path[0] == '\0');
-    TEST_CHECK(mock.stats == 0 && mock.begin_calls == io);
+    TEST_CHECK(mock.stats == 0 && mock.transport_calls == io);
     TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
 }
 
@@ -1511,10 +1452,10 @@ static void test_missing_or_invalid_alias (void) {
         mock.aliases[0].unterminated = cases[i].unterminated;
         mock.alias_count = 1;
         flashcart_err_t expected = cases[i].result == FR_OK ? FLASHCART_ERR_ARGS : FLASHCART_ERR_LOAD;
-        unsigned io = mock.begin_calls;
+        unsigned io = mock.transport_calls;
         TEST_CHECK(pro_load_save("/日本語.sav") == expected);
         TEST_CHECK(pro_diagnostics.save_path[0] == '\0' && !pro_diagnostics.save_ready);
-        TEST_CHECK(mock.stats == 1 && mock.begin_calls == io);
+        TEST_CHECK(mock.stats == 1 && mock.transport_calls == io);
         TEST_CHECK(pro_get_error_message(expected) != NULL);
         TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
         TEST_CHECK(pro_load_save("/new.sav") == FLASHCART_OK && pro_diagnostics.path_error == NULL);
@@ -1571,7 +1512,7 @@ static void test_path_metadata_requires_ownership (void) {
     TEST_CHECK(mock.stats == 0 && mock.opens == 0 && !pro_diagnostics.launch_ready);
     pro_diagnostics.launch_ready = true;
     TEST_CHECK(pro_load_file("/日本語.gb", 0x80000, 0) == FLASHCART_ERR_LOAD);
-    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && mock.begin_calls == 0 && !pro_diagnostics.launch_ready);
+    TEST_CHECK(mock.stats == 0 && mock.opens == 0 && mock.transport_calls == 0 && !pro_diagnostics.launch_ready);
 }
 
 /**
@@ -1902,7 +1843,6 @@ TEST_LIST = {
     {"3.3V packed BCD and invalid digits", test_voltage_bcd},
     {"first cached refreshed and failed voltage samples", test_voltage_cache},
     {"voltage argument and transport failures", test_voltage_failures},
-    {"voltage release failure never publishes sample", test_voltage_release_failure},
     {"live full-width SYSSTAT button reads", test_live_button},
     {"shared loader missing IPL then standalone retains complete GPAK and save", test_shared_loader_missing_ipl_then_standalone},
     {"shared loader ROM/save failure then standalone disables cartridge services", test_shared_loader_failure_then_standalone},
@@ -1945,7 +1885,6 @@ TEST_LIST = {
     {"sector bounds reject without I/O", test_sector_arguments},
     {"sector buffers respect installed RDRAM", test_sector_rdram_bounds},
     {"storage failure invalidates subsequent I/O", test_storage_latch},
-    {"unsupported context is nonfatal and performs no I/O", test_unsupported_context},
     {"release unmounts before MCU FS INIT", test_release},
     {"release failures refuse handoff", test_release_refusals},
     {NULL, NULL},

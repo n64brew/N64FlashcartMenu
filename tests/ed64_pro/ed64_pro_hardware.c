@@ -208,18 +208,10 @@ static void run_stress (void) {
         bool status_operation = (completed & 1u) == 0;
         uint32_t start = TICKS_READ();
         uint32_t deadline = start + TICKS_FROM_MS(ED64_PRO_STATUS_TIMEOUT_MS);
-        ed64_pro_ll_transaction_t transaction;
         stress_active = true;
-        error = ed64_pro_ll_begin(&transaction, deadline);
-        if (error == ED64_PRO_LL_OK) {
-            error = status_operation
-                        ? ed64_pro_ll_check_status(&transaction, &status_line.value, deadline)
-                        : ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_EDID, &register_line.value, deadline);
-            ed64_pro_ll_error_t release_error = ed64_pro_ll_end(&transaction);
-            if (error == ED64_PRO_LL_OK) {
-                error = release_error;
-            }
-        }
+        error = status_operation
+                    ? ed64_pro_ll_check_status(&status_line.value, deadline)
+                    : ed64_pro_ll_read_reg(ED64_PRO_REG_EDID, &register_line.value, deadline);
         stress_active = false;
         uint32_t elapsed = TICKS_READ() - start;
         uint32_t *maximum = status_operation ? &max_status_ticks : &max_register_ticks;
@@ -541,20 +533,12 @@ static bool map_scratch (uint32_t sectors[SCRATCH_SECTORS]) {
 }
 
 /**
- * @brief Read or write one scratch sector within a bounded transport transaction.
+ * @brief Read or write one scratch sector with a protocol polling deadline.
  */
 static bool scratch_sector_io (uint32_t lba, bool write) {
-    ed64_pro_ll_transaction_t transaction;
     uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
-    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
-    if (error == ED64_PRO_LL_OK) {
-        error = write ? ed64_pro_ll_sd_write(&transaction, storage_buffer, lba, 1, deadline)
-                      : ed64_pro_ll_sd_read(&transaction, storage_buffer, lba, 1, deadline);
-        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
-        if (error == ED64_PRO_LL_OK) {
-            error = end_error;
-        }
-    }
+    ed64_pro_ll_error_t error = write ? ed64_pro_ll_sd_write(storage_buffer, lba, 1, deadline)
+                                    : ed64_pro_ll_sd_read(storage_buffer, lba, 1, deadline);
     if (error != ED64_PRO_LL_OK) {
         printf("Raw write FAILED: %s LBA %" PRIu32 ", LL %u\n", write ? "write" : "read", lba, (unsigned)error);
         return false;

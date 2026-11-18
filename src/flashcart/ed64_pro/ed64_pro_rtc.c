@@ -13,23 +13,17 @@ flashcart_err_t ed64_pro_rtc_init (void) {
     if (pro_rtc_running) return FLASHCART_OK;
     pro_rtc_error = NULL;
     uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
-    ed64_pro_ll_transaction_t transaction;
-    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+    /* No Game Pak, save RAM or DD service is needed while FatFs owns SD.
+     * OFF/zero starts only STD RTC; cartridge asset reads are qualified
+     * independently on both menu boot routes (see the Pro test report). */
+    const ed64_pro_dev_cfg_t config = {
+        .brom_type = ED64_PRO_ROM_OFF,
+        .rtc_mode = ED64_PRO_RTC_STD,
+    };
+    ed64_pro_ll_error_t error = ed64_pro_ll_dev_set_cfg(&config, deadline);
     if (error == ED64_PRO_LL_OK) {
-        /* No Game Pak, save RAM or DD service is needed while FatFs owns SD.
-         * OFF/zero starts only STD RTC; cartridge asset reads are qualified
-         * independently on both menu boot routes (see the Pro test report). */
-        const ed64_pro_dev_cfg_t config = {
-            .brom_type = ED64_PRO_ROM_OFF,
-            .rtc_mode = ED64_PRO_RTC_STD,
-        };
-        error = ed64_pro_ll_dev_set_cfg(&transaction, &config, deadline);
-        if (error == ED64_PRO_LL_OK) {
-            error = ed64_pro_ll_dev_start(&transaction, deadline);
-            if (error == ED64_PRO_LL_OK) pro_rtc_running = true;
-        }
-        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
-        if (error == ED64_PRO_LL_OK) error = end_error;
+        error = ed64_pro_ll_dev_start(deadline);
+        if (error == ED64_PRO_LL_OK) pro_rtc_running = true;
     }
     if (error != ED64_PRO_LL_OK) {
         if (!pro_rtc_error) pro_rtc_error = "EverDrive-64 Pro: RTC services could not be started";
@@ -61,17 +55,11 @@ flashcart_err_t ed64_pro_rtc_close (void) {
      * transport fault and clear native source/cache even on failure. */
     pro_rtc_running = false;
     uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
-    ed64_pro_ll_transaction_t transaction;
-    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
-    if (error == ED64_PRO_LL_OK) {
-        error = ed64_pro_ll_stop(&transaction, deadline);
-        size_t drained;
-        if (error == ED64_PRO_LL_OK) error = ed64_pro_ll_drain(&transaction, &drained, deadline);
-        ed64_pro_status_t status;
-        if (error == ED64_PRO_LL_OK) error = ed64_pro_ll_check_status(&transaction, &status, deadline);
-        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
-        if (error == ED64_PRO_LL_OK) error = end_error;
-    }
+    ed64_pro_ll_error_t error = ed64_pro_ll_stop(deadline);
+    size_t drained;
+    if (error == ED64_PRO_LL_OK) error = ed64_pro_ll_drain(&drained, deadline);
+    ed64_pro_status_t status;
+    if (error == ED64_PRO_LL_OK) error = ed64_pro_ll_check_status(&status, deadline);
     if (error != ED64_PRO_LL_OK) {
         if (!pro_rtc_error) pro_rtc_error = "EverDrive-64 Pro: RTC services could not be stopped";
         pro_rtc_failed = true;

@@ -65,21 +65,12 @@ static ed64_pro_ll_error_t pro_init_fail (ed64_pro_ll_error_t error) {
 
 /**
  * @brief Probe once within the whole-attempt budget, distinguishing absence from I/O failure.
- *
- * Cold-start rejections retain their probe result without latching a failure;
- * busy or unsupported-context results leave the startup state unchanged.
  */
 ed64_pro_probe_t ed64_pro_probe (void) {
     uint32_t start = TICKS_READ();
     uint32_t deadline = pro_diagnostics.state == ED64_PRO_COLD ? start + TICKS_FROM_MS(ED64_PRO_ATTEMPT_TIMEOUT_MS)
                                                                : pro_attempt_deadline;
     ed64_pro_probe_t result = ed64_pro_ll_probe(deadline);
-    if (result.error == ED64_PRO_LL_BUSY || result.error == ED64_PRO_LL_CONTEXT) {
-        if (pro_diagnostics.state == ED64_PRO_COLD) {
-            pro_diagnostics.probe = result;
-        }
-        return result;
-    }
     if (pro_diagnostics.state == ED64_PRO_COLD) {
         pro_attempt_start = start;
         pro_attempt_deadline = deadline;
@@ -96,17 +87,16 @@ ed64_pro_probe_t ed64_pro_probe (void) {
     return result;
 }
 
-/** @brief Run the MCU/SD startup phases within an active transaction. */
-static ed64_pro_ll_error_t pro_prepare_transport (ed64_pro_ll_transaction_t *transaction) {
+/** @brief Run the MCU/SD startup phases within the startup deadline. */
+static ed64_pro_ll_error_t pro_prepare_transport (void) {
     pro_set_phase(ED64_PRO_PHASE_INITIAL_DRAIN);
-    ed64_pro_ll_error_t error = ed64_pro_ll_drain(transaction, &pro_diagnostics.initial_drained, pro_attempt_deadline);
+    ed64_pro_ll_error_t error = ed64_pro_ll_drain(&pro_diagnostics.initial_drained, pro_attempt_deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
 
     pro_set_phase(ED64_PRO_PHASE_INHERITED_STATUS);
     error = ed64_pro_ll_read_status(
-        transaction,
         &pro_diagnostics.inherited_status,
         ed64_pro_ll_limit_deadline(pro_attempt_deadline, ED64_PRO_STATUS_TIMEOUT_MS)
     );
@@ -116,19 +106,18 @@ static ed64_pro_ll_error_t pro_prepare_transport (ed64_pro_ll_transaction_t *tra
     pro_diagnostics.inherited_status_valid = true;
 
     pro_set_phase(ED64_PRO_PHASE_STOP);
-    error = ed64_pro_ll_stop(transaction, pro_attempt_deadline);
+    error = ed64_pro_ll_stop(pro_attempt_deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
 
     pro_set_phase(ED64_PRO_PHASE_POST_STOP_DRAIN);
-    error = ed64_pro_ll_drain(transaction, &pro_diagnostics.post_stop_drained, pro_attempt_deadline);
+    error = ed64_pro_ll_drain(&pro_diagnostics.post_stop_drained, pro_attempt_deadline);
     if (error != ED64_PRO_LL_OK) {
         return error;
     }
     pro_set_phase(ED64_PRO_PHASE_STOP_STATUS);
     error = ed64_pro_ll_check_status(
-        transaction,
         &pro_diagnostics.status,
         ed64_pro_ll_limit_deadline(pro_attempt_deadline, ED64_PRO_STATUS_TIMEOUT_MS)
     );
@@ -139,7 +128,7 @@ static ed64_pro_ll_error_t pro_prepare_transport (ed64_pro_ll_transaction_t *tra
 
     pro_set_phase(ED64_PRO_PHASE_SD_INIT);
     pro_diagnostics.status_valid = false;
-    error = ed64_pro_ll_init_sd(transaction, &pro_diagnostics.status, pro_attempt_deadline);
+    error = ed64_pro_ll_init_sd(&pro_diagnostics.status, pro_attempt_deadline);
     pro_diagnostics.status_valid = error == ED64_PRO_LL_OK || error == ED64_PRO_LL_MCU_ERROR;
     return error;
 }
@@ -165,20 +154,10 @@ ed64_pro_ll_error_t ed64_pro_init_transport (void) {
         return pro_diagnostics.failure.code;
     }
 
-    ed64_pro_ll_transaction_t transaction;
-    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, pro_attempt_deadline);
-    if (error != ED64_PRO_LL_OK) {
-        pro_init_fail(error);
-        return error;
-    }
     pro_diagnostics.state = ED64_PRO_INITIALIZING;
-    error = pro_prepare_transport(&transaction);
-    ed64_pro_ll_error_t release_error = ed64_pro_ll_end(&transaction);
+    ed64_pro_ll_error_t error = pro_prepare_transport();
     if (error != ED64_PRO_LL_OK) {
         return pro_init_fail(error);
-    }
-    if (release_error != ED64_PRO_LL_OK) {
-        return pro_init_fail(release_error);
     }
     pro_set_phase(ED64_PRO_PHASE_READY);
     pro_diagnostics.state = ED64_PRO_READY;
@@ -216,8 +195,6 @@ static const char *pro_error_name (ed64_pro_ll_error_t error) {
     switch (error) {
     case ED64_PRO_LL_OK: return "No transport error";
     case ED64_PRO_LL_ARGUMENT: return "Invalid transport argument";
-    case ED64_PRO_LL_CONTEXT: return "Unsupported interrupt/thread context";
-    case ED64_PRO_LL_BUSY: return "Transport already in use";
     case ED64_PRO_LL_TIMEOUT: return "Protocol deadline expired";
     case ED64_PRO_LL_NOT_IDENTIFIED: return "Pro not identified";
     case ED64_PRO_LL_FIFO_COUNT: return "Implausible RX FIFO count";
@@ -366,16 +343,8 @@ static flashcart_err_t pro_init (void) {
         const uint32_t ids[] = {ED64_PRO_INFS_TS_FW, ED64_PRO_INFS_MAX_ROM_SIZE};
         uint32_t values[2];
         uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
-        ed64_pro_ll_transaction_t transaction;
         pro_set_phase(ED64_PRO_PHASE_FIRMWARE_INFO);
-        ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
-        if (error == ED64_PRO_LL_OK) {
-            error = ed64_pro_ll_get_sys_info(&transaction, ids, values, 2, deadline);
-            ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
-            if (error == ED64_PRO_LL_OK) {
-                error = end_error;
-            }
-        }
+        ed64_pro_ll_error_t error = ed64_pro_ll_get_sys_info(ids, values, 2, deadline);
         pro_diagnostics.info_queried = true;
         pro_diagnostics.info_result = FLASHCART_ERR_INT;
         if (error != ED64_PRO_LL_OK) {
@@ -429,22 +398,14 @@ static bool pro_decode_voltage (uint32_t bcd, uint16_t *millivolts) {
     return true;
 }
 
-/** @brief Read a live full-width SYSSTAT button bit under foreground ownership. */
+/** @brief Read a live full-width SYSSTAT button bit through the synchronous register API. */
 static flashcart_err_t pro_get_button_state (bool *pressed) {
     if (!pressed) {
         return FLASHCART_ERR_ARGS;
     }
     uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
-    ed64_pro_ll_transaction_t transaction;
-    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
     uint32_t status = 0;
-    if (error == ED64_PRO_LL_OK) {
-        error = ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_SYSSTAT, &status, deadline);
-        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
-        if (error == ED64_PRO_LL_OK) {
-            error = end_error;
-        }
-    }
+    ed64_pro_ll_error_t error = ed64_pro_ll_read_reg(ED64_PRO_REG_SYSSTAT, &status, deadline);
     if (error != ED64_PRO_LL_OK) {
         return FLASHCART_ERR_INT;
     }
@@ -452,15 +413,14 @@ static flashcart_err_t pro_get_button_state (bool *pressed) {
     return FLASHCART_OK;
 }
 
-/** @brief Refresh 3.3 V at most once per second while preserving transport guards. */
+/** @brief Refresh 3.3 V at most once per second without retrying transport failures. */
 static flashcart_err_t pro_get_voltage (uint16_t *voltage_mv) {
     if (!voltage_mv) {
         return FLASHCART_ERR_ARGS;
     }
     uint32_t now = TICKS_READ();
     uint32_t deadline = now + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
-    ed64_pro_ll_transaction_t transaction;
-    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+    ed64_pro_ll_error_t error = ed64_pro_ll_get_failure()->code;
     if (error != ED64_PRO_LL_OK) {
         return FLASHCART_ERR_INT;
     }
@@ -471,14 +431,13 @@ static flashcart_err_t pro_get_voltage (uint16_t *voltage_mv) {
         pro_voltage.sampled = true;
         pro_voltage.ticks = now;
         pro_voltage.result = FLASHCART_ERR_INT;
-        error = ed64_pro_ll_get_sys_info(&transaction, &id, &value, 1, deadline);
+        error = ed64_pro_ll_get_sys_info(&id, &value, 1, deadline);
         if (error == ED64_PRO_LL_OK && pro_decode_voltage(value, &millivolts)) {
             pro_voltage.millivolts = millivolts;
             pro_voltage.result = FLASHCART_OK;
         }
     }
-    ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
-    if (error != ED64_PRO_LL_OK || end_error != ED64_PRO_LL_OK) {
+    if (error != ED64_PRO_LL_OK) {
         pro_voltage.result = FLASHCART_ERR_INT;
     }
     if (pro_voltage.result != FLASHCART_OK) {
@@ -565,35 +524,25 @@ static int pro_disk_transfer (void *buffer, int64_t sector, int count, bool writ
     while (count > 0) {
         uint32_t chunk = (unsigned)count > max_chunk ? max_chunk : (unsigned)count;
         uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
-        ed64_pro_ll_transaction_t transaction;
-        ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
-        if (error == ED64_PRO_LL_OK) {
-            if (fci) {
-                /* WRSW is confined to the SD-to-FCI operation; FIFO metadata
-                 * transfers must always run with it cleared. */
-                error = ed64_pro_ll_set_flags(
-                    &transaction, ED64_PRO_FLAG_WRSW, pro_diagnostics.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0, deadline
-                );
-                if (error == ED64_PRO_LL_OK) {
-                    error = ipl ? ed64_pro_ll_sd_read_ipl_fci(&transaction, PhysicalAddr(cursor), sector, chunk, deadline)
-                                : ed64_pro_ll_sd_read_fci(
-                                    &transaction, PhysicalAddr(cursor) - 0x10000000u, sector, chunk, deadline
-                                );
-                }
-                if (error == ED64_PRO_LL_OK) {
-                    error = ed64_pro_ll_set_flags(&transaction, ED64_PRO_FLAG_WRSW, 0, deadline);
-                }
-            } else {
-                error = write ? ed64_pro_ll_sd_write(&transaction, cursor, sector, chunk, deadline)
-                              : ed64_pro_ll_sd_read(&transaction, cursor, sector, chunk, deadline);
-            }
-            ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
+        ed64_pro_ll_error_t error;
+        if (fci) {
+            /* WRSW is confined to the SD-to-FCI operation; FIFO metadata
+             * transfers must always run with it cleared. */
+            error = ed64_pro_ll_set_flags(
+                ED64_PRO_FLAG_WRSW, pro_diagnostics.load_byte_swap ? ED64_PRO_FLAG_WRSW : 0, deadline
+            );
             if (error == ED64_PRO_LL_OK) {
-                error = end_error;
+                error = ipl ? ed64_pro_ll_sd_read_ipl_fci(PhysicalAddr(cursor), sector, chunk, deadline)
+                            : ed64_pro_ll_sd_read_fci(
+                                PhysicalAddr(cursor) - 0x10000000u, sector, chunk, deadline
+                            );
             }
-        }
-        if (error == ED64_PRO_LL_CONTEXT) {
-            return RES_NOTRDY;
+            if (error == ED64_PRO_LL_OK) {
+                error = ed64_pro_ll_set_flags(ED64_PRO_FLAG_WRSW, 0, deadline);
+            }
+        } else {
+            error = write ? ed64_pro_ll_sd_write(cursor, sector, chunk, deadline)
+                          : ed64_pro_ll_sd_read(cursor, sector, chunk, deadline);
         }
         if (error == ED64_PRO_LL_ARGUMENT) {
             return RES_PARERR;
@@ -686,16 +635,8 @@ static flashcart_err_t pro_release_storage (void) {
     pro_diagnostics.volume_id = -1;
     pro_diagnostics.storage_state = ED64_PRO_STORAGE_RELEASING;
     uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
-    ed64_pro_ll_transaction_t transaction;
-    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
-    if (error == ED64_PRO_LL_OK) {
-        error = ed64_pro_ll_init_sd(&transaction, &pro_diagnostics.status, deadline);
-        pro_diagnostics.status_valid = error == ED64_PRO_LL_OK || error == ED64_PRO_LL_MCU_ERROR;
-        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
-        if (error == ED64_PRO_LL_OK) {
-            error = end_error;
-        }
-    }
+    ed64_pro_ll_error_t error = ed64_pro_ll_init_sd(&pro_diagnostics.status, deadline);
+    pro_diagnostics.status_valid = error == ED64_PRO_LL_OK || error == ED64_PRO_LL_MCU_ERROR;
     if (error != ED64_PRO_LL_OK) {
         pro_storage_fail("MCU filesystem reinitialization failed", "FS INIT", 0, 0, error);
         return FLASHCART_ERR_INT;
@@ -759,47 +700,36 @@ static flashcart_err_t pro_deinit (void) {
         .rtc_mode = pro_diagnostics.dd_requested ? ED64_PRO_RTC_STD : ED64_PRO_RTC_RDO,
         .dd_en = pro_diagnostics.dd_requested ? 1 : 0,
     };
-    ed64_pro_ll_transaction_t transaction;
-    uint32_t deadline = TICKS_READ() + 5u * TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
-    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
-    const char *step = "Game services";
+    ed64_pro_ll_error_t error = ED64_PRO_LL_OK;
+    const char *step = "GPAK path";
+    if (cartridge) {
+        error = ed64_pro_ll_dev_set_path(
+            ED64_PRO_PATH_GPAK, pro_diagnostics.rom_path,
+            TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
+        );
+    }
+    if (error == ED64_PRO_LL_OK && pro_diagnostics.dd_requested) {
+        step = "Disk path";
+        error = ed64_pro_ll_dev_set_path(
+            ED64_PRO_PATH_DISK, pro_diagnostics.disk_path,
+            TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
+        );
+    }
+    if (error == ED64_PRO_LL_OK && cartridge && pro_diagnostics.brm_type != ED64_PRO_BRM_OFF) {
+        step = "Save path";
+        error = ed64_pro_ll_dev_set_path(
+            ED64_PRO_PATH_BRM,
+            pro_diagnostics.save_path,
+            TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
+        );
+    }
     if (error == ED64_PRO_LL_OK) {
-        step = "GPAK path";
-        if (cartridge) {
-            error = ed64_pro_ll_dev_set_path(
-                &transaction, ED64_PRO_PATH_GPAK, pro_diagnostics.rom_path,
-                TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
-            );
-        }
-        if (error == ED64_PRO_LL_OK && pro_diagnostics.dd_requested) {
-            step = "Disk path";
-            error = ed64_pro_ll_dev_set_path(
-                &transaction, ED64_PRO_PATH_DISK, pro_diagnostics.disk_path,
-                TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
-            );
-        }
-        if (error == ED64_PRO_LL_OK && cartridge && pro_diagnostics.brm_type != ED64_PRO_BRM_OFF) {
-            step = "Save path";
-            error = ed64_pro_ll_dev_set_path(
-                &transaction,
-                ED64_PRO_PATH_BRM,
-                pro_diagnostics.save_path,
-                TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS)
-            );
-        }
-        if (error == ED64_PRO_LL_OK) {
-            step = "Game configuration";
-            error =
-                ed64_pro_ll_dev_set_cfg(&transaction, &config, TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS));
-        }
-        if (error == ED64_PRO_LL_OK) {
-            step = "Game start";
-            error = ed64_pro_ll_dev_start(&transaction, TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS));
-        }
-        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
-        if (error == ED64_PRO_LL_OK) {
-            error = end_error;
-        }
+        step = "Game configuration";
+        error = ed64_pro_ll_dev_set_cfg(&config, TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS));
+    }
+    if (error == ED64_PRO_LL_OK) {
+        step = "Game start";
+        error = ed64_pro_ll_dev_start(TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS));
     }
     if (error != ED64_PRO_LL_OK) {
         pro_storage_fail("Game startup failed", step, 0, 0, error);

@@ -417,8 +417,6 @@ static void test_identified_failures (void) {
  */
 static void test_failed_probe_never_falls_back (void) {
     const ed64_pro_ll_error_t failures[] = {
-        ED64_PRO_LL_BUSY,
-        ED64_PRO_LL_CONTEXT,
         ED64_PRO_LL_TIMEOUT,
     };
     for (size_t i = 0; i < sizeof(failures) / sizeof(failures[0]); i++) {
