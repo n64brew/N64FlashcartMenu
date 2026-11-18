@@ -20,7 +20,7 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 #### Preparations for EverDrive-64 Pro
 
 - Use firmware `26.1014` or newer.
-- Download the latest `menu.n64` file from the [releases](https://github.com/Polprzewodnikowy/N64FlashcartMenu/releases/) page, then copy it to `/ed64/menu.n64` on your Micro SD card.
+- Download `menu.n64` from a [release](https://github.com/n64brew/N64FlashcartMenu/releases/) that includes EverDrive-64 Pro support, then copy it to `/ed64/menu.n64` on your Micro SD card. Until such a release is available, use the `ED64-Pro` artifact from a successful [Actions build](https://github.com/n64brew/N64FlashcartMenu/actions/workflows/build.yml) of a branch containing Pro support. Older releases do not contain this backend.
 - Place your ROM files on the Micro SD card, **in any folder except the root directory `ed64` folder**.
 - Remove the Micro SD Card from your computer and insert it into the ED64 Pro. 
 
