@@ -97,6 +97,12 @@ RDO. Set the clock in Settings > Time before launching a disk: firmware
 After mounting FatFs, the backend starts MCU services with ROM_OFF, zero ROM
 size, STD RTC, and cartridge/save/DD services disabled. Libdragon detects the
 Joybus RTC and provides its normal POSIX clock integration and cache.
+
+The Pro path sets libcart's `cart_type` to `CART_MAX` to suppress overlapping
+legacy-cart probes during SDK RTC detection. This sentinel is outside libcart's
+valid driver indices: Pro operations stay on the Pro backend and must never
+pass it to `cart_init()`, `cart_exit()`, or `cart_card_*()`.
+
 **Settings > Time** reads and saves the clock; leaving and reentering refreshes it. Game
 launch closes the RTC and stops menu services before storage handoff.
 
