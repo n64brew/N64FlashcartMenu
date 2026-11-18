@@ -22,7 +22,7 @@
 
 #define MAX_FILE_SIZE   MiB(4)
 
-// File commands (list-dir, stat, get-file, put-file, make-dir, rename, free-space)
+// File commands (list-dir, stat, get-file, put-file, make-dir, delete, rename, free-space)
 //
 // These let a USB host manage the files on the SD card while the menu is running.
 // Arguments are NUL terminated so paths may contain spaces; numbers are decimal and end with a space.
@@ -35,6 +35,7 @@
 #define MAX_REQUEST_LENGTH (64)
 #define MAX_PATH_LENGTH (512)
 #define DATA_CHUNK_SIZE (4096) // Small enough to be sent well within the USB write timeout
+#define MAX_DELETE_DEPTH (16)
 
 /** @brief The supported USB commands structure. */
 typedef struct {
@@ -419,6 +420,67 @@ static void command_make_dir (menu_t *menu) {
 }
 
 /**
+ * @brief Delete a file, or a directory and everything in it.
+ *
+ * @param path Path to delete, used as a work buffer of MAX_PATH_LENGTH bytes while descending.
+ * @param depth Current directory depth.
+ * @return FRESULT FatFs result code.
+ */
+static FRESULT delete_tree (char *path, int depth) {
+    DIR dir;
+    FILINFO info;
+
+    FRESULT result = f_unlink(path);
+
+    // FR_DENIED: either a directory that is not empty, or a read-only entry
+    if ((result != FR_DENIED) || (depth >= MAX_DELETE_DEPTH) || (f_opendir(&dir, path) != FR_OK)) {
+        return result;
+    }
+
+    size_t length = strlen(path);
+
+    while (((result = f_readdir(&dir, &info)) == FR_OK) && (info.fname[0] != '\0')) {
+        if ((length + strlen(info.fname) + 2) > MAX_PATH_LENGTH) {
+            result = FR_INVALID_NAME;
+            break;
+        }
+        path[length] = '/';
+        strcpy(path + length + 1, info.fname);
+        result = delete_tree(path, depth + 1);
+        path[length] = '\0';
+        if (result != FR_OK) {
+            break;
+        }
+    }
+
+    f_closedir(&dir);
+
+    return (result == FR_OK) ? f_unlink(path) : result;
+}
+
+/**
+ * @brief Delete a file, or a directory and everything in it.
+ *
+ * Arguments: <path>\0.
+ *
+ * @param menu Pointer to the menu structure.
+ */
+static void command_delete (menu_t *menu) {
+    char path[MAX_PATH_LENGTH];
+
+    if (usb_comm_read_string(path, sizeof(path), '\0') || (strlen(path) < 2)) {
+        return usb_comm_send_result(FR_INVALID_PARAMETER);
+    }
+
+    FRESULT result = delete_tree(path, 0);
+
+    menu->browser.reload = true;
+    view_grid_library_changed();
+
+    usb_comm_send_result(result);
+}
+
+/**
  * @brief Rename or move a file or directory.
  *
  * Arguments: <old path>\0<new path>\0.
@@ -481,6 +543,7 @@ static usb_comm_command_t commands[] = {
     { .id = "get-file", .op = command_send_file },
     { .id = "put-file", .op = command_put_file },
     { .id = "make-dir", .op = command_make_dir },
+    { .id = "delete", .op = command_delete },
     { .id = "rename", .op = command_rename },
     { .id = "free-space", .op = command_free_space },
     { .id = NULL },
