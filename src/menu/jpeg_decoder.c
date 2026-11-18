@@ -289,9 +289,11 @@ jpeg_err_t jpeg_decoder_start_into (char *path, int max_width, int max_height,
                                    callback, callback_data);
 }
 
-jpeg_err_t jpeg_decoder_start_mem (void *buf, size_t buf_size, int max_width,
-                                   int max_height, jpeg_callback_t *callback,
-                                   void *callback_data) {
+static jpeg_err_t jpeg_decoder_start_mem_internal (void *buf, size_t buf_size,
+                                                   int max_width, int max_height,
+                                                   surface_t *output_buffer,
+                                                   jpeg_callback_t *callback,
+                                                   void *callback_data) {
     if (buf == NULL || buf_size == 0) {
         free(buf);
         return JPEG_ERR_BAD_FILE;
@@ -305,7 +307,27 @@ jpeg_err_t jpeg_decoder_start_mem (void *buf, size_t buf_size, int max_width,
 
     decoder->mem_buf = buf;
     decoder->mem_buf_size = buf_size;
+    decoder->output_buffer = output_buffer;
     return jpeg_decoder_setup(max_width, max_height);
+}
+
+jpeg_err_t jpeg_decoder_start_mem (void *buf, size_t buf_size, int max_width,
+                                   int max_height, jpeg_callback_t *callback,
+                                   void *callback_data) {
+    return jpeg_decoder_start_mem_internal(buf, buf_size, max_width, max_height,
+                                           NULL, callback, callback_data);
+}
+
+jpeg_err_t jpeg_decoder_start_mem_into (void *buf, size_t buf_size, int max_width,
+                                        int max_height, surface_t *output_buffer,
+                                        jpeg_callback_t *callback,
+                                        void *callback_data) {
+    if (output_buffer == NULL) {
+        free(buf);
+        return JPEG_ERR_OUT_OF_MEM;
+    }
+    return jpeg_decoder_start_mem_internal(buf, buf_size, max_width, max_height,
+                                           output_buffer, callback, callback_data);
 }
 
 void jpeg_decoder_poll (void) {

@@ -205,7 +205,11 @@ png_err_t png_decoder_start_into (char *path, int max_width, int max_height,
                                   callback, callback_data);
 }
 
-png_err_t png_decoder_start_mem (void *buf, size_t buf_size, int max_width, int max_height, png_callback_t *callback, void *callback_data) {
+static png_err_t png_decoder_start_mem_internal (void *buf, size_t buf_size,
+                                                 int max_width, int max_height,
+                                                 surface_t *output_buffer,
+                                                 png_callback_t *callback,
+                                                 void *callback_data) {
     if (decoder != NULL) return PNG_ERR_BUSY;
 
     decoder = calloc(1, sizeof(png_decoder_t));
@@ -214,6 +218,7 @@ png_err_t png_decoder_start_mem (void *buf, size_t buf_size, int max_width, int 
         return PNG_ERR_OUT_OF_MEM;
     }
 
+    decoder->output_buffer = output_buffer;
     decoder->callback = callback;
     decoder->callback_data = callback_data;
 
@@ -226,6 +231,24 @@ png_err_t png_decoder_start_mem (void *buf, size_t buf_size, int max_width, int 
     }
 
     return png_decoder_setup(max_width, max_height);
+}
+
+png_err_t png_decoder_start_mem (void *buf, size_t buf_size, int max_width,
+                                 int max_height, png_callback_t *callback,
+                                 void *callback_data) {
+    return png_decoder_start_mem_internal(buf, buf_size, max_width, max_height,
+                                          NULL, callback, callback_data);
+}
+
+png_err_t png_decoder_start_mem_into (void *buf, size_t buf_size, int max_width,
+                                      int max_height, surface_t *output_buffer,
+                                      png_callback_t *callback, void *callback_data) {
+    if (output_buffer == NULL) {
+        free(buf);
+        return PNG_ERR_OUT_OF_MEM;
+    }
+    return png_decoder_start_mem_internal(buf, buf_size, max_width, max_height,
+                                          output_buffer, callback, callback_data);
 }
 
 /**

@@ -451,16 +451,20 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
                 uint8_t *data = NULL;
                 size_t size = 0;
                 if (!is_memory_expanded()) {
-                    ui_components_background_release_decode_buffer();
+                    ui_components_background_image_free_only();
                 }
                 if (rom_info_extract_metadata_image(
                         &menu->load.rom_info,
                         metadata_image_names[new_metadata_image_index],
                         &data, &size)) {
-                    new_boxart = ui_components_boxart_init_mem(
-                        metadata_image_names[new_metadata_image_index], data, size,
-                        BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX
-                    );
+                    new_boxart = !is_memory_expanded()
+                        ? ui_components_boxart_init_mem_into(
+                            metadata_image_names[new_metadata_image_index], data, size,
+                            BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX,
+                            ui_components_background_get_decode_buffer())
+                        : ui_components_boxart_init_mem(
+                            metadata_image_names[new_metadata_image_index], data, size,
+                            BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX);
                 }
                 if (new_boxart == NULL) {
                     ui_components_background_reload();
@@ -504,16 +508,20 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
                 uint8_t *data = NULL;
                 size_t size = 0;
                 if (!is_memory_expanded()) {
-                    ui_components_background_release_decode_buffer();
+                    ui_components_background_image_free_only();
                 }
                 if (rom_info_extract_metadata_image(
                         &menu->load.rom_info,
                         metadata_image_names[previous_metadata_image_index],
                         &data, &size)) {
-                    boxart = ui_components_boxart_init_mem(
-                        metadata_image_names[previous_metadata_image_index], data, size,
-                        BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX
-                    );
+                    boxart = !is_memory_expanded()
+                        ? ui_components_boxart_init_mem_into(
+                            metadata_image_names[previous_metadata_image_index], data, size,
+                            BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX,
+                            ui_components_background_get_decode_buffer())
+                        : ui_components_boxart_init_mem(
+                            metadata_image_names[previous_metadata_image_index], data, size,
+                            BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX);
                 }
                 if (boxart == NULL) {
                     ui_components_background_reload();
@@ -1070,13 +1078,17 @@ void view_load_rom_init (menu_t *menu) {
             uint8_t *data = NULL;
             size_t size = 0;
             if (!is_memory_expanded()) {
-                ui_components_background_release_decode_buffer();
+                ui_components_background_image_free_only();
             }
             if (rom_info_extract_metadata_image(&menu->load.rom_info, metadata_image_names[0], &data, &size)) {
-                boxart = ui_components_boxart_init_mem(
-                    metadata_image_names[0], data, size,
-                    BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX
-                );
+                boxart = !is_memory_expanded()
+                    ? ui_components_boxart_init_mem_into(
+                        metadata_image_names[0], data, size,
+                        BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX,
+                        ui_components_background_get_decode_buffer())
+                    : ui_components_boxart_init_mem(
+                        metadata_image_names[0], data, size,
+                        BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX);
             }
             if (boxart == NULL) {
                 // The embedded entry passed the scan-time ZIP existence/size check but could

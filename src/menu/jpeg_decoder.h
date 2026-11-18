@@ -28,6 +28,10 @@ jpeg_err_t jpeg_decoder_start_into (char *path, int max_width, int max_height,
                                     surface_t *output_buffer,
                                     jpeg_callback_t *callback, void *callback_data);
 jpeg_err_t jpeg_decoder_start_mem (void *buf, size_t buf_size, int max_width, int max_height, jpeg_callback_t *callback, void *callback_data);
+/** Decode a JPEG from memory into a caller-owned RGBA16 output surface. */
+jpeg_err_t jpeg_decoder_start_mem_into (void *buf, size_t buf_size, int max_width, int max_height,
+                                        surface_t *output_buffer, jpeg_callback_t *callback,
+                                        void *callback_data);
 void jpeg_decoder_abort (void);
 float jpeg_decoder_get_progress (void);
 void jpeg_decoder_poll (void);

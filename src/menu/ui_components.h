@@ -235,11 +235,6 @@ void ui_components_background_image_free_only(void);
 surface_t *ui_components_background_get_decode_buffer(void);
 
 /**
- * @brief Free the background image and its reserved decode buffer.
- */
-void ui_components_background_release_decode_buffer(void);
-
-/**
  * @brief Draw the file list component.
  * 
  * @param list List of entries.
@@ -337,6 +332,9 @@ component_boxart_t *ui_components_boxart_init(const char *storage_prefix, const 
 /** Initialize boxart from an image buffer owned by the decoder. */
 component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *data, size_t size,
                                                   int max_width, int max_height);
+component_boxart_t *ui_components_boxart_init_mem_into(const char *filename, void *data, size_t size,
+                                                       int max_width, int max_height,
+                                                       surface_t *output_buffer);
 
 /**
  * @brief Free the box art component resources.

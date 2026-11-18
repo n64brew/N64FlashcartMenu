@@ -1,7 +1,7 @@
 ## Background Images
 
 > [!NOTE]
-> The menu reserves a 600 KiB buffer for background images so heap fragmentation does not force the image resolution below the menu's 640x480 limit. On systems with a Jumper PAK, the buffer is temporarily released while embedded ROM metadata artwork is displayed, then reserved again when returning to the background.
+> The menu reserves a 600 KiB buffer for background images so heap fragmentation does not force the image resolution below the menu's 640x480 limit. On systems with a Jumper PAK, embedded ROM metadata artwork temporarily reuses that buffer while the background image is hidden.
 
 ### How to add a background image
 First copy a `.PNG`, `.JPG`, or `.JPEG` image with a maximum size of `640x480` to anywhere on the SD card. JPEG files must be exported as baseline, non-progressive JPEGs. Then when the N64FlashcartMenu is loaded on the N64, browse to the image and then press the `A` Button to preview it on the screen. Press the `A` Button again to open up the confirmation message, which will ask if you want to set a new background image.

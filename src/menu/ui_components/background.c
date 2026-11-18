@@ -349,11 +349,3 @@ surface_t *ui_components_background_get_decode_buffer(void) {
     }
     return &background->decode_buffer;
 }
-
-void ui_components_background_release_decode_buffer(void) {
-    if (!background) {
-        return;
-    }
-    ui_components_background_image_free_only();
-    surface_free(&background->decode_buffer);
-}
