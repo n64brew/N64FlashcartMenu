@@ -821,14 +821,20 @@ pro_encode_oem (const char *utf8, size_t length, char *output, size_t capacity, 
     return true;
 }
 
+/** @brief Clear a rejected MCU path and report an encoding or length error. */
+static flashcart_err_t pro_invalid_mcu_path (char *output) {
+    pro_diagnostics.path_error = "File path cannot be represented by the cartridge filesystem";
+    output[0] = '\0';
+    return FLASHCART_ERR_ARGS;
+}
+
 /** @brief Build a CP437 MCU path, using FatFs short aliases for unmappable components. */
 static flashcart_err_t pro_stage_mcu_path (const char *utf8, char *output) {
     size_t length = strlen(utf8);
     size_t written;
     bool representable;
-    flashcart_err_t result = FLASHCART_ERR_ARGS;
     if (!pro_encode_oem(utf8, length, output, ED64_PRO_PATH_MAX, &written, &representable)) {
-        goto invalid;
+        return pro_invalid_mcu_path(output);
     }
     if (representable && written <= ED64_PRO_PATH_MAX) {
         output[written] = '\0';
@@ -844,7 +850,7 @@ static flashcart_err_t pro_stage_mcu_path (const char *utf8, char *output) {
     while (*component) {
         if (*component == '/' || *component == '\\') {
             if (position == ED64_PRO_PATH_MAX) {
-                goto invalid;
+                return pro_invalid_mcu_path(output);
             }
             output[position++] = *component++;
             continue;
@@ -853,7 +859,7 @@ static flashcart_err_t pro_stage_mcu_path (const char *utf8, char *output) {
         if (!pro_encode_oem(
                 component, component_length, output + position, ED64_PRO_PATH_MAX - position, &written, &representable
             )) {
-            goto invalid;
+            return pro_invalid_mcu_path(output);
         }
         if (!representable) {
             size_t prefix_length = component + component_length - utf8;
@@ -864,8 +870,8 @@ static flashcart_err_t pro_stage_mcu_path (const char *utf8, char *output) {
             lookup[prefix_length] = separator;
             if (status != FR_OK) {
                 pro_diagnostics.path_error = "Could not resolve a file path alias";
-                result = FLASHCART_ERR_LOAD;
-                goto failed;
+                output[0] = '\0';
+                return FLASHCART_ERR_LOAD;
             }
             size_t alias_length = strnlen(info.altname, sizeof(info.altname));
             if (!alias_length || alias_length == sizeof(info.altname) ||
@@ -879,23 +885,17 @@ static flashcart_err_t pro_stage_mcu_path (const char *utf8, char *output) {
                     &representable
                 ) ||
                 !representable) {
-                goto invalid;
+                return pro_invalid_mcu_path(output);
             }
         }
         if (written > ED64_PRO_PATH_MAX - position) {
-            goto invalid;
+            return pro_invalid_mcu_path(output);
         }
         position += written;
         component += component_length;
     }
     output[position] = '\0';
     return FLASHCART_OK;
-
-invalid:
-    pro_diagnostics.path_error = "File path cannot be represented by the cartridge filesystem";
-failed:
-    output[0] = '\0';
-    return result;
 }
 
 /** @brief Validate and read an open ROM into cartridge memory. */
@@ -1051,6 +1051,50 @@ static bool pro_ipl_identity (const char *path, const uint8_t *header) {
     return supported;
 }
 
+/** @brief Validate and read an open native IPL into the bounded IPL4 memory window. */
+static flashcart_err_t pro_read_64dd_ipl (FIL *file, const char *utf8_path, flashcart_progress_callback_t *progress) {
+    uint8_t header[64];
+    UINT read = 0;
+    if (f_size(file) != ED64_PRO_IPL_SIZE || !file->obj.fs || file->obj.fs->wflag) {
+        pro_diagnostics.path_error = "64DD IPL must be a 4 MiB native image";
+        return FLASHCART_ERR_LOAD;
+    }
+    if (f_read(file, header, sizeof(header), &read) != FR_OK || read != sizeof(header) ||
+        pro_ipl_word(header) != 0x80270740u || !pro_ipl_identity(utf8_path, header)) {
+        pro_diagnostics.path_error = "Invalid 64DD IPL identity, revision, or byte order";
+        return FLASHCART_ERR_LOAD;
+    }
+    for (unsigned i = 0; i < 4; i++) {
+        pro_diagnostics.ipl_header[i] = pro_ipl_word(header + i * 4);
+    }
+    if (f_lseek(file, 0x1010) != FR_OK || f_tell(file) != 0x1010 || f_read(file, header, 4, &read) != FR_OK ||
+        read != 4) {
+        return FLASHCART_ERR_LOAD;
+    }
+    pro_diagnostics.ipl_code = pro_ipl_word(header);
+    if (f_lseek(file, 0) != FR_OK || f_tell(file) != 0 || file->obj.fs->wflag) {
+        return FLASHCART_ERR_LOAD;
+    }
+    /* These sector-aligned reads go directly to disk_read. The destination is
+     * an FCI address, never PI_ROM + FCI_IPL (the latter is the I/O window).
+     * Metadata reads still use RDRAM and the ordinary disk-read path. */
+    pro_diagnostics.loading_ipl = true;
+    pro_diagnostics.load_byte_swap = false;
+    for (uint32_t offset = 0; offset < ED64_PRO_IPL_SIZE; offset += 128 * 1024u) {
+        if (f_read(file, (void *)(uintptr_t)(ED64_PRO_FCI_IPL + offset), 128 * 1024u, &read) != FR_OK ||
+            read != 128 * 1024u) {
+            return FLASHCART_ERR_LOAD;
+        }
+        if (progress) {
+            progress(f_tell(file) / (float)ED64_PRO_IPL_SIZE);
+        }
+    }
+    if (f_tell(file) != ED64_PRO_IPL_SIZE) {
+        return FLASHCART_ERR_LOAD;
+    }
+    return FLASHCART_OK;
+}
+
 /** @brief Load a native IPL through the explicitly FCI-addressed, bounded IPL4 path. */
 static flashcart_err_t pro_load_64dd_ipl (char *ipl_path, flashcart_progress_callback_t *progress) {
     pro_diagnostics.path_error = NULL;
@@ -1078,50 +1122,8 @@ static flashcart_err_t pro_load_64dd_ipl (char *ipl_path, flashcart_progress_cal
         pro_diagnostics.path_error = "64DD IPL could not be opened";
         return FLASHCART_ERR_LOAD;
     }
-    flashcart_err_t result = FLASHCART_ERR_LOAD;
-    uint8_t header[64];
-    UINT read = 0;
-    if (f_size(&file) != ED64_PRO_IPL_SIZE || !file.obj.fs || file.obj.fs->wflag) {
-        pro_diagnostics.path_error = "64DD IPL must be a 4 MiB native image";
-        goto close;
-    }
-    if (f_read(&file, header, sizeof(header), &read) != FR_OK || read != sizeof(header) ||
-        pro_ipl_word(header) != 0x80270740u || !pro_ipl_identity(utf8_path, header)) {
-        pro_diagnostics.path_error = "Invalid 64DD IPL identity, revision, or byte order";
-        goto close;
-    }
-    for (unsigned i = 0; i < 4; i++) {
-        pro_diagnostics.ipl_header[i] = pro_ipl_word(header + i * 4);
-    }
-    if (f_lseek(&file, 0x1010) != FR_OK || f_tell(&file) != 0x1010 ||
-        f_read(&file, header, 4, &read) != FR_OK || read != 4) {
-        goto close;
-    }
-    pro_diagnostics.ipl_code = pro_ipl_word(header);
-    if (f_lseek(&file, 0) != FR_OK || f_tell(&file) != 0 || file.obj.fs->wflag) {
-        goto close;
-    }
-    /* These sector-aligned reads go directly to disk_read. The destination is
-     * an FCI address, never PI_ROM + FCI_IPL (the latter is the I/O window).
-     * Metadata reads still use RDRAM and the ordinary disk-read path. */
-    pro_diagnostics.loading_ipl = true;
-    pro_diagnostics.load_byte_swap = false;
-    result = FLASHCART_OK;
-    for (uint32_t offset = 0; offset < ED64_PRO_IPL_SIZE; offset += 128 * 1024u) {
-        if (f_read(&file, (void *)(uintptr_t)(ED64_PRO_FCI_IPL + offset), 128 * 1024u, &read) != FR_OK ||
-            read != 128 * 1024u) {
-            result = FLASHCART_ERR_LOAD;
-            break;
-        }
-        if (progress) {
-            progress(f_tell(&file) / (float)ED64_PRO_IPL_SIZE);
-        }
-    }
+    flashcart_err_t result = pro_read_64dd_ipl(&file, utf8_path, progress);
     pro_diagnostics.loading_ipl = false;
-    if (f_tell(&file) != ED64_PRO_IPL_SIZE) {
-        result = FLASHCART_ERR_LOAD;
-    }
-close:
     if (f_close(&file) != FR_OK) {
         result = FLASHCART_ERR_LOAD;
     }

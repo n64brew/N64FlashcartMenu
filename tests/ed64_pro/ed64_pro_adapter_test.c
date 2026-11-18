@@ -1640,6 +1640,23 @@ static void test_dd_setup_refusals (void) {
     }
 }
 
+/** @brief IPL metadata and close failures always release the file and block launch. */
+static void test_dd_ipl_cleanup_failures (void) {
+    for (unsigned fault = 0; fault < 3; fault++) {
+        mounted_fixture();
+        mock.ipl_fixture = true;
+        mock.file_size = ED64_PRO_IPL_SIZE;
+        if (fault == 0) mock.read_result = FR_DISK_ERR;
+        if (fault == 1) mock.seek_result = FR_DISK_ERR;
+        if (fault == 2) mock.close_result = FR_DISK_ERR;
+        TEST_CHECK(pro_load_64dd_ipl("sd:/NDDJ2.n64", NULL) == FLASHCART_ERR_LOAD);
+        TEST_CHECK(mock.opens == 1 && mock.closes == 1);
+        TEST_CHECK(!pro_diagnostics.loading_ipl && !pro_diagnostics.ipl_ready && !pro_diagnostics.launch_ready);
+        TEST_CHECK(mock.operations == (fault < 2 ? 0u : 32u));
+        TEST_CHECK(pro_deinit() == FLASHCART_ERR_LOAD && mock.unmounts == 0 && mock.command_calls == 0);
+    }
+}
+
 /** @brief IPL transfer faults and unmapped launch memory stop the actual backend boot callback. */
 static void test_dd_transfer_and_mapping_faults (void) {
     mounted_fixture();
@@ -1760,6 +1777,7 @@ TEST_LIST = {
     {"native DD mirror overlap rejects before writing and allows standalone retry", test_dd_overlap_preflight},
     {"ordinary ROM loading retains full capacity after DD staging", test_ordinary_capacity_after_dd},
     {"native DD unsupported missing read-only and incomplete setup refuses boot", test_dd_setup_refusals},
+    {"native DD IPL metadata and close failures release the file", test_dd_ipl_cleanup_failures},
     {"native DD transfer and mapping faults halt boot", test_dd_transfer_and_mapping_faults},
     {"native DD handoff failures latch and native swap has no slot cap", test_dd_handoff_failures_and_native_swap},
     {"staged paths use exact CP437 while FatFs keeps UTF-8", test_cp437_paths},
