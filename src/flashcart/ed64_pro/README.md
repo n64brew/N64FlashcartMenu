@@ -113,9 +113,7 @@ second. Native DD RTC SET is affected by the firmware limitation above; writing
 through Settings > Time works.
 
 Run the [host tests](../../../tests/README.md) for transport, lifecycle,
-adapter, diagnostics, RTC, and DD loading coverage. See the
-[build-specific hardware results](../../../tests/ed64_pro/VALIDATION.md) for
-measured RTC/save outcomes and remaining merge evidence.
+adapter, diagnostics, RTC, and DD loading coverage.
 
 ### Upstream license
 

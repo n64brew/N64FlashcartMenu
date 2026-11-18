@@ -39,5 +39,3 @@ each run. Using the same menu build as the Pro regression:
 | Settings, flashcart pane, Z: Diagnostics | Numeric voltage and signed temperature; neither is marked unsupported. |
 | Close with B, reopen with Z, close with Z | Existing modal controls work and return to Settings. |
 | Browse and launch a known working ROM | Ordinary operation still works after diagnostics. |
-
-Physical regression results are recorded in the [Pro validation summary](ed64_pro/VALIDATION.md).
