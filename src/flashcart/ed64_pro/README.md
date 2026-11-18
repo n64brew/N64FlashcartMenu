@@ -65,6 +65,9 @@ checks.
 
 ### Native 64DD
 
+Hardware tests demonstrate disk boot and swapping. Disk-save persistence has
+not yet been qualified with a disk edit, restart, and reload/readback test.
+
 An Expansion Pak is required; disconnect a physical 64DD. Use writable,
 native-endian 64,931,840-byte `.ndd` images and the matching native-endian 4 MiB
 IPL in `/menu/64ddipl/`:
