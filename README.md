@@ -21,7 +21,7 @@ The current state of support is:
 ### Supported
 * SummerCart64
 * 64Drive
-* EverDrive-64 Pro (firmware 26.1014 or newer)
+* EverDrive-64 Pro series (firmware 26.1014 or newer)
 
 ### Help wanted (Work in Progress)
 * EverDrive-64 (X and V series)
