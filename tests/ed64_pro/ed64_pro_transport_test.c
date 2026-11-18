@@ -88,6 +88,7 @@ static struct {
     uint8_t tx_bytes[131072];
     size_t tx_count;
     uint32_t info_values[2];
+    uint32_t voltage_bcd;
     size_t info_reply_limit;
     bool info_trailing;
     unsigned info_requests;
@@ -105,6 +106,7 @@ static struct {
     uint32_t fci_address;
     uint16_t flags;
     unsigned flag_commands;
+    uint32_t sysstat_value;
     bool sysstat_busy;
     bool sysstat_unstable;
     unsigned sysstat_reads;
@@ -356,8 +358,10 @@ static void execute_bus (void) {
                 for (size_t i = 0; i < count; i++) {
                     uint32_t id = mock.ram[6 + i * 4] << 24 | mock.ram[7 + i * 4] << 16 | mock.ram[8 + i * 4] << 8 |
                                   mock.ram[9 + i * 4];
-                    TEST_ASSERT(id == ED64_PRO_INFS_TS_FW || id == ED64_PRO_INFS_MAX_ROM_SIZE);
-                    uint32_t value = mock.info_values[id == ED64_PRO_INFS_TS_FW ? 0 : 1];
+                    TEST_ASSERT(id == ED64_PRO_INFS_TS_FW || id == ED64_PRO_INFS_MAX_ROM_SIZE ||
+                                id == ED64_PRO_INFD_VCC_3V3);
+                    uint32_t value = id == ED64_PRO_INFD_VCC_3V3 ? mock.voltage_bcd
+                                                                              : mock.info_values[id == ED64_PRO_INFS_TS_FW ? 0 : 1];
                     for (size_t j = 0; j < 4 && i * 4 + j < mock.info_reply_limit; j++) {
                         rx_push(value >> (24 - j * 8));
                     }
@@ -482,7 +486,7 @@ static void execute_bus (void) {
             mock.ram[0] = mock.fifo_upper | (mock.count_override ? mock.reported_count : mock.rx_count);
             break;
         case 0x1F800008u:
-            mock.ram[0] = mock.sysstat_busy ? 1 : 0;
+            mock.ram[0] = mock.sysstat_value | (mock.sysstat_busy ? 1 : 0);
             if (mock.sysstat_unstable && (mock.sysstat_reads & 1)) {
                 mock.ram[0] ^= 0x10;
             }
@@ -648,6 +652,8 @@ static void power_on (void) {
     memset(&mock, 0, sizeof(mock));
     memset(&pro_ll, 0, sizeof(pro_ll));
     memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
+    memset(&pro_voltage, 0, sizeof(pro_voltage));
+    mock.voltage_bcd = 0x0330;
     memset(pro_error_message, 0, sizeof(pro_error_message));
     pro_attempt_start = 0;
     pro_attempt_deadline = 0;
@@ -1703,7 +1709,7 @@ static void test_adapter_unavailable_operations (void) {
              feature++) {
             bool supported = feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_AUTO_REGION
                 || feature == FLASHCART_FEATURE_SAVE_WRITEBACK || feature == FLASHCART_FEATURE_RTC
-                || feature == FLASHCART_FEATURE_64DD;
+                || feature == FLASHCART_FEATURE_64DD || feature == FLASHCART_FEATURE_DIAGNOSTIC_DATA;
             TEST_CHECK(adapter->has_feature(feature) == supported);
         }
         flashcart_firmware_version_t version = adapter->get_firmware_version();
@@ -1713,7 +1719,7 @@ static void test_adapter_unavailable_operations (void) {
         TEST_CHECK(adapter->load_save("sd:/test.sra") == FLASHCART_ERR_ARGS);
         TEST_CHECK(adapter->set_save_type(FLASHCART_SAVE_TYPE_SRAM_256KBIT) == FLASHCART_ERR_LOAD);
         TEST_CHECK(adapter->deinit != NULL && adapter->load_64dd_ipl != NULL && adapter->load_64dd_disk != NULL);
-        TEST_CHECK(adapter->load_64dd_disks != NULL && adapter->get_button_state == NULL);
+        TEST_CHECK(adapter->load_64dd_disks != NULL && adapter->get_button_state != NULL && adapter->get_voltage != NULL);
         TEST_CHECK(adapter->get_voltage_temperature == NULL && adapter->set_save_writeback == NULL);
         TEST_CHECK(adapter->set_next_boot_mode == NULL && mock.accesses == accesses);
     }
@@ -1930,6 +1936,87 @@ static void test_sys_info (void) {
         TEST_CHECK(mock.info_requests == 1 && mock.rx_count == 0 && mock.status_requests == 0);
         end(&transaction);
     }
+}
+
+/** @brief Send the exact one-ID 3.3 V GET_INF and retain its fixed two-ID limit. */
+static void test_voltage_get_info (void) {
+    power_on();
+    identify();
+    uint16_t output = 0xBEEF;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK && output == 3300);
+    const uint8_t frame[] = {0x2B, 0xD4, 0x84, 0x7B, 0x10, 1, 0, 0, 0, 139};
+    TEST_CHECK(mock.tx_count == sizeof(frame) && memcmp(mock.tx_bytes, frame, sizeof(frame)) == 0);
+    TEST_CHECK(mock.info_requests == 1 && mock.status_requests == 0 && mock.nresp_requests == 0);
+    TEST_CHECK(mock.rx_count == 0 && pro_ll.owner == NULL);
+    unsigned accesses = mock.accesses;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK && output == 3300 && mock.accesses == accesses);
+    mock.now = pro_voltage.ticks + TICKS_FROM_MS(PRO_VOLTAGE_REFRESH_MS);
+    mock.voltage_bcd = 0x0328;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK && output == 3280 && mock.info_requests == 2);
+    TEST_CHECK(mock.tx_count == 2 * sizeof(frame) && memcmp(mock.tx_bytes + sizeof(frame), frame, sizeof(frame)) == 0);
+}
+
+/** @brief A truncated, missing or trailing voltage reply leaves output and terminal failure intact. */
+static void test_voltage_get_info_faults (void) {
+    for (unsigned after_sample = 0; after_sample < 2; after_sample++) {
+        for (size_t length = 0; length <= 4; length++) {
+            power_on();
+            identify();
+            uint16_t output = 0xBEEF;
+            if (after_sample) {
+                TEST_ASSERT(pro_get_voltage(&output) == FLASHCART_OK);
+                mock.now = pro_voltage.ticks + TICKS_FROM_MS(PRO_VOLTAGE_REFRESH_MS);
+            }
+            mock.info_reply_limit = length;
+            mock.info_trailing = length == 4;
+            mock.tick_step = TICKS_FROM_MS(1) / 8;
+            output = 0xBEEF;
+            TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
+            ed64_pro_ll_failure_t failure = *ed64_pro_ll_get_failure();
+            TEST_CHECK(length == 4 ? failure.code == ED64_PRO_LL_TRAILING_DATA : is_deadline_error(failure.code));
+            TEST_CHECK(failure.transferred == length);
+            TEST_CHECK(mock.info_requests == after_sample + 1 && pro_ll.owner == NULL);
+            unsigned accesses = mock.accesses;
+            /* Even an unexpired successful cache cannot mask the terminal fault. */
+            pro_voltage.result = FLASHCART_OK;
+            TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
+            bool pressed = true;
+            TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_ERR_INT && pressed);
+            TEST_CHECK(mock.accesses == accesses);
+            TEST_CHECK(memcmp(&failure, ed64_pro_ll_get_failure(), sizeof(failure)) == 0);
+        }
+    }
+}
+
+/** @brief Read the actual full-width register and reject foreground ownership conflicts. */
+static void test_button_register (void) {
+    power_on();
+    identify();
+    const uint32_t statuses[] = {0, 0xFFFF, 0xFFFEFFFF, 0x00010000, 0xFFFFFFFF, 0x000100A8, 0xA8};
+    for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++) {
+        mock.sysstat_value = statuses[i];
+        bool pressed = !(statuses[i] & ED64_PRO_SYSSTAT_BTN);
+        TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_OK);
+        TEST_CHECK(pressed == ((statuses[i] & ED64_PRO_SYSSTAT_BTN) != 0));
+        TEST_CHECK(mock.bus[i].address == ED64_PRO_REG_SYSSTAT && mock.bus[i].length == sizeof(uint32_t));
+        TEST_CHECK(!mock.bus[i].write && mock.sysstat_reads == i + 1);
+        TEST_CHECK(mock.tx_count == 0 && mock.dma_reads == 0 && mock.dma_writes == 0);
+    }
+    uint16_t voltage = 0xBEEF;
+    TEST_ASSERT(pro_get_voltage(&voltage) == FLASHCART_OK);
+    unsigned accesses = mock.accesses;
+    bool pressed = true;
+    mock.kernel = true;
+    TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_ERR_INT && pressed);
+    TEST_CHECK(pro_get_voltage(&voltage) == FLASHCART_ERR_INT && voltage == 3300);
+    TEST_CHECK(mock.accesses == accesses);
+    mock.kernel = false;
+    ed64_pro_ll_transaction_t transaction;
+    begin(&transaction);
+    TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_ERR_INT && pressed);
+    TEST_CHECK(pro_get_voltage(&voltage) == FLASHCART_ERR_INT && voltage == 3300);
+    TEST_CHECK(mock.accesses == accesses);
+    end(&transaction);
 }
 
 /**
@@ -2664,6 +2751,9 @@ static void test_dd_config_profiles (void) {
 }
 
 TEST_LIST = {
+    {"voltage-only exact GET_INF and cached refresh", test_voltage_get_info},
+    {"voltage missing partial trailing replies and retained failure", test_voltage_get_info_faults},
+    {"button full-width SYSSTAT and foreground guards", test_button_register},
     {"native DD IPL FCI frames and independent bounds", test_dd_ipl_fci_frames_and_bounds},
     {"native DD standalone and combo configuration profiles", test_dd_config_profiles},
     {"RTC physical observation framing", test_rtc_frames},

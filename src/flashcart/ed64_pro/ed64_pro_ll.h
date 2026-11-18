@@ -52,6 +52,8 @@ enum {
     ED64_PRO_ACK_BLOCK = 1024,
     ED64_PRO_INFS_TS_FW = 6,
     ED64_PRO_INFS_MAX_ROM_SIZE = 9,
+    ED64_PRO_INFD_VCC_3V3 = 139,
+    ED64_PRO_SYSSTAT_BTN = 1u << 16,
     ED64_PRO_ATTEMPT_TIMEOUT_MS = 15000,
     ED64_PRO_FIFO_CHUNK = 128,
     ED64_PRO_FIFO_LIMIT = 2048,
@@ -220,7 +222,7 @@ ed64_pro_ll_error_t ed64_pro_ll_rtc_get (
     uint32_t deadline
 );
 /**
- * @brief Read the selected firmware timestamp or maximum ROM size values.
+ * @brief Read selected firmware, maximum ROM size, or 3.3 V supply values.
  */
 ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     ed64_pro_ll_transaction_t *transaction,

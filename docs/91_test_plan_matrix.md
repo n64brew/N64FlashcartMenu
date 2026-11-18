@@ -66,13 +66,14 @@ Before starting a full test cycle, document the current baseline status to track
 | **Controller Pak** | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Auto CIC/Region Detection** | ✓ | Manual | ✓ | ✓ | ✓ |
 | **Fast Reboot** | ✓ | - | - | - | ✓ |
-| **Diagnostics** | - | - | - | … | ✓ |
+| **Diagnostics** | - | - | - | ⚠ | ✓ |
 
 **Notes:**
 - `⚠` = limited support; `…` = possible, but not yet implemented; `-` = unavailable.
 - ED64 V3: Limited USB support (older revision)
 - ED64 V3: Requires manual CIC/region setting
 - ED64 Pro: Firmware `26.1014` has a bug that causes the last 2-3 bytes of 128 KiB FlashRAM and 128 KiB SRAM saves to be stored and loaded incorrectly. This does not affect any retail games; only homebrew games that use the last 4 bytes of these specific save types are impacted. It is not possible to work around this bug in software; a firmware fix is required.
+- ED64 Pro Diagnostics: cartridge button and 3.3 V supply implemented; temperature unsupported. See [qualification and remaining physical checks](ed64_pro_diagnostics_qualification.md).
 - SummerCart64: Most feature-complete (includes diagnostics & BIOS updates)
 
 ## Display Mod Compatibility Matrix

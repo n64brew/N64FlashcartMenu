@@ -40,6 +40,12 @@ Idle RESET returns to the stock menu. SM64 EEPROM settings persist after immedia
 
 Local synthetic tests passed EEPROM (4/16 Kbit) and SRAM (32/96 KiB) persistence under orderly MCU-stop power cycles. The 128 KiB SRAM, FlashRAM, and PKST2 fixtures had mismatches confined to the final four bytes. Beyond the F-Zero SRAM result below, other retail SRAM/FlashRAM save-and-reload, emulator saves, and uncontrolled power-loss timing still need qualification.
 
+### Diagnostics
+
+Settings > Flashcart > Z shows the live cartridge button and the Pro's 3.3 V supply in millivolts. Temperature is explicitly unsupported. Voltage uses the bounded GET_INF request with validated packed BCD and a one-second backend-local cache; the first call samples hardware, and a failed refresh returns an error rather than a successful stale reading. The existing startup warning also uses this voltage source below 3000 mV. No other rails or battery readings are exposed.
+
+See [Diagnostics qualification](../../../docs/ed64_pro_diagnostics_qualification.md) for the tested hardware and remaining physical checks.
+
 ### Native 64DD
 
 The existing menu selects a matching native-endian 4 MiB IPL: `/menu/64ddipl/NDDJ2.n64` (Japan retail), `NDDE0.n64` (USA prototype), or `NDXJ0.n64` (development). The backend verifies the canonical filename against its header identity/revision and stages it through the bounded FCI window at `0x0F800000`. After START, mapped IPL words must match the selected file before shared boot proceeds. An Expansion Pak is required; disconnect a physical 64DD.

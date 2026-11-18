@@ -229,6 +229,9 @@ static struct {
     char launch_paths[3][ED64_PRO_PATH_MAX + 1];
     uint32_t info[2];
     unsigned info_calls;
+    uint32_t voltage_bcd, sysstat;
+    unsigned voltage_calls, button_reads;
+    ed64_pro_ll_error_t register_error, end_error;
     unsigned begin_calls;
     unsigned end_calls;
     unsigned reads;
@@ -305,7 +308,7 @@ ed64_pro_ll_error_t ed64_pro_ll_begin (ed64_pro_ll_transaction_t *transaction, u
 ed64_pro_ll_error_t ed64_pro_ll_end (ed64_pro_ll_transaction_t *transaction) {
     (void)transaction;
     mock.end_calls++;
-    return ED64_PRO_LL_OK;
+    return mock.end_error;
 }
 
 /**
@@ -377,10 +380,25 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
 ) {
     (void)transaction;
     (void)deadline;
-    TEST_CHECK(count == 2 && ids[0] == ED64_PRO_INFS_TS_FW && ids[1] == ED64_PRO_INFS_MAX_ROM_SIZE);
-    mock.info_calls++;
-    memcpy(values, mock.info, sizeof(mock.info));
+    if (count == 1 && ids[0] == ED64_PRO_INFD_VCC_3V3) {
+        mock.voltage_calls++;
+        *values = mock.voltage_bcd;
+    } else {
+        TEST_CHECK(count == 2 && ids[0] == ED64_PRO_INFS_TS_FW && ids[1] == ED64_PRO_INFS_MAX_ROM_SIZE);
+        mock.info_calls++;
+        memcpy(values, mock.info, sizeof(mock.info));
+    }
     return mock.info_error;
+}
+
+/** @brief Preserve the full-width button status supplied by the fixture. */
+ed64_pro_ll_error_t ed64_pro_ll_read_reg (
+    ed64_pro_ll_transaction_t *transaction, ed64_pro_reg_t reg, uint32_t *value, uint32_t deadline
+) {
+    TEST_CHECK(transaction->deadline == deadline && reg == ED64_PRO_REG_SYSSTAT);
+    mock.button_reads++;
+    *value = mock.sysstat;
+    return mock.register_error;
 }
 
 /**
@@ -707,6 +725,8 @@ static void fixture (void) {
     memset(&mock, 0, sizeof(mock));
     mock.memory_size = 8 * 1024 * 1024;
     memset(&pro_diagnostics, 0, sizeof(pro_diagnostics));
+    memset(&pro_voltage, 0, sizeof(pro_voltage));
+    mock.voltage_bcd = 0x0330;
     pro_diagnostics.state = ED64_PRO_READY;
     mock.info[0] = 0x90555D4Eu;
     mock.info[1] = 0x10000000u;
@@ -734,6 +754,109 @@ static void mounted_fixture (void) {
     mock.begin_calls = 0;
     mock.events_count = mock.command_calls = 0;
     memset(mock.events, 0, sizeof(mock.events));
+}
+
+/** @brief Decode all BCD digits and retain the caller output on invalid input. */
+static void test_voltage_bcd (void) {
+    const struct { uint32_t bcd; uint16_t mv; bool valid; } cases[] = {
+        {0x0330, 3300, true}, {0x0299, 2990, true}, {0x0300, 3000, true},
+        {0x0301, 3010, true}, {0x0000, 0, true}, {0x0001, 10, true},
+        {0x6553, 65530, true}, {0x6554, 0, false}, {0x9999, 0, false},
+        {0x033A, 0, false}, {0x03B0, 0, false}, {0x0C30, 0, false},
+        {0xD330, 0, false}, {0x10330, 0, false},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        fixture();
+        mock.voltage_bcd = cases[i].bcd;
+        uint16_t output = 0xBEEF;
+        TEST_CHECK(pro_get_voltage(&output) == (cases[i].valid ? FLASHCART_OK : FLASHCART_ERR_INT));
+        TEST_CHECK(output == (cases[i].valid ? cases[i].mv : 0xBEEF));
+        TEST_CHECK(mock.voltage_calls == 1 && mock.begin_calls == 1 && mock.end_calls == 1);
+    }
+}
+
+/** @brief Refresh at the fixed interval, cache errors, and never publish stale success. */
+static void test_voltage_cache (void) {
+    fixture();
+    uint16_t output = 0xBEEF;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK && output == 3300);
+    TEST_CHECK(mock.voltage_calls == 1);
+    mock.voltage_bcd = 0x0329;
+    mock.now = pro_voltage.ticks + TICKS_FROM_MS(PRO_VOLTAGE_REFRESH_MS) - 1;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK && output == 3300 && mock.voltage_calls == 1);
+    mock.now = pro_voltage.ticks + TICKS_FROM_MS(PRO_VOLTAGE_REFRESH_MS);
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK && output == 3290 && mock.voltage_calls == 2);
+    mock.now = pro_voltage.ticks + TICKS_FROM_MS(PRO_VOLTAGE_REFRESH_MS);
+    mock.info_error = ED64_PRO_LL_TIMEOUT;
+    output = 0xBEEF;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF && mock.voltage_calls == 3);
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF && mock.voltage_calls == 3);
+
+    fixture();
+    mock.now = UINT32_MAX - TICKS_FROM_MS(PRO_VOLTAGE_REFRESH_MS) / 2;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK);
+    mock.now = pro_voltage.ticks + TICKS_FROM_MS(PRO_VOLTAGE_REFRESH_MS);
+    mock.voltage_bcd = 0x0331;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_OK && output == 3310 && mock.voltage_calls == 2);
+}
+
+/** @brief Keep argument, ownership, query, and release failures from publishing output. */
+static void test_voltage_failures (void) {
+    fixture();
+    TEST_CHECK(pro_get_voltage(NULL) == FLASHCART_ERR_ARGS && mock.begin_calls == 0);
+    const ed64_pro_ll_error_t errors[] = {ED64_PRO_LL_CONTEXT, ED64_PRO_LL_BUSY, ED64_PRO_LL_TIMEOUT};
+    for (size_t i = 0; i < sizeof(errors) / sizeof(errors[0]); i++) {
+        fixture();
+        uint16_t output = 0xBEEF;
+        mock.begin_error = errors[i];
+        TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
+        TEST_CHECK(mock.voltage_calls == 0 && mock.end_calls == 0);
+    }
+    fixture();
+    uint16_t output = 0xBEEF;
+    mock.info_error = ED64_PRO_LL_TIMEOUT;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
+    TEST_CHECK(mock.voltage_calls == 1 && mock.end_calls == 1);
+    fixture();
+    mock.end_error = ED64_PRO_LL_BUSY;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
+    fixture();
+    TEST_ASSERT(pro_get_voltage(&output) == FLASHCART_OK);
+    output = 0xBEEF;
+    mock.begin_error = ED64_PRO_LL_TIMEOUT;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF && mock.voltage_calls == 1);
+}
+
+/** @brief A release failure also keeps the caller output and cached result unavailable. */
+static void test_voltage_release_failure (void) {
+    fixture();
+    uint16_t output = 0xBEEF;
+    mock.end_error = ED64_PRO_LL_CONTEXT;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
+    mock.end_error = ED64_PRO_LL_OK;
+    TEST_CHECK(pro_get_voltage(&output) == FLASHCART_ERR_INT && output == 0xBEEF);
+    TEST_CHECK(mock.voltage_calls == 1);
+}
+
+/** @brief Read bit 16 on every call despite unrelated status changes and failure. */
+static void test_live_button (void) {
+    fixture();
+    TEST_CHECK(pro_get_button_state(NULL) == FLASHCART_ERR_ARGS && mock.begin_calls == 0);
+    const uint32_t statuses[] = {0, 0xFFFF, 0xFFFEFFFF, 0x00010000, 0xFFFFFFFF, 0x000100A8, 0xA8};
+    for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++) {
+        mock.sysstat = statuses[i];
+        bool pressed = (statuses[i] & ED64_PRO_SYSSTAT_BTN) == 0;
+        TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_OK);
+        TEST_CHECK(pressed == ((statuses[i] & ED64_PRO_SYSSTAT_BTN) != 0));
+        TEST_CHECK(mock.button_reads == i + 1 && mock.begin_calls == i + 1 && mock.end_calls == i + 1);
+    }
+    mock.register_error = ED64_PRO_LL_TIMEOUT;
+    bool pressed = true;
+    mock.sysstat = 0;
+    TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_ERR_INT && pressed);
+    mock.begin_error = ED64_PRO_LL_CONTEXT;
+    unsigned reads = mock.button_reads;
+    TEST_CHECK(pro_get_button_state(&pressed) == FLASHCART_ERR_INT && pressed && mock.button_reads == reads);
 }
 
 /**
@@ -1769,6 +1892,11 @@ static void test_shared_loader_failure_then_standalone (void) {
 }
 
 TEST_LIST = {
+    {"3.3V packed BCD and invalid digits", test_voltage_bcd},
+    {"first cached refreshed and failed voltage samples", test_voltage_cache},
+    {"voltage argument and transport failures", test_voltage_failures},
+    {"voltage release failure never publishes sample", test_voltage_release_failure},
+    {"live full-width SYSSTAT button reads", test_live_button},
     {"shared loader missing IPL then standalone retains complete GPAK and save", test_shared_loader_missing_ipl_then_standalone},
     {"shared loader ROM/save failure then standalone disables cartridge services", test_shared_loader_failure_then_standalone},
     {"native DD standalone IPL FCI loading and safe handoff", test_dd_standalone},

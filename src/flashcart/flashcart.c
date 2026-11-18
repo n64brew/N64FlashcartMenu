@@ -449,6 +449,34 @@ flashcart_err_t flashcart_get_button_state (bool *pressed) {
 }
 
 /**
+ * @brief Check whether supply voltage can be queried.
+ *
+ * @return bool True if either voltage callback is supported.
+ */
+bool flashcart_has_voltage (void) {
+    return flashcart->get_voltage != NULL || flashcart->get_voltage_temperature != NULL;
+}
+
+/**
+ * @brief Get supply voltage using the voltage-only callback when available.
+ *
+ * @param voltage_mv Output voltage in millivolts.
+ * @return flashcart_err_t Result code.
+ */
+flashcart_err_t flashcart_get_voltage (uint16_t *voltage_mv) {
+    if (voltage_mv == NULL) {
+        return FLASHCART_ERR_ARGS;
+    }
+
+    if (flashcart->get_voltage) {
+        return flashcart->get_voltage(voltage_mv);
+    }
+
+    int16_t temperature_deci_c;
+    return flashcart_get_voltage_temperature(voltage_mv, &temperature_deci_c);
+}
+
+/**
  * @brief Check whether voltage/temperature diagnostics are supported.
  *
  * @return bool True if supported.

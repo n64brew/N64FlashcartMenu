@@ -743,7 +743,7 @@ static void pro_put_u32 (uint8_t *output, uint32_t value) {
 }
 
 /**
- * @brief Read the selected firmware timestamp or maximum ROM size values.
+ * @brief Read selected firmware, maximum ROM size, or 3.3 V supply values.
  */
 ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     ed64_pro_ll_transaction_t *transaction,
@@ -758,7 +758,8 @@ ed64_pro_ll_error_t ed64_pro_ll_get_sys_info (
     uint8_t payload[9];
     payload[0] = count;
     for (size_t i = 0; i < count; i++) {
-        if (ids[i] != ED64_PRO_INFS_TS_FW && ids[i] != ED64_PRO_INFS_MAX_ROM_SIZE) {
+        if (ids[i] != ED64_PRO_INFS_TS_FW && ids[i] != ED64_PRO_INFS_MAX_ROM_SIZE &&
+            ids[i] != ED64_PRO_INFD_VCC_3V3) {
             return ED64_PRO_LL_ARGUMENT;
         }
         pro_put_u32(&payload[1 + i * 4], ids[i]);

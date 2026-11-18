@@ -35,3 +35,29 @@ $(ROM_INFO_TEST): $(ROM_INFO_DEPS)
 $(ROM_INFO_SANITIZE): $(ROM_INFO_DEPS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O1 $(SANITIZE_FLAGS) tests/rom_info_test.c $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@
+
+DIAGNOSTICS_TEST := $(HOST_BUILD_DIR)/flashcart_diagnostics_test
+DIAGNOSTICS_SANITIZE := $(HOST_BUILD_DIR)/flashcart_diagnostics_test_sanitize
+DIAGNOSTICS_SOURCE := tests/flashcart_diagnostics_test.c
+DIAGNOSTICS_DEPS := $(DIAGNOSTICS_SOURCE) src/flashcart/flashcart.c src/flashcart/flashcart.h \
+	src/menu/views/flashcart_info.c src/menu/views/startup.c src/menu/views/views.h \
+	src/menu/menu_state.h src/menu/ui_components.h src/menu/ui_components/constants.h \
+	src/menu/path.c src/menu/path.h src/menu/settings.h tests/stubs/libdragon.h tests/Makefile
+
+.PHONY: test-flashcart-diagnostics test-flashcart-diagnostics-sanitize
+test-flashcart-diagnostics: $(DIAGNOSTICS_TEST)
+	$(DIAGNOSTICS_TEST)
+
+test-flashcart-diagnostics-sanitize: $(DIAGNOSTICS_SANITIZE)
+	$(DIAGNOSTICS_SANITIZE)
+
+$(DIAGNOSTICS_TEST): $(DIAGNOSTICS_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O2 $(DIAGNOSTICS_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@
+
+$(DIAGNOSTICS_SANITIZE): $(DIAGNOSTICS_DEPS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(HOST_FLAGS) $(ROM_INFO_FLAGS) -O1 $(SANITIZE_FLAGS) $(DIAGNOSTICS_SOURCE) $(LDFLAGS) $(ROM_INFO_LINK_FLAGS) -o $@
+
+test-ed64-pro: test-flashcart-diagnostics
+test-ed64-pro-sanitize: test-flashcart-diagnostics-sanitize

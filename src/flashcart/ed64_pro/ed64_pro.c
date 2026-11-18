@@ -399,6 +399,95 @@ static flashcart_err_t pro_init (void) {
     return pro_diagnostics.info_result;
 }
 
+/* Cache the sample result as well as its value: a failed refresh must not expose
+ * the previous voltage as successful or query the MCU on every rendered frame. */
+enum { PRO_VOLTAGE_REFRESH_MS = 1000 };
+static struct {
+    bool sampled;
+    uint32_t ticks;
+    uint16_t millivolts;
+    flashcart_err_t result;
+} pro_voltage;
+
+/** @brief Decode packed BCD hundredths of a volt without calibration rules. */
+static bool pro_decode_voltage (uint32_t bcd, uint16_t *millivolts) {
+    if (bcd > UINT16_MAX) {
+        return false;
+    }
+    unsigned value = 0;
+    for (unsigned shift = 16; shift > 0; shift -= 4) {
+        unsigned digit = (bcd >> (shift - 4)) & 15u;
+        if (digit > 9) {
+            return false;
+        }
+        value = value * 10 + digit;
+    }
+    if (value > UINT16_MAX / 10u) {
+        return false;
+    }
+    *millivolts = value * 10;
+    return true;
+}
+
+/** @brief Read a live full-width SYSSTAT button bit under foreground ownership. */
+static flashcart_err_t pro_get_button_state (bool *pressed) {
+    if (!pressed) {
+        return FLASHCART_ERR_ARGS;
+    }
+    uint32_t deadline = TICKS_READ() + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
+    ed64_pro_ll_transaction_t transaction;
+    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+    uint32_t status = 0;
+    if (error == ED64_PRO_LL_OK) {
+        error = ed64_pro_ll_read_reg(&transaction, ED64_PRO_REG_SYSSTAT, &status, deadline);
+        ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
+        if (error == ED64_PRO_LL_OK) {
+            error = end_error;
+        }
+    }
+    if (error != ED64_PRO_LL_OK) {
+        return FLASHCART_ERR_INT;
+    }
+    *pressed = (status & ED64_PRO_SYSSTAT_BTN) != 0;
+    return FLASHCART_OK;
+}
+
+/** @brief Refresh 3.3 V at most once per second while preserving transport guards. */
+static flashcart_err_t pro_get_voltage (uint16_t *voltage_mv) {
+    if (!voltage_mv) {
+        return FLASHCART_ERR_ARGS;
+    }
+    uint32_t now = TICKS_READ();
+    uint32_t deadline = now + TICKS_FROM_MS(ED64_PRO_IO_TIMEOUT_MS);
+    ed64_pro_ll_transaction_t transaction;
+    ed64_pro_ll_error_t error = ed64_pro_ll_begin(&transaction, deadline);
+    if (error != ED64_PRO_LL_OK) {
+        return FLASHCART_ERR_INT;
+    }
+    if (!pro_voltage.sampled || now - pro_voltage.ticks >= TICKS_FROM_MS(PRO_VOLTAGE_REFRESH_MS)) {
+        const uint32_t id = ED64_PRO_INFD_VCC_3V3;
+        uint32_t value;
+        uint16_t millivolts;
+        pro_voltage.sampled = true;
+        pro_voltage.ticks = now;
+        pro_voltage.result = FLASHCART_ERR_INT;
+        error = ed64_pro_ll_get_sys_info(&transaction, &id, &value, 1, deadline);
+        if (error == ED64_PRO_LL_OK && pro_decode_voltage(value, &millivolts)) {
+            pro_voltage.millivolts = millivolts;
+            pro_voltage.result = FLASHCART_OK;
+        }
+    }
+    ed64_pro_ll_error_t end_error = ed64_pro_ll_end(&transaction);
+    if (error != ED64_PRO_LL_OK || end_error != ED64_PRO_LL_OK) {
+        pro_voltage.result = FLASHCART_ERR_INT;
+    }
+    if (pro_voltage.result != FLASHCART_OK) {
+        return FLASHCART_ERR_INT;
+    }
+    *voltage_mv = pro_voltage.millivolts;
+    return FLASHCART_OK;
+}
+
 /** @brief Return the cartridge display name. */
 static const char *pro_get_name (void) {
     return "EverDrive-64 Pro";
@@ -408,7 +497,7 @@ static const char *pro_get_name (void) {
 static bool pro_has_feature (flashcart_features_t feature) {
     return feature == FLASHCART_FEATURE_AUTO_CIC || feature == FLASHCART_FEATURE_AUTO_REGION
         || feature == FLASHCART_FEATURE_SAVE_WRITEBACK || feature == FLASHCART_FEATURE_RTC
-        || feature == FLASHCART_FEATURE_64DD;
+        || feature == FLASHCART_FEATURE_64DD || feature == FLASHCART_FEATURE_DIAGNOSTIC_DATA;
 }
 
 /** @brief Return cached information without MCU traffic. */
@@ -1278,7 +1367,8 @@ static flashcart_t flashcart_ed64_pro = {
     .load_64dd_ipl = pro_load_64dd_ipl,
     .load_64dd_disk = pro_load_64dd_disk,
     .load_64dd_disks = pro_load_64dd_disks,
-    .get_button_state = NULL,
+    .get_button_state = pro_get_button_state,
+    .get_voltage = pro_get_voltage,
     .get_voltage_temperature = NULL,
     .set_save_type = pro_set_save_type,
     .set_save_writeback = NULL,

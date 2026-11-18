@@ -103,6 +103,8 @@ typedef struct {
     flashcart_err_t (*load_64dd_disks) (char *disk_path, flashcart_disk_parameters_t *disk_parameters, char **swap_disk_paths, int swap_disk_count);
     /** @brief Query hardware button state if supported by flashcart. */
     flashcart_err_t (*get_button_state) (bool *pressed);
+    /** @brief Query supply voltage if supported, independently of temperature. */
+    flashcart_err_t (*get_voltage) (uint16_t *voltage_mv);
     /** @brief Query realtime voltage/temperature diagnostic data if supported. */
     flashcart_err_t (*get_voltage_temperature) (uint16_t *voltage_mv, int16_t *temperature_deci_c);
     /** @brief The flashcart set save type function */
@@ -233,6 +235,21 @@ bool flashcart_has_button_state (void);
  * @return flashcart_err_t Result code.
  */
 flashcart_err_t flashcart_get_button_state (bool *pressed);
+
+/**
+ * @brief Check whether supply voltage can be queried, with or without temperature.
+ *
+ * @return bool True when either voltage callback is supported.
+ */
+bool flashcart_has_voltage (void);
+
+/**
+ * @brief Get supply voltage, preferring the voltage-only callback when available.
+ *
+ * @param voltage_mv Output voltage in millivolts.
+ * @return flashcart_err_t Result code.
+ */
+flashcart_err_t flashcart_get_voltage (uint16_t *voltage_mv);
 
 /**
  * @brief Check whether realtime voltage/temperature diagnostics are supported.
