@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := test
+
 CC ?= cc
 HOST_BUILD_DIR ?= build/tests
 RTC_STUB_SOURCE := tests/stubs/rtc.c
@@ -5,6 +7,10 @@ FATFS_UNICODE_SOURCE := libdragon/src/fatfs/ffunicode.c
 FATFS_UNICODE_DEPS := $(FATFS_UNICODE_SOURCE) libdragon/src/fatfs/ff.h libdragon/src/fatfs/ffconf.h
 HOST_FLAGS := -std=gnu11 -Wall -Wextra -Werror -g -Itests/stubs -Isrc -isystem src/libs/acutest
 SANITIZE_FLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
+
+.PHONY: test test-sanitize
+test: test-ed64-pro
+test-sanitize: test-ed64-pro-sanitize
 
 include tests/ed64_pro/host.mk
 

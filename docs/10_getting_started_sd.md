@@ -25,9 +25,9 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 - Remove the Micro SD Card from your computer and insert it into the ED64 Pro. 
 
 > [!IMPORTANT]
-> USB tools such as `edlink` should only be used with the console powered off or in the stock Pro menu.
+> Use active USB tools only with the console powered off or in the stock Pro menu.
 
-Automatic CIC, save writeback, and RTC reads/writes are enabled. Set the clock in Settings > Time, or use the stock Pro menu or `edlink` while this menu is not running. 64DD, fast reboot, and USB debugging are not yet implemented.
+Automatic CIC/region detection, save writeback, RTC reads/writes, and native [64DD disk loading](17_64dd.md) are supported. Set the clock in Settings > Time. Fast reboot and USB debugging are not implemented.
 
 ROM and save paths use [CP437](https://en.wikipedia.org/wiki/Code_page_437), with existing [8.3 aliases](https://en.wikipedia.org/wiki/8.3_filename) for unsupported characters. Paths without usable aliases are rejected before launch.
 

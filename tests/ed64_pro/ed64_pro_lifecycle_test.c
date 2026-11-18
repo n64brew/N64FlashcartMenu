@@ -335,7 +335,7 @@ static void power_on (void) {
     spy.detected_cart = CART_EDX;
     spy.selected_cart = -999;
     spy.probe = (ed64_pro_probe_t){.outcome = ED64_PRO_PROBE_ABSENT, .id_valid = true};
-    spy.message = "EverDrive-64 Pro storage backend is not implemented.";
+    spy.message = "EverDrive-64 Pro startup failed.";
 }
 
 /**

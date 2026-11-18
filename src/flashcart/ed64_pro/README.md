@@ -2,79 +2,105 @@
 
 ### Official documentation
 
-https://github.com/krikzz/ed64-pro-pub/blob/main/MANUAL.md
+- [Manual](https://github.com/krikzz/ed64-pro-pub/blob/main/MANUAL.md)
+- [Protocol source](https://github.com/krikzz/ed64-pro-pub), revision `43014e290f85140d4c5ca84fbf5ae48ac755a23d`, `edio/everdrive.c` and `edio/everdrive.h`
 
-### Protocol source and adaptations
+Firmware **26.1014 or newer** is required. The backend supports N64 and emulator
+ROMs, save persistence, cheats, Controller Pak operations, automatic CIC/region
+detection, native 64DD, RTC reads/writes, and diagnostics. Fast reboot and USB
+debugging are not implemented.
 
-- Source: https://github.com/krikzz/ed64-pro-pub
-- Revision: 43014e290f85140d4c5ca84fbf5ae48ac755a23d
-- Paths: edio/everdrive.c, edio/everdrive.h
+N64FlashcartMenu retains its AGPL license; the adapted driver retains the
+upstream copyright and MIT notice [below](#upstream-license).
 
-The cartridge-local driver adapts register and FIFO access, bounded command framing, STATUS/NRESP, firmware information, MCU filesystem initialization, raw-sector I/O, SD-to-FCI loading, DEV stop/flags/paths/configuration/start, and diagnostic RTC GET.
+### Transport and storage ownership
 
-Register accesses use libdragon `io_read()`/`io_write()`; FIFO transfers use synchronous `dma_read()`/`dma_write()` with exclusive, aligned cache-line staging and explicit cache maintenance. Each FIFO byte occupies exactly one 32-bit bus word. These addresses are already in the SDK wrappers' ROM range, and aligned reads take the exact-length path without extra FIFO reads.
+The cartridge-local driver handles register/FIFO access, command framing,
+firmware information, raw-sector I/O, ROM loading, launch configuration, and
+storage handoff. Register accesses use libdragon `io_read()`/`io_write()`;
+FIFO transfers use synchronous DMA with aligned cache-line staging and explicit
+cache maintenance. Each FIFO byte occupies one 32-bit bus word.
 
-Libdragon serializes PI access and waits for DMA completion. A mailbox `io_write()` is followed by `dma_wait()` because register writes can return before the bus write completes. Transaction end needs no further wait. FIFO availability, MCU replies, mailbox readiness, STATUS, SD initialization, and cleanup retain protocol deadlines and limits checked between completed SDK operations; these cannot interrupt a synchronous SDK hardware wait. The first protocol fault and confirmed progress remain latched, and ambiguous writes are never retried.
+Libdragon serializes PI access and waits for DMA completion. Mailbox writes
+also call `dma_wait()`. Protocol deadlines bound polling between SDK operations;
+they cannot interrupt a synchronous SDK hardware wait. The first fault and
+confirmed progress are retained, and ambiguous writes are never retried.
 
-N64FlashcartMenu retains its AGPL license; the upstream copyright and MIT license notice appear [below](#upstream-license).
+The N64 owns volume 0 as `sd:/` through FatFs while the menu runs. Before launch,
+consumers stop, writes synchronize, FatFs unmounts, and FS INIT returns storage
+to the MCU. START loads the save file and enables game services. A failed I/O or
+handoff requires a console/cartridge power cycle.
 
-### Storage ownership
+Only use active USB tools with the console powered off or in the stock Pro menu.
+This menu has no USB transfer mode.
 
-The driver requires firmware 26.1014 or newer. It stops MCU services and mounts volume 0 as `sd:/` through libdragon FatFs. MCU handoff requires stopping consumers, syncing writes, unmounting FatFs, and running FS INIT. I/O or release failures are terminal; never retry an ambiguous write. Power-cycle the console and USB after a fault, then check the files on a computer.
+FatFs paths remain UTF-8. Paths passed to the MCU use CP437, with actual FatFs
+8.3 aliases for characters outside that encoding. Missing or unusable aliases
+are rejected before handoff, including on exFAT. Both the input path without
+`sd:` and its MCU encoding are limited to 1023 bytes. Autoload and history
+retain the shared INI parser's 255-byte value limit. Manual CIC/TV overrides
+take priority over automatic detection.
 
-Only use `edlink` or other active USB tools with the console powered off or in the stock Pro menu. This menu has no USB transfer mode.
-
-WRE transmits `DE AD BE EF`, matching edlink rather than the upstream N64 sample's read operation. Transfers calculate their own LBA stepping rather than copying upstream's byte-based address increment.
-
-ROM and emulator loads use FatFs with capacity checks and staged paths. Save configuration remains local until the storage handoff; START loads the BRM file and enables MCU game services. The existing boot and cheat engine then runs.
-
-Automatic CIC, automatic region detection, and MCU save writeback are enabled. CIC detection uses the shared IPL3 checksum path. ROM TV type comes from the shared destination-code metadata mapping; manual CIC/TV overrides take priority, and an unknown destination passes through the console TV type.
-
-Fast reboot and USB debugging are not implemented.
-
-FatFs paths remain UTF-8. Only staged GPAK/BRM/disk paths use FatFs's CP437 table and actual 8.3 aliases for unrepresentable components. Missing or unusable aliases, including on exFAT, are rejected before storage handoff without lossy replacement. The input path without `sd:` and its MCU encoding are each limited to 1023 bytes.
-
-`.v64` loading and a game launch are verified. On FAT32, a game booted and its fresh save was written under the correct Unicode name on paths over 300 bytes. Autoload and history paths retain the shared INI parser's 255-byte value limit.
-
-Idle RESET returns to the stock menu. SM64 EEPROM settings persist after immediate, 3-second and 10-second RESET trials, console-only and console-plus-USB power cycles, and intervening games.
-
-Local synthetic tests passed EEPROM (4/16 Kbit) and SRAM (32/96 KiB) persistence under orderly MCU-stop power cycles. The 128 KiB SRAM, FlashRAM, and PKST2 fixtures had mismatches confined to the final four bytes. Beyond the F-Zero SRAM result below, other retail SRAM/FlashRAM save-and-reload, emulator saves, and uncontrolled power-loss timing still need qualification.
+EEPROM (4/16 Kbit) and SRAM (32/96 KiB) saves are supported. Firmware `26.1014`
+corrupts the last four bytes of 128 KiB SRAM and FlashRAM saves, including
+PKST2. This does not affect known retail games; homebrew using those bytes needs
+a firmware fix.
 
 ### Diagnostics
 
-Settings > Flashcart > Z shows the live cartridge button and the Pro's 3.3 V supply in millivolts. Temperature is explicitly unsupported. Voltage uses the bounded GET_INF request with validated packed BCD and a one-second backend-local cache; the first call samples hardware, and a failed refresh returns an error rather than a successful stale reading. The existing startup warning also uses this voltage source below 3000 mV. No other rails or battery readings are exposed.
+Settings > Flashcart > Z shows the live cartridge button and 3.3 V supply in
+millivolts. Temperature is unsupported. Voltage uses a validated GET_INF request
+and a one-second cache; a failed refresh returns an error. Startup uses the same
+reading for its low-voltage warning below 3000 mV.
 
-See [Diagnostics qualification](../../../docs/ed64_pro_diagnostics_qualification.md) for the tested hardware and remaining physical checks.
+See [diagnostics](../../../docs/ed64_pro_diagnostics.md) for controls and manual
+checks.
 
 ### Native 64DD
 
-The existing menu selects a matching native-endian 4 MiB IPL: `/menu/64ddipl/NDDJ2.n64` (Japan retail), `NDDE0.n64` (USA prototype), or `NDXJ0.n64` (development). The backend verifies the canonical filename against its header identity/revision and stages it through the bounded FCI window at `0x0F800000`. After START, mapped IPL words must match the selected file before shared boot proceeds. An Expansion Pak is required; disconnect a physical 64DD.
+An Expansion Pak is required; disconnect a physical 64DD. Use writable,
+native-endian 64,931,840-byte `.ndd` images and the matching native-endian 4 MiB
+IPL in `/menu/64ddipl/`:
 
-Only writable 64,931,840-byte native `.ndd` images are supported. Preview the disk and press A for standalone IPL startup. For a combo, preview the cartridge, return with B, preview the disk and press Z. The unchanged shared loader stops on ROM/save errors before loading DD. Backend ROM/auxiliary loading and save preparation must both finish before a cartridge is retained; incomplete preparation is discarded when DD begins. IPL and disk readiness are independent, so a missing or invalid IPL/disk does not discard a complete cartridge.
+- `NDDJ2.n64`: Japan retail.
+- `NDDE0.n64`: USA prototype.
+- `NDXJ0.n64`: Development.
 
-The backend enables DD with GPAK and its cartridge save services when a complete cartridge remains prepared; otherwise it selects IPL with cartridge backup services disabled. The existing shared boot parameters choose the startup aperture: standalone starts at DD IPL even when an earlier complete GPAK/save remains configured. Selecting standalone does not clear every earlier cartridge mapping. No freshness heuristic identifies launch intent.
+Preview a disk and press A for standalone startup. For a cartridge/disk combo,
+preview the cartridge, return with B, then preview the disk and press Z. Combo
+ROMs are limited to 120 MiB to leave room for the IPL; oversized combos are
+rejected before the IPL is written.
 
-DD attachment rejects a retained cartridge extent above 120 MiB **before writing any IPL bytes**, then invalidates that cartridge/save preparation. This protects the IPL mirror without reducing ordinary ROM-loading capacity. A freshly prepared oversized combo fails; a first standalone attempt after abandoned oversized preparation can also fail, and the next standalone attempt can proceed after that rejection. There is no silent truncation or fallback that drops an intended combo.
+The backend validates IPL identity, prepares the disk and cartridge save,
+hands storage to the MCU, and checks the mapped IPL before boot. Failed ROM or
+save preparation cannot leave a partial cartridge configured for a DD launch.
+Standalone startup enters the DD IPL; combo startup uses the prepared cartridge.
 
-Both existing DD callbacks stage the primary image. The multi-disk callback ignores the menu's sibling list because firmware discovers its own swap group. Keep the group in one directory; the physical cartridge button advances disks. The menu retains its existing three-slot preview, which does not describe the firmware's full group or order. DD launches use STD RTC; ordinary ROM launches retain RDO. Checked storage handoff, readiness, mapping verification, and failure diagnostics use the existing backend facilities. Recoverable menu failures retain the generic shared error text.
+Firmware discovers disk-swap groups in the same directory. Press the physical
+cartridge button to advance disks. The menu's three-slot preview does not limit
+the firmware's swap group. DD launches use STD RTC; ordinary ROM launches use
+RDO. Set the clock in Settings > Time before launching a disk: firmware
+`26.1014` does not apply native DD RTC SET commands.
 
-Restoring the shared disk view also restores metadata preview before its later Expansion Pak refusal. The revised production build passed both steps on its first cold Jumper Pak boot, followed by ordinary F-Zero ROM startup. Historical intermittent 4 MiB preview stalls and startup RDP faults remain unisolated; this focused passing run does not establish a general fix. Native DD RTC SET remains ineffective on the tested cart/firmware. Other console regions and USA/development-disk compatibility remain untested.
-
-Host checks: `make -f tests/Makefile test-ed64-pro test-ed64-pro-sanitize test-cart-load-dd test-cart-load-dd-sanitize`.
+Intermittent preview/startup faults can occur with a 4 MiB Jumper Pak. Use an
+Expansion Pak if affected; native DD always requires one.
 
 ### Real-time clock
 
-After mounting FatFs, the Pro backend sends a documented DEV_SET_CFG with ROM_OFF, ROM size zero, STD RTC, and every other field zero, then DEV_START before the first `rtc_init()`. Backup RAM and 64DD services remain disabled while N64 FatFs owns storage. No ROM extent, bundle enumeration, bank fingerprinting, FCI samples, private SDK API, or production build metadata is needed.
+After mounting FatFs, the backend starts MCU services with ROM_OFF, zero ROM
+size, STD RTC, and cartridge/save/DD services disabled. Libdragon detects the
+Joybus RTC and provides its normal POSIX clock integration and cache.
+**Settings > Time** reads and saves the clock; leaving and reentering refreshes it. Game
+launch closes the RTC and stops menu services before storage handoff.
 
-ROM_OFF disables ROM mapping according to the vendor documentation; it does not mean "preserve configuration", and size zero is not an "unchanged" convention. On the tested original N64 and Pro firmware 26.1014, this configuration left the default cartridge read aperture usable through both stock-menu SD launch and directly installed physical cold boot. A 3 MiB probe independently verified a known fixture at offset `0x280000` and compared fresh header/fixture bytes before and after START. This is measured behavior on that hardware/firmware, not a claim about every firmware implementation.
+The hardware calendar supports 2000–2099; the shared Time editor offers years
+through 2095. An invalid hardware calendar reports a clock error rather than a
+software fallback date. MCU RTC GET can trail a Joybus write by about one
+second. Native DD RTC SET is affected by the firmware limitation above; writing
+through Settings > Time works.
 
-Libdragon then detects the genuine Joybus RTC and supplies its ordinary POSIX clock integration and cache. There are no Pro clock overrides. The unchanged Settings > Time pane reads and saves the clock; leaving and reentering refreshes the same native cache. Game launch closes native RTC state and stops the menu services before FatFs unmount/FS INIT. Ordinary ROMs use game-side RDO configuration; DD launches configure STD mode.
-
-On the tested ED64 Pro running firmware 26.1014, native DD RTC SET completes without changing the physical clock. Extended native probes still failed after SDK register-sequence, settling-time, one-hour-target, and Joybus write-lock checks. In contrast, Joybus SET changed the same clock successfully, with both native DD and independent physical MCU readback confirming the target and restoration. This isolates the failure to the cartridge's native DD write-emulation path; the exact internal firmware/FPGA defect remains unknown. No simple backend-only repair was established. Use Settings > Time before launching a disk to adjust the clock through the working Joybus interface.
-
-Use hardware dates in 2000–2099. The shared year selector remains 1996–2095, so qualification uses the supported intersection; no shared range or invalid-clock editing behavior was changed. If genuine detection succeeds but the calendar is invalid, public source resynchronization preserves the clock error instead of presenting libdragon's software fallback date. Failed service transitions retain their first error and require a console/cartridge power cycle.
-
-OFF/zero probes selected genuine Joybus RTC after START on both launch routes; settled native and physical MCU readings agreed within one second. MCU RTC GET can lag a native Joybus write by approximately one second, so immediate cached success alone is not persistence evidence.
+Run the [host tests](../../../tests/README.md) for transport, lifecycle,
+adapter, diagnostics, RTC, and DD loading coverage.
 
 ### Upstream license
 

@@ -11,6 +11,7 @@ ifneq ($(ED64_PRO_REGION_INNER),1)
 
 .PHONY: all
 all:
+	@mkdir -p "$(OUTPUT_DIR)"
 	$(MAKE) --no-print-directory -f tests/ed64_pro/Makefile.region ED64_PRO_REGION_INNER=1 \
 		BUILD_DIR="$(BUILD_DIR)" OUTPUT_DIR="$(OUTPUT_DIR)" "$(OUTPUT_DIR)/N64FlashcartMenu.n64"
 
