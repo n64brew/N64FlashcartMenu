@@ -172,8 +172,10 @@ void view_image_viewer_init (menu_t *menu) {
 
     int err;
     if (is_jpeg) {
-        err = jpeg_decoder_start_into(path_get(path), max_w, max_h, decode_buffer,
-                                      jpeg_callback, menu);
+        err = decode_buffer
+            ? jpeg_decoder_start_into(path_get(path), max_w, max_h, decode_buffer,
+                                      jpeg_callback, menu)
+            : jpeg_decoder_start(path_get(path), max_w, max_h, jpeg_callback, menu);
     } else {
         err = png_decoder_start_into(path_get(path), max_w, max_h, decode_buffer,
                                      png_callback, menu);
