@@ -37,6 +37,7 @@
 #define MAX_PATH_LENGTH (512)
 #define DATA_CHUNK_SIZE (4096) // Small enough to be sent well within the USB write timeout
 #define MAX_DELETE_DEPTH (16)
+#define PATH_SEPARATORS "/\\" // FatFs permits the two separators
 
 /** @brief The supported USB commands structure. */
 typedef struct {
@@ -368,12 +369,30 @@ static bool archive_in_use (menu_t *menu, const char *path) {
 
     const char *archive = strip_fs_prefix(path_get(menu->browser.directory));
 
-    archive += strspn(archive, "/");
-    path += strspn(path, "/");
+    // FatFs permits a volume before the path, for example "0:"
+    const char *volume_end = strchr(path, ':');
+    if (volume_end) {
+        path = volume_end + 1;
+    }
 
-    size_t length = strlen(path);
+    // Compare one name at a time, thus repeated separators make no difference
+    while (true) {
+        archive += strspn(archive, PATH_SEPARATORS);
+        path += strspn(path, PATH_SEPARATORS);
 
-    return (strncasecmp(archive, path, length) == 0) && ((archive[length] == '\0') || (archive[length] == '/'));
+        if (*path == '\0') {
+            return true;
+        }
+
+        size_t length = strcspn(path, PATH_SEPARATORS);
+
+        if ((strcspn(archive, PATH_SEPARATORS) != length) || (strncasecmp(archive, path, length) != 0)) {
+            return false;
+        }
+
+        archive += length;
+        path += length;
+    }
 }
 
 /**
