@@ -803,7 +803,7 @@ static flashcart_err_t sc64_get_diagnostics (flashcart_diagnostic_t *diagnostics
         if (available) {
             int temperature_abs = temperature_deci_c < 0
                 ? -temperature_deci_c : temperature_deci_c;
-            snprintf(diagnostics[1].value, sizeof(diagnostics[1].value), "%s%d.%d C",
+            snprintf(diagnostics[1].value, sizeof(diagnostics[1].value), "%s%d.%d°C",
                      temperature_deci_c < 0 ? "-" : "",
                      temperature_abs / 10, temperature_abs % 10);
         } else {
