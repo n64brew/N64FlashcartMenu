@@ -137,13 +137,15 @@ static void deinit (menu_t *menu) {
         }
     }
 
+    rspq_wait();
+
     if (image) {
         if (image_set_as_background) {
             ui_components_background_replace_image(image);
         } else {
             surface_free(image);
             free(image);
-            // Restore the background that was freed at init to give the decoder more memory
+            // Restore the prior background from cache into the reserved decode buffer
             ui_components_background_reload();
         }
     } else {
@@ -160,9 +162,9 @@ void view_image_viewer_init (menu_t *menu) {
     image_set_as_background = false;
     is_jpeg = file_has_extensions(menu->browser.entry->name, jpeg_extensions);
     image = NULL;
-    // Free the background image temporarily so the PNG decoder has its full memory budget;
-    // ui_components_background_reload() restores it if the user does not set a new background
+    // Release the active image view so the decoder can reuse the reserved background buffer.
     ui_components_background_image_free_only();
+    surface_t *decode_buffer = ui_components_background_get_decode_buffer();
     int max_w = display_get_width();
     int max_h = display_get_height();
 
@@ -170,9 +172,15 @@ void view_image_viewer_init (menu_t *menu) {
 
     int err;
     if (is_jpeg) {
-        err = jpeg_decoder_start(path_get(path), max_w, max_h, jpeg_callback, menu);
+        err = decode_buffer
+            ? jpeg_decoder_start_into(path_get(path), max_w, max_h, decode_buffer,
+                                      jpeg_callback, menu)
+            : jpeg_decoder_start(path_get(path), max_w, max_h, jpeg_callback, menu);
     } else {
-        err = png_decoder_start(path_get(path), max_w, max_h, png_callback, menu);
+        err = decode_buffer
+            ? png_decoder_start_into(path_get(path), max_w, max_h, decode_buffer,
+                                     png_callback, menu)
+            : png_decoder_start(path_get(path), max_w, max_h, png_callback, menu);
     }
     if (err != (is_jpeg ? JPEG_OK : PNG_OK)) {
         image_loading = false;

@@ -1,7 +1,7 @@
 ## Background Images
 
 > [!NOTE]
-> On systems that use a Jumper PAK, available memory limits the size of images that can be loaded.
+> On systems that use a Jumper PAK, ROMs that include embedded metadata may not show a menu background.
 
 ### How to add a background image
 First copy a `.PNG`, `.JPG`, or `.JPEG` image with a maximum size of `640x480` to anywhere on the SD card. JPEG files must be exported as baseline, non-progressive JPEGs. Then when the N64FlashcartMenu is loaded on the N64, browse to the image and then press the `A` Button to preview it on the screen. Press the `A` Button again to open up the confirmation message, which will ask if you want to set a new background image.

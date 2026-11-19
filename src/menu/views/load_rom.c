@@ -36,13 +36,6 @@ static bool metadata_image_available[METADATA_IMAGE_CACHE_MAX];
 static uint16_t metadata_image_count;
 static bool metadata_images_scanned = false;
 
-/** Embedded metadata images may be PNG or JPEG. Validated by content (file signature),
- * not by filename, so a mis-named or extension-less entry isn't wrongly excluded or accepted. */
-static bool is_unsupported_embedded_image(const rom_info_t *rom_info, const char *filename) {
-    return !rom_info_metadata_image_is_png(rom_info, filename) &&
-           !rom_info_metadata_image_is_jpeg(rom_info, filename);
-}
-
 static void scan_metadata_images(menu_t *menu) {
     if (metadata_images_scanned) {
         return;
@@ -50,32 +43,40 @@ static void scan_metadata_images(menu_t *menu) {
 
     metadata_image_count = 0;
     if (menu->load.rom_info.meta.metadata_zip_path) {
-        for (uint16_t i = 0; i < 6 && metadata_image_count < METADATA_IMAGE_CACHE_MAX; i++) {
-            if (menu->load.rom_info.meta.boxart[i] && menu->load.rom_info.meta.boxart[i][0] &&
-                rom_info_metadata_image_exists(&menu->load.rom_info, menu->load.rom_info.meta.boxart[i]) &&
-                !is_unsupported_embedded_image(&menu->load.rom_info, menu->load.rom_info.meta.boxart[i])) {
-                metadata_image_names[metadata_image_count] = menu->load.rom_info.meta.boxart[i];
-                metadata_image_embedded[metadata_image_count] = true;
-                metadata_image_available[metadata_image_count++] = true;
+        const char *filenames[METADATA_IMAGE_CACHE_MAX];
+        bool supported[METADATA_IMAGE_CACHE_MAX];
+        size_t filename_count = 0;
+
+        for (uint16_t i = 0; i < 6 && filename_count < METADATA_IMAGE_CACHE_MAX; i++) {
+            if (menu->load.rom_info.meta.boxart[i] && menu->load.rom_info.meta.boxart[i][0]) {
+                filenames[filename_count++] = menu->load.rom_info.meta.boxart[i];
             }
         }
-        for (uint16_t i = 0; i < 2 && metadata_image_count < METADATA_IMAGE_CACHE_MAX; i++) {
-            if (menu->load.rom_info.meta.cartart[i] && menu->load.rom_info.meta.cartart[i][0] &&
-                rom_info_metadata_image_exists(&menu->load.rom_info, menu->load.rom_info.meta.cartart[i]) &&
-                !is_unsupported_embedded_image(&menu->load.rom_info, menu->load.rom_info.meta.cartart[i])) {
-                metadata_image_names[metadata_image_count] = menu->load.rom_info.meta.cartart[i];
-                metadata_image_embedded[metadata_image_count] = true;
-                metadata_image_available[metadata_image_count++] = true;
+        for (uint16_t i = 0; i < 2 && filename_count < METADATA_IMAGE_CACHE_MAX; i++) {
+            if (menu->load.rom_info.meta.cartart[i] && menu->load.rom_info.meta.cartart[i][0]) {
+                filenames[filename_count++] = menu->load.rom_info.meta.cartart[i];
             }
         }
-        for (uint16_t i = 0; i < menu->load.rom_info.meta.screenshot_count && metadata_image_count < METADATA_IMAGE_CACHE_MAX; i++) {
-            if (rom_info_metadata_image_exists(&menu->load.rom_info, menu->load.rom_info.meta.screenshots[i]) &&
-                !is_unsupported_embedded_image(&menu->load.rom_info, menu->load.rom_info.meta.screenshots[i])) {
-                metadata_image_names[metadata_image_count] = menu->load.rom_info.meta.screenshots[i];
-                metadata_image_embedded[metadata_image_count] = true;
-                metadata_image_available[metadata_image_count++] = true;
+        for (uint16_t i = 0; i < menu->load.rom_info.meta.screenshot_count
+                && filename_count < METADATA_IMAGE_CACHE_MAX; i++) {
+            if (menu->load.rom_info.meta.screenshots[i]
+                    && menu->load.rom_info.meta.screenshots[i][0]) {
+                filenames[filename_count++] = menu->load.rom_info.meta.screenshots[i];
             }
         }
+
+        if (filename_count > 0
+                && rom_info_metadata_images_supported(&menu->load.rom_info, filenames,
+                                                     filename_count, supported)) {
+            for (size_t i = 0; i < filename_count; i++) {
+                if (supported[i]) {
+                    metadata_image_names[metadata_image_count] = filenames[i];
+                    metadata_image_embedded[metadata_image_count] = true;
+                    metadata_image_available[metadata_image_count++] = true;
+                }
+            }
+        }
+
         if (metadata_image_count > 0) {
             metadata_images_scanned = true;
             return;
@@ -457,10 +458,14 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
                         &menu->load.rom_info,
                         metadata_image_names[new_metadata_image_index],
                         &data, &size)) {
-                    new_boxart = ui_components_boxart_init_mem(
-                        metadata_image_names[new_metadata_image_index], data, size,
-                        BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX
-                    );
+                    new_boxart = !is_memory_expanded()
+                        ? ui_components_boxart_init_mem_into(
+                            metadata_image_names[new_metadata_image_index], data, size,
+                            BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX,
+                            ui_components_background_get_decode_buffer())
+                        : ui_components_boxart_init_mem(
+                            metadata_image_names[new_metadata_image_index], data, size,
+                            BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX);
                 }
                 if (new_boxart == NULL) {
                     ui_components_background_reload();
@@ -510,10 +515,14 @@ static void iterate_metadata_image(menu_t *menu, int direction) {
                         &menu->load.rom_info,
                         metadata_image_names[previous_metadata_image_index],
                         &data, &size)) {
-                    boxart = ui_components_boxart_init_mem(
-                        metadata_image_names[previous_metadata_image_index], data, size,
-                        BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX
-                    );
+                    boxart = !is_memory_expanded()
+                        ? ui_components_boxart_init_mem_into(
+                            metadata_image_names[previous_metadata_image_index], data, size,
+                            BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX,
+                            ui_components_background_get_decode_buffer())
+                        : ui_components_boxart_init_mem(
+                            metadata_image_names[previous_metadata_image_index], data, size,
+                            BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX);
                 }
                 if (boxart == NULL) {
                     ui_components_background_reload();
@@ -1073,10 +1082,14 @@ void view_load_rom_init (menu_t *menu) {
                 ui_components_background_image_free_only();
             }
             if (rom_info_extract_metadata_image(&menu->load.rom_info, metadata_image_names[0], &data, &size)) {
-                boxart = ui_components_boxart_init_mem(
-                    metadata_image_names[0], data, size,
-                    BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX
-                );
+                boxart = !is_memory_expanded()
+                    ? ui_components_boxart_init_mem_into(
+                        metadata_image_names[0], data, size,
+                        BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX,
+                        ui_components_background_get_decode_buffer())
+                    : ui_components_boxart_init_mem(
+                        metadata_image_names[0], data, size,
+                        BOXART_WIDTH_MAX, BOXART_HEIGHT_MAX);
             }
             if (boxart == NULL) {
                 // The embedded entry passed the scan-time ZIP existence/size check but could

@@ -13,6 +13,7 @@ Files are made available:
 
 - **Bug Fixes**
 	- Fix: Long nested folder names cause the menu path buffer to grow, pointing to freed memory.
+	- Fix: Memory allocation issues with background images on consoles using a Jumper Pak.
 
 - **Documentation**
 	- None.
@@ -21,6 +22,7 @@ Files are made available:
 	- Menu Credits, Flashcart Information and N64 Information are now shown as tabs within the Device Information screen. 
 	- Controller Pak Manager has been improved to align with the rest of the menu.
 	- Improve Settings Editor, splitting options list into into tabs and making it directly editable.
+	- Improve UI responsiveness when loading or unloading ROM's with embedded metadata.
 
 - **Other**
 	- None.
