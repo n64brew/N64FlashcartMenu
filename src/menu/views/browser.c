@@ -749,17 +749,20 @@ static void draw (menu_t *menu, surface_t *d) {
 
 
 static void reload_if_requested (menu_t *menu) {
-    if (menu->browser.reload) {
-        menu->browser.reload = false;
-        if (reload_directory(menu)) {
-            menu_show_error(
-                menu,
-                directory_entry_limit_exceeded
-                    ? "Current directory is too large for Jumper Pak\nUse an Expansion Pak"
-                    : "Error while reloading current directory"
-            );
-            menu->browser.valid = false;
-        }
+    // An open archive keeps the request until the browser goes out of the archive
+    if (!menu->browser.reload || menu->browser.archive) {
+        return;
+    }
+
+    menu->browser.reload = false;
+    if (reload_directory(menu)) {
+        menu_show_error(
+            menu,
+            directory_entry_limit_exceeded
+                ? "Current directory is too large for Jumper Pak\nUse an Expansion Pak"
+                : "Error while reloading current directory"
+        );
+        menu->browser.valid = false;
     }
 }
 
@@ -803,7 +806,7 @@ void view_browser_init (menu_t *menu) {
 
 void view_browser_display (menu_t *menu, surface_t *display) {
     // Files can change while the browser is on screen (see usb_comm.c)
-    if (menu->browser.valid && !menu->browser.archive) {
+    if (menu->browser.valid) {
         reload_if_requested(menu);
     }
 
