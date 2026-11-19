@@ -137,7 +137,7 @@ static void deinit (menu_t *menu) {
         }
     }
 
-    rdpq_detach_wait();
+    rspq_wait();
 
     if (image) {
         if (image_set_as_background) {
