@@ -153,6 +153,8 @@ The commands from `list-dir` to `free-space` are the file commands. These rules 
 * `list-dir` and `stat` give one line for each entry: `<attributes> <size> <date> <time> <name>`. The attributes, date and time are the FatFs values, as decimal numbers.
 * `free-space` gives one line: `<total bytes> <free bytes>`.
 * The browser reloads the directory after `make-dir`, `delete` and `rename`.
+* `put-file` does not reload the browser, because one file can use many commands. To show a new file, write it with a temporary name and then use `rename`.
+* `put-file`, `delete` and `rename` give the result code 16 (`FR_LOCKED`) for the archive that the browser has open.
 
 
 ### How to deploy and/or debug to other flashcarts/emulators
