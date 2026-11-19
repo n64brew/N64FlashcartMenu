@@ -177,8 +177,10 @@ void view_image_viewer_init (menu_t *menu) {
                                       jpeg_callback, menu)
             : jpeg_decoder_start(path_get(path), max_w, max_h, jpeg_callback, menu);
     } else {
-        err = png_decoder_start_into(path_get(path), max_w, max_h, decode_buffer,
-                                     png_callback, menu);
+        err = decode_buffer
+            ? png_decoder_start_into(path_get(path), max_w, max_h, decode_buffer,
+                                     png_callback, menu)
+            : png_decoder_start(path_get(path), max_w, max_h, png_callback, menu);
     }
     if (err != (is_jpeg ? JPEG_OK : PNG_OK)) {
         image_loading = false;
