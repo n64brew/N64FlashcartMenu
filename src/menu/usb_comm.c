@@ -468,7 +468,8 @@ static FRESULT delete_tree (char *path, int depth) {
 static void command_delete (menu_t *menu) {
     char path[MAX_PATH_LENGTH];
 
-    if (usb_comm_read_string(path, sizeof(path), '\0') || (strlen(path) < 2)) {
+    // An empty path and the root directory are not permitted
+    if (usb_comm_read_string(path, sizeof(path), '\0') || (path[strspn(path, "/")] == '\0')) {
         return usb_comm_send_result(FR_INVALID_PARAMETER);
     }
 
