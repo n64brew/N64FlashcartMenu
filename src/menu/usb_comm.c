@@ -17,6 +17,7 @@
 
 #include "sound.h"
 #include "usb_comm.h"
+#include "utils/fs.h"
 #include "utils/utils.h"
 #include "views/views.h"
 
@@ -352,6 +353,30 @@ static void command_send_file (menu_t *menu) {
 }
 
 /**
+ * @brief Find if a path is the archive that the browser has open, or a directory that contains it.
+ *
+ * FatFs does not prevent changes to an open file, thus the file commands must not change the archive.
+ *
+ * @param menu Pointer to the menu structure.
+ * @param path Path from the USB host.
+ * @return true if the path is in use, false otherwise.
+ */
+static bool archive_in_use (menu_t *menu, const char *path) {
+    if (!menu->browser.archive) {
+        return false;
+    }
+
+    const char *archive = strip_fs_prefix(path_get(menu->browser.directory));
+
+    archive += strspn(archive, "/");
+    path += strspn(path, "/");
+
+    size_t length = strlen(path);
+
+    return (strncasecmp(archive, path, length) == 0) && ((archive[length] == '\0') || (archive[length] == '/'));
+}
+
+/**
  * @brief Write a part of a file from the USB host.
  *
  * Arguments: <offset> <path>\0, then the data. Offset 0 makes a new file.
@@ -369,6 +394,10 @@ static void command_put_file (menu_t *menu) {
     }
     if (usb_comm_read_string(path, sizeof(path), '\0')) {
         return usb_comm_send_result(FR_INVALID_PARAMETER);
+    }
+
+    if (archive_in_use(menu, path)) {
+        return usb_comm_send_result(FR_LOCKED);
     }
 
     // The rest of the packet is the data. Offset 0 starts a new file, anything else continues one.
@@ -473,6 +502,10 @@ static void command_delete (menu_t *menu) {
         return usb_comm_send_result(FR_INVALID_PARAMETER);
     }
 
+    if (archive_in_use(menu, path)) {
+        return usb_comm_send_result(FR_LOCKED);
+    }
+
     FRESULT result = delete_tree(path, 0);
 
     menu->browser.reload = true;
@@ -495,6 +528,10 @@ static void command_rename (menu_t *menu) {
     if (usb_comm_read_string(old_path, sizeof(old_path), '\0') ||
         usb_comm_read_string(new_path, sizeof(new_path), '\0')) {
         return usb_comm_send_result(FR_INVALID_PARAMETER);
+    }
+
+    if (archive_in_use(menu, old_path) || archive_in_use(menu, new_path)) {
+        return usb_comm_send_result(FR_LOCKED);
     }
 
     FRESULT result = f_rename(old_path, new_path);
