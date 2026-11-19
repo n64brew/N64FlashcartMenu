@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../ui_components.h"
 #include "constants.h"
@@ -72,12 +73,15 @@ static void load_from_cache(component_background_t *c) {
         return;
     }
 
-    for (uint32_t y = 0; y < cache_metadata.height; y++) {
-        uint8_t *row = (uint8_t *) c->decode_buffer.buffer + y * c->decode_buffer.stride;
-        if (fread(row, cache_metadata.width * 2, 1, f) != 1) {
-            fclose(f);
-            return;
-        }
+    if (fread(c->decode_buffer.buffer, cache_metadata.size, 1, f) != 1) {
+        fclose(f);
+        return;
+    }
+
+    size_t row_size = cache_metadata.width * 2;
+    for (uint32_t y = cache_metadata.height; y-- > 0;) {
+        uint8_t *buffer = c->decode_buffer.buffer;
+        memmove(buffer + y * c->decode_buffer.stride, buffer + y * row_size, row_size);
     }
 
     c->image = calloc(1, sizeof(surface_t));
