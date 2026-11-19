@@ -220,7 +220,9 @@ void ui_components_background_draw(void);
 surface_t *ui_components_background_get_image(void);
 
 /**
- * @brief Reload the background image from cache (call after temporarily freeing).
+ * @brief Restore the background image from cache after temporarily freeing it.
+ *
+ * Cache data is loaded incrementally while drawing the background.
  */
 void ui_components_background_reload(void);
 
