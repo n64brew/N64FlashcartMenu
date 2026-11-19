@@ -47,7 +47,7 @@ static const char *format_button_state (void) {
     if (flashcart_get_button_state(&pressed) != FLASHCART_OK) {
         snprintf(buffer, sizeof(buffer), "Supported / Unavailable");
     } else {
-        snprintf(buffer, sizeof(buffer), "Supported / %s", pressed ? "Pressed" : "Released");
+        snprintf(buffer, sizeof(buffer), " %s", pressed ? "Pressed" : "Released");
     }
     return buffer;
 }
