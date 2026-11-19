@@ -186,7 +186,13 @@ static void draw (menu_t *menu, surface_t *d) {
             }
         }
 
-        ui_components_messagebox_draw("%sPress L|Z to return.\n", diagnostics_text);
+        ui_components_messagebox_draw(
+            "%s%sPress L|Z to return.\n\n",
+            diagnostics_text,
+            cart_type == CART_SC
+                ? "\nTo run hardware diagnostics, hold the flashcart button while powering on.\n"
+                : ""
+        );
     }
 
     rdpq_detach_show();

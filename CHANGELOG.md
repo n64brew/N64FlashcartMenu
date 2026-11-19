@@ -10,7 +10,7 @@ Files are made available:
 
 - **New Features**
 	- Added four selectable built-in background music tracks.
-	- Flashcart information lists button support; diagnostics show its live state.
+	- Flashcart information lists button support; diagnostics show its live state and SC64 hardware-test instructions.
 
 - **Bug Fixes**
 	- Fix: Long nested folder names cause the menu path buffer to grow, pointing to freed memory.
