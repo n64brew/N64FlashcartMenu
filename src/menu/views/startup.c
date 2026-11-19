@@ -12,13 +12,12 @@ static void draw (menu_t *menu, surface_t *d) {
 
 
 void view_startup_init (menu_t *menu) {
-    if (flashcart_has_voltage_temperature()) {
-        uint16_t voltage_mv;
-        int16_t temperature_deci_c;
+    if (flashcart_has_input_voltage()) {
+        uint16_t input_voltage_mv;
 
-        if (flashcart_get_voltage_temperature(&voltage_mv, &temperature_deci_c) == FLASHCART_OK && voltage_mv < 3000) {
+        if (flashcart_get_input_voltage(&input_voltage_mv) == FLASHCART_OK && input_voltage_mv < 3000) {
             menu_show_error(menu, "ERROR: Low voltage detected\n\n"
-                                  "The flashcart reports a voltage less than 3.0V.\n"
+                                  "The flashcart reports an input voltage less than 3.0V.\n"
                                   "\n"
                                   "COMMON CAUSES:\n"
                                   "- Faulty power supply\n"

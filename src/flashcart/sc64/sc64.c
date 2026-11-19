@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include <fatfs/ff.h>
 #include <libdragon.h>
@@ -769,6 +770,50 @@ static flashcart_err_t sc64_get_voltage_temperature (uint16_t *voltage_mv, int16
     return FLASHCART_OK;
 }
 
+static flashcart_err_t sc64_get_input_voltage (uint16_t *input_voltage_mv) {
+    int16_t temperature_deci_c;
+    return sc64_get_voltage_temperature(input_voltage_mv, &temperature_deci_c);
+}
+
+static flashcart_err_t sc64_get_diagnostics (flashcart_diagnostic_t *diagnostics,
+                                             size_t capacity, size_t *count) {
+    if (count == NULL || (capacity > 0 && diagnostics == NULL)) {
+        return FLASHCART_ERR_ARGS;
+    }
+
+    *count = 0;
+    if (capacity == 0) {
+        return FLASHCART_OK;
+    }
+
+    uint16_t input_voltage_mv;
+    int16_t temperature_deci_c;
+    snprintf(diagnostics[0].label, sizeof(diagnostics[0].label), "Input Voltage");
+
+    bool available = sc64_get_voltage_temperature(&input_voltage_mv, &temperature_deci_c) == FLASHCART_OK;
+    if (available) {
+        snprintf(diagnostics[0].value, sizeof(diagnostics[0].value), "%u mV", input_voltage_mv);
+    } else {
+        snprintf(diagnostics[0].value, sizeof(diagnostics[0].value), "Unavailable");
+    }
+    *count = 1;
+
+    if (capacity > 1) {
+        snprintf(diagnostics[1].label, sizeof(diagnostics[1].label), "Temperature");
+        if (available) {
+            int temperature_abs = temperature_deci_c < 0
+                ? -temperature_deci_c : temperature_deci_c;
+            snprintf(diagnostics[1].value, sizeof(diagnostics[1].value), "%s%d.%d C",
+                     temperature_deci_c < 0 ? "-" : "",
+                     temperature_abs / 10, temperature_abs % 10);
+        } else {
+            snprintf(diagnostics[1].value, sizeof(diagnostics[1].value), "Unavailable");
+        }
+        *count = 2;
+    }
+    return FLASHCART_OK;
+}
+
 static flashcart_t flashcart_sc64 = {
     .init = sc64_init,
     .deinit = sc64_deinit,
@@ -781,7 +826,8 @@ static flashcart_t flashcart_sc64 = {
     .load_64dd_disk = sc64_load_64dd_disk,
     .load_64dd_disks = sc64_load_64dd_disks,
     .get_button_state = sc64_get_button_state,
-    .get_voltage_temperature = sc64_get_voltage_temperature,
+    .get_input_voltage = sc64_get_input_voltage,
+    .get_diagnostics = sc64_get_diagnostics,
     .set_save_type = sc64_set_save_type,
     .set_save_writeback = sc64_set_save_writeback,
     .set_next_boot_mode = sc64_set_bootmode,
