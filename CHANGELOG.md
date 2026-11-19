@@ -13,6 +13,7 @@ Files are made available:
 	- Added Custom background music support.
 	- File browser filetype images.
 	- Menu colour themes.
+	- USB commands to manage the files on the SD card while the menu is in operation (see the developer guide).
 
 - **Bug Fixes**
 	- Preserve alpha transparency in decoded boxart.
