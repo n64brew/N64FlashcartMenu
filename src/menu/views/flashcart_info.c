@@ -190,8 +190,8 @@ static void draw (menu_t *menu, surface_t *d) {
             "%s%sPress L|Z to return.\n\n",
             diagnostics_text,
             cart_type == CART_SC
-                ? "\nTo run hardware diagnostics, hold the flashcart button while powering on.\n"
-                : ""
+                ? "\nTo run hardware diagnostics, hold the flashcart button while powering on.\n\n"
+                : "\n\n"
         );
     }
 
