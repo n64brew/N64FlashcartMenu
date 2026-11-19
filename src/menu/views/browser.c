@@ -754,6 +754,11 @@ static void reload_if_requested (menu_t *menu) {
         return;
     }
 
+    // An open context menu keeps the request, because its actions use the selected entry
+    if ((entry_context_menu.row_selected >= 0) || (archive_context_menu.row_selected >= 0)) {
+        return;
+    }
+
     menu->browser.reload = false;
     if (reload_directory(menu)) {
         menu_show_error(
