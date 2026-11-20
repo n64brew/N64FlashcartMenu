@@ -8,6 +8,7 @@
 #define FLASHCART_H__
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /** @brief Flashcart error enumeration */
@@ -71,6 +72,16 @@ typedef struct {
     uint32_t revision; /**< Revision */
 } flashcart_firmware_version_t;
 
+#define FLASHCART_DIAGNOSTIC_MAX_COUNT 8
+#define FLASHCART_DIAGNOSTIC_LABEL_SIZE 20
+#define FLASHCART_DIAGNOSTIC_VALUE_SIZE 24
+
+/** @brief One labeled diagnostic value reported by a flashcart. */
+typedef struct {
+    char label[FLASHCART_DIAGNOSTIC_LABEL_SIZE];
+    char value[FLASHCART_DIAGNOSTIC_VALUE_SIZE];
+} flashcart_diagnostic_t;
+
 /** @brief Flashcart progress callback type */
 typedef void flashcart_progress_callback_t (float progress);
 
@@ -98,8 +109,10 @@ typedef struct {
     flashcart_err_t (*load_64dd_disks) (char *disk_path, flashcart_disk_parameters_t *disk_parameters, char **swap_disk_paths, int swap_disk_count);
     /** @brief Query hardware button state if supported by flashcart. */
     flashcart_err_t (*get_button_state) (bool *pressed);
-    /** @brief Query realtime voltage/temperature diagnostic data if supported. */
-    flashcart_err_t (*get_voltage_temperature) (uint16_t *voltage_mv, int16_t *temperature_deci_c);
+    /** @brief Query realtime input voltage in millivolts if supported. */
+    flashcart_err_t (*get_input_voltage) (uint16_t *input_voltage_mv);
+    /** @brief Query labeled diagnostic values supported by this flashcart. */
+    flashcart_err_t (*get_diagnostics) (flashcart_diagnostic_t *diagnostics, size_t capacity, size_t *count);
     /** @brief The flashcart set save type function */
     flashcart_err_t (*set_save_type) (flashcart_save_type_t save_type);
     /** @brief The flashcart set save writeback function */
@@ -220,20 +233,35 @@ bool flashcart_has_button_state (void);
 flashcart_err_t flashcart_get_button_state (bool *pressed);
 
 /**
- * @brief Check whether realtime voltage/temperature diagnostics are supported.
+ * @brief Check whether realtime input voltage readings are supported.
  *
- * @return bool True when voltage/temperature query is supported.
+ * @return bool True when input voltage readings are supported.
  */
-bool flashcart_has_voltage_temperature (void);
+bool flashcart_has_input_voltage (void);
 
 /**
- * @brief Get realtime voltage and temperature diagnostics.
+ * @brief Get the realtime input voltage supplied to the flashcart.
  *
- * @param voltage_mv Output voltage in millivolts.
- * @param temperature_deci_c Output temperature in deci-degrees Celsius.
+ * @param input_voltage_mv Voltage supplied to the flashcart, in millivolts.
  * @return flashcart_err_t Result code.
  */
-flashcart_err_t flashcart_get_voltage_temperature (uint16_t *voltage_mv, int16_t *temperature_deci_c);
+flashcart_err_t flashcart_get_input_voltage (uint16_t *input_voltage_mv);
+
+/**
+ * @brief Check whether the active flashcart provides labeled diagnostic values.
+ */
+bool flashcart_has_diagnostics (void);
+
+/**
+ * @brief Read the active flashcart's labeled diagnostic values.
+ *
+ * @param diagnostics Output array for diagnostic values.
+ * @param capacity Number of entries available in @p diagnostics.
+ * @param count Output number of entries written.
+ * @return flashcart_err_t Result code.
+ */
+flashcart_err_t flashcart_get_diagnostics (flashcart_diagnostic_t *diagnostics,
+                                           size_t capacity, size_t *count);
 
 /**
 * @brief Set the next boot mode for the flashcart.

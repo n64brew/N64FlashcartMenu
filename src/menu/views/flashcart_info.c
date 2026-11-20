@@ -37,55 +37,37 @@ static const char *format_cart_version () {
 }
 
 static const char *format_button_state (void) {
-    static const char *unknown = "Unknown";
+    static char buffer[FLASHCART_DIAGNOSTIC_VALUE_SIZE];
     bool pressed = false;
 
     if (!flashcart_has_button_state()) {
-        return unknown;
-    }
-
-    if (flashcart_get_button_state(&pressed) != FLASHCART_OK) {
-        return unknown;
-    }
-
-    return pressed ? "Pressed" : "Released";
-}
-
-static const char *format_voltage_temperature (void) {
-    static char buffer[48];
-    uint16_t voltage_mv;
-    int16_t temperature_deci_c;
-    int temperature_abs;
-    int temperature_whole;
-    int temperature_frac;
-
-    if (!flashcart_has_voltage_temperature()) {
         return "Unsupported";
     }
 
-    if (flashcart_get_voltage_temperature(&voltage_mv, &temperature_deci_c) != FLASHCART_OK) {
-        return "Unavailable";
+    if (flashcart_get_button_state(&pressed) != FLASHCART_OK) {
+        snprintf(buffer, sizeof(buffer), "Supported / Unavailable");
+    } else {
+        snprintf(buffer, sizeof(buffer), " %s", pressed ? "Pressed" : "Released");
+    }
+    return buffer;
+}
+
+static void append_diagnostic_line (char *text, size_t text_size, size_t *used,
+                                    const char *label, const char *value) {
+    if (*used >= text_size) {
+        return;
     }
 
-    temperature_abs = (temperature_deci_c < 0) ? -temperature_deci_c : temperature_deci_c;
-    temperature_whole = (temperature_abs / 10);
-    temperature_frac = (temperature_abs % 10);
-
-    snprintf(
-        buffer,
-        sizeof(buffer),
-        "%u mV / %s%d.%d C",
-        voltage_mv,
-        (temperature_deci_c < 0) ? "-" : "",
-        temperature_whole,
-        temperature_frac
-    );
-    return buffer;
+    size_t available = text_size - *used;
+    int written = snprintf(text + *used, available, "  %.19s: %.23s\n", label, value);
+    if (written > 0) {
+        *used += ((size_t)written < available) ? (size_t)written : available - 1;
+    }
 }
 
 static void process (menu_t *menu) {
     bool has_button_support = flashcart_has_button_state();
-    bool has_diagnostics_support = flashcart_has_voltage_temperature();
+    bool has_diagnostics_support = flashcart_has_diagnostics();
     bool has_extra_info = has_button_support || has_diagnostics_support;
 
     if (menu->actions.go_left) {
@@ -105,7 +87,7 @@ static void process (menu_t *menu) {
 
 static void draw (menu_t *menu, surface_t *d) {
     bool has_button_support = flashcart_has_button_state();
-    bool has_diagnostics_support = flashcart_has_voltage_temperature();
+    bool has_diagnostics_support = flashcart_has_diagnostics();
     bool has_extra_info = has_button_support || has_diagnostics_support;
 
     rdpq_attach(d, NULL);
@@ -176,16 +158,40 @@ static void draw (menu_t *menu, surface_t *d) {
     }
 
     if (show_extra_info_message && has_extra_info) {
+        char diagnostics_text[512];
+        size_t used = (size_t)snprintf(diagnostics_text, sizeof(diagnostics_text),
+                                       "FLASHCART DIAGNOSTICS\n\n");
+
+        append_diagnostic_line(diagnostics_text, sizeof(diagnostics_text), &used,
+                              "Button", format_button_state());
+
+        if (has_diagnostics_support) {
+            flashcart_diagnostic_t diagnostics[FLASHCART_DIAGNOSTIC_MAX_COUNT] = {0};
+            size_t count = 0;
+            flashcart_err_t err = flashcart_get_diagnostics(
+                diagnostics, FLASHCART_DIAGNOSTIC_MAX_COUNT, &count);
+            if (err == FLASHCART_OK) {
+                if (count == 0) {
+                    append_diagnostic_line(diagnostics_text, sizeof(diagnostics_text), &used,
+                                          "Diagnostics", "No readings available");
+                } else {
+                    for (size_t i = 0; i < count; i++) {
+                        append_diagnostic_line(diagnostics_text, sizeof(diagnostics_text), &used,
+                                              diagnostics[i].label, diagnostics[i].value);
+                    }
+                }
+            } else {
+                append_diagnostic_line(diagnostics_text, sizeof(diagnostics_text), &used,
+                                      "Diagnostics", "Unavailable");
+            }
+        }
+
         ui_components_messagebox_draw(
-            "FLASHCART DIAGNOSTICS\n"
-            "\n"
-            "Diagnostics:\n"
-            "  Button Realtime: %s\n"
-            "  Voltage / Temp: %s\n"
-            "\n"
-            "Press L|Z to return.\n",
-            format_button_state(),
-            format_voltage_temperature()
+            "%s%sPress L|Z to return.\n\n",
+            diagnostics_text,
+            cart_type == CART_SC
+                ? "\nTo run hardware diagnostics, hold the flashcart button while powering on.\n\n"
+                : "\n\n"
         );
     }
 

@@ -107,7 +107,8 @@ static flashcart_t *flashcart = &((flashcart_t) {
     .load_64dd_disk = NULL,
     .load_64dd_disks = NULL,
     .get_button_state = NULL,
-    .get_voltage_temperature = NULL,
+    .get_input_voltage = NULL,
+    .get_diagnostics = NULL,
     .set_save_type = dummy_set_save_type,
     .set_save_writeback = NULL,
     .set_next_boot_mode = NULL,
@@ -404,31 +405,61 @@ flashcart_err_t flashcart_get_button_state (bool *pressed) {
 }
 
 /**
- * @brief Check whether voltage/temperature diagnostics are supported.
+ * @brief Check whether input voltage readings are supported.
  *
- * @return bool True if supported.
+ * @return bool True when supported.
  */
-bool flashcart_has_voltage_temperature (void) {
-    return (flashcart->get_voltage_temperature != NULL);
+bool flashcart_has_input_voltage (void) {
+    return (flashcart->get_input_voltage != NULL);
 }
 
 /**
- * @brief Get realtime voltage and temperature diagnostics.
+ * @brief Get the realtime input voltage supplied to the flashcart.
  *
- * @param voltage_mv Output voltage in millivolts.
- * @param temperature_deci_c Output temperature in deci-degrees Celsius.
+ * @param input_voltage_mv Voltage supplied to the flashcart, in millivolts.
  * @return flashcart_err_t Result code.
  */
-flashcart_err_t flashcart_get_voltage_temperature (uint16_t *voltage_mv, int16_t *temperature_deci_c) {
-    if ((voltage_mv == NULL) || (temperature_deci_c == NULL)) {
+flashcart_err_t flashcart_get_input_voltage (uint16_t *input_voltage_mv) {
+    if (input_voltage_mv == NULL) {
         return FLASHCART_ERR_ARGS;
     }
 
-    if (!flashcart->get_voltage_temperature) {
+    if (!flashcart->get_input_voltage) {
         return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
     }
 
-    return flashcart->get_voltage_temperature(voltage_mv, temperature_deci_c);
+    return flashcart->get_input_voltage(input_voltage_mv);
+}
+
+bool flashcart_has_diagnostics (void) {
+    return flashcart->get_diagnostics != NULL;
+}
+
+flashcart_err_t flashcart_get_diagnostics (flashcart_diagnostic_t *diagnostics,
+                                           size_t capacity, size_t *count) {
+    if (count == NULL || (capacity > 0 && diagnostics == NULL)) {
+        return FLASHCART_ERR_ARGS;
+    }
+
+    *count = 0;
+    if (!flashcart->get_diagnostics) {
+        return FLASHCART_ERR_FUNCTION_NOT_SUPPORTED;
+    }
+
+    flashcart_err_t err = flashcart->get_diagnostics(diagnostics, capacity, count);
+    if (err != FLASHCART_OK) {
+        return err;
+    }
+    if (*count > capacity) {
+        *count = 0;
+        return FLASHCART_ERR_INT;
+    }
+
+    for (size_t i = 0; i < *count; i++) {
+        diagnostics[i].label[sizeof(diagnostics[i].label) - 1] = '\0';
+        diagnostics[i].value[sizeof(diagnostics[i].value) - 1] = '\0';
+    }
+    return FLASHCART_OK;
 }
 
 /**
