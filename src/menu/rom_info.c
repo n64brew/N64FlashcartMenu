@@ -1317,6 +1317,191 @@ bool rom_info_metadata_images_supported(const rom_info_t *rom_info,
     return true;
 }
 
+#define ROMPAK_TOC_MAGIC             (0x544F4330u) /**< "TOC0" */
+#define ROMPAK_TOC_SEARCH_START      (0x1000)
+#define ROMPAK_TOC_SEARCH_STEPS      (1024)
+#define ROMPAK_TOC_SEARCH_STEP_SIZE  (16)
+#define ROMPAK_TOC_MAX_ENTRY_SIZE    (1024)
+#define ROMPAK_VERSION_ENTRY_MAX     (4096)
+
+/** @brief ROM-Pak table of contents header, as embedded by libdragon's toolchain. */
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint32_t cookie;
+    uint32_t toc_size;
+    uint16_t entry_size;
+    uint16_t num_entries;
+} rompak_toc_header_t;
+
+static void safe_copy_field (char *dst, size_t dst_size, const char *src) {
+    snprintf(dst, dst_size, "%s", src);
+}
+
+/**
+ * @brief Parse libdragon's minimal JSON-like "libdragon.version" format.
+ *
+ * Mirrors libdragon's own rompak_version_parse() (src/rompak.c): a flat object with
+ * string values for "branch", "hash", "commit-date", and "dirty".
+ *
+ * @param data Buffer containing the version entry's contents (mutated in place).
+ * @param size Size of the buffer in bytes.
+ * @param version Output: populated with any recognized fields found.
+ */
+static void parse_libdragon_version_json (char *data, size_t size, rom_libdragon_version_t *version) {
+    char *p = data, *end = data + size;
+    while (p < end && *p != '{' && *p != '"') p++;
+    while (p < end) {
+        while (p < end && *p != '"') {
+            if (*p == '}') return;
+            p++;
+        }
+        if (p >= end) return;
+        p++;
+
+        char *key = p;
+        while (p < end) {
+            if (*p == '\\') { if (++p < end) p++; continue; }
+            if (*p == '"') { *p++ = '\0'; break; }
+            p++;
+        }
+        if (p >= end) return;
+
+        while (p < end && *p != ':') {
+            if (*p == '}') return;
+            p++;
+        }
+        if (p >= end) return;
+        p++;
+
+        while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) p++;
+        if (p >= end) continue;
+
+        char *val = p;
+        if (*p == '"') {
+            val = ++p;
+            while (p < end) {
+                if (*p == '\\') { if (++p < end) p++; continue; }
+                if (*p == '"') break;
+                p++;
+            }
+        } else {
+            while (p < end) {
+                char c = *p;
+                if (c == ',' || c == '}' || c == ' ' || c == '\t' || c == '\n' || c == '\r') break;
+                p++;
+            }
+        }
+        if (p > end) return;
+        *p++ = '\0';
+
+        if (strcmp(key, "branch") == 0) {
+            safe_copy_field(version->branch, sizeof(version->branch), val);
+        } else if (strcmp(key, "hash") == 0) {
+            safe_copy_field(version->hash, sizeof(version->hash), val);
+        } else if (strcmp(key, "commit-date") == 0) {
+            safe_copy_field(version->commit_date, sizeof(version->commit_date), val);
+        } else if (strcmp(key, "dirty") == 0) {
+            version->dirty = (strcmp(val, "true") == 0);
+        }
+    }
+}
+
+bool rom_info_read_libdragon_version (path_t *rom_path, rom_libdragon_version_t *version) {
+    memset(version, 0, sizeof(*version));
+
+    FILE *f = fopen(path_get(rom_path), "rb");
+    if (!f) {
+        return false;
+    }
+
+    // Libdragon's ROM-Pak table of contents is normally located right after IPL3, at file
+    // offset 0x1000, but search a small range of 16-byte-aligned positions to tolerate
+    // IPL3 variants that don't load at the usual offset (mirrors libdragon's own lenient
+    // search in rompak_get_header(), src/rompak.c).
+    long toc_offset = -1;
+    for (int i = 0; i < ROMPAK_TOC_SEARCH_STEPS; i++) {
+        long candidate = ROMPAK_TOC_SEARCH_START + ((long)i * ROMPAK_TOC_SEARCH_STEP_SIZE);
+        uint32_t magic = 0;
+        if (fseek(f, candidate, SEEK_SET) != 0 || fread(&magic, sizeof(magic), 1, f) != 1) {
+            break;
+        }
+        if (magic == ROMPAK_TOC_MAGIC) {
+            toc_offset = candidate;
+            break;
+        }
+    }
+
+    if (toc_offset < 0) {
+        fclose(f);
+        return true; // File readable; this ROM just doesn't have a ROM-Pak.
+    }
+
+    rompak_toc_header_t header;
+    if (fseek(f, toc_offset, SEEK_SET) != 0 || fread(&header, sizeof(header), 1, f) != 1 ||
+        header.entry_size < 8 || header.entry_size >= ROMPAK_TOC_MAX_ENTRY_SIZE ||
+        header.num_entries >= ROMPAK_TOC_MAX_ENTRY_SIZE) {
+        fclose(f);
+        return true;
+    }
+
+    long version_offset = -1;
+    uint32_t version_size = 0;
+    static const char version_entry_name[] = "libdragon.version";
+
+    uint8_t *entry_buffer = malloc((size_t)header.entry_size + 1);
+    if (!entry_buffer) {
+        fclose(f);
+        return true;
+    }
+
+    for (uint16_t i = 0; i < header.num_entries; i++) {
+        long entry_pos = toc_offset + (long)sizeof(header) + ((long)i * header.entry_size);
+        if (fseek(f, entry_pos, SEEK_SET) != 0 || fread(entry_buffer, header.entry_size, 1, f) != 1) {
+            break;
+        }
+        entry_buffer[header.entry_size] = '\0';
+
+        uint32_t entry_offset;
+        uint32_t entry_size;
+        memcpy(&entry_offset, entry_buffer, sizeof(entry_offset));
+        memcpy(&entry_size, entry_buffer + 4, sizeof(entry_size));
+        const char *entry_name = (const char *)(entry_buffer + 8);
+
+        size_t name_len = strlen(entry_name);
+        size_t ext_len = sizeof(version_entry_name) - 1;
+        if (name_len >= ext_len && strcmp(entry_name + name_len - ext_len, version_entry_name) == 0) {
+            version_offset = entry_offset;
+            version_size = entry_size;
+            break;
+        }
+    }
+
+    free(entry_buffer);
+
+    if (version_offset < 0 || version_size == 0 || version_size > ROMPAK_VERSION_ENTRY_MAX) {
+        fclose(f);
+        return true;
+    }
+
+    char *version_data = malloc((size_t)version_size + 1);
+    if (!version_data) {
+        fclose(f);
+        return true;
+    }
+
+    bool ok = fseek(f, version_offset, SEEK_SET) == 0 && fread(version_data, version_size, 1, f) == 1;
+    fclose(f);
+
+    if (ok) {
+        version_data[version_size] = '\0';
+        parse_libdragon_version_json(version_data, version_size, version);
+        version->found = (version->branch[0] != '\0' || version->hash[0] != '\0');
+    }
+
+    free(version_data);
+    return ok;
+}
+
 void rom_info_free_meta(rom_info_t *rom_info) {
     if (!rom_info) {
         return;
