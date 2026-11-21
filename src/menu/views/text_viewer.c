@@ -5,6 +5,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 
 #include "../ui_components/constants.h"
@@ -19,6 +20,7 @@
 typedef struct {
     FILE *f; /**< File pointer */
     char *contents; /**< File contents */
+    bool owns_contents; /**< True when this view allocated/owns contents and must free it */
     size_t length; /**< File length */
     int lines; /**< Number of lines */
     int current_line; /**< Current line */
@@ -69,7 +71,7 @@ static void perform_vertical_scroll (int lines) {
 static void process (menu_t *menu) {
     if (menu->actions.back) {
         sound_play_effect(SFX_EXIT);
-        menu->next_mode = MENU_MODE_BROWSER;
+        menu->next_mode = menu->text_viewer.return_mode;
     } else if (text) {
         if (menu->actions.go_up) {
             perform_vertical_scroll(menu->actions.go_fast ? -10 : -1);
@@ -120,7 +122,7 @@ static void deinit (void) {
         if (text->f) {
             fclose(text->f);
         }
-        if (text->contents) {
+        if (text->contents && text->owns_contents) {
             free(text->contents);
         }
         free(text);
@@ -138,48 +140,62 @@ void view_text_viewer_init (menu_t *menu) {
         return menu_show_error(menu, "Couldn't allocate memory for the text file");
     }
 
-    path_t *path = path_clone_push(menu->browser.directory, menu->browser.entry->name);
-    text->f = fopen(path_get(path), "r");
-    path_free(path);
+    if (menu->text_viewer.content != NULL) {
+        // Pre-loaded content supplied by the caller; ownership transfers to this view.
+        text->contents = menu->text_viewer.content;
+        text->owns_contents = true;
+        text->length = strlen(text->contents);
+        menu->text_viewer.content = NULL;
 
-    if (text->f == NULL) {
-        deinit();
-        return menu_show_error(menu, "Couldn't open text file");
-    }
+        if (text->length <= 0) {
+            deinit();
+            return menu_show_error(menu, "Text is empty");
+        }
+    } else {
+        path_t *path = path_clone_push(menu->browser.directory, menu->browser.entry->name);
+        text->f = fopen(path_get(path), "r");
+        path_free(path);
 
-    struct stat st;
-    if (fstat(fileno(text->f), &st)) {
-        deinit();
-        return menu_show_error(menu, "Couldn't get text file size");
-    }
-    text->length = st.st_size;
+        if (text->f == NULL) {
+            deinit();
+            return menu_show_error(menu, "Couldn't open text file");
+        }
 
-    if (text->length <= 0) {
-        deinit();
-        return menu_show_error(menu, "Text file is empty");
-    }
+        struct stat st;
+        if (fstat(fileno(text->f), &st)) {
+            deinit();
+            return menu_show_error(menu, "Couldn't get text file size");
+        }
+        text->length = st.st_size;
 
-    if (text->length > MAX_FILE_SIZE) {
-        deinit();
-        return menu_show_error(menu, "Text file is too big to be displayed");
-    }
+        if (text->length <= 0) {
+            deinit();
+            return menu_show_error(menu, "Text file is empty");
+        }
 
-    if ((text->contents = malloc((text->length + 1) * sizeof(char))) == NULL) {
-        deinit();
-        return menu_show_error(menu, "Couldn't allocate memory for the text file contents");
-    }
+        if (text->length > MAX_FILE_SIZE) {
+            deinit();
+            return menu_show_error(menu, "Text file is too big to be displayed");
+        }
 
-    if (fread(text->contents, text->length, 1, text->f) != 1) {
-        deinit();
-        return menu_show_error(menu, "Couldn't read text file contents");
-    }
-    text->contents[text->length] = '\0';
+        if ((text->contents = malloc((text->length + 1) * sizeof(char))) == NULL) {
+            deinit();
+            return menu_show_error(menu, "Couldn't allocate memory for the text file contents");
+        }
+        text->owns_contents = true;
 
-    if (fclose(text->f)) {
-        deinit();
-        return menu_show_error(menu, "Couldn't close text file");
+        if (fread(text->contents, text->length, 1, text->f) != 1) {
+            deinit();
+            return menu_show_error(menu, "Couldn't read text file contents");
+        }
+        text->contents[text->length] = '\0';
+
+        if (fclose(text->f)) {
+            deinit();
+            return menu_show_error(menu, "Couldn't close text file");
+        }
+        text->f = NULL;
     }
-    text->f = NULL;
 
     text->lines = 1;
     for (size_t i = 0; i < text->length; i++) {

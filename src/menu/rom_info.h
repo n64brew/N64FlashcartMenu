@@ -16,6 +16,31 @@
 
 #define ROM_METADATA_MAX_SCREENSHOTS 8
 
+/** @brief Base directory (relative to the storage prefix) of the shared ROM metadata database. */
+#define METADATA_BASE_DIRECTORY   "menu/metadata"
+/** @brief Subdirectory (relative to a metadata base directory) used for homebrew ROM IDs, matched by title. */
+#define HOMEBREW_ID_SUBDIRECTORY  "homebrew"
+
+/**
+ * @brief Resolve the metadata directory for a ROM.
+ *
+ * Builds the path as <base_directory>/<game_code[0]>/<game_code[1]>/<game_code[2]>/<game_code[3]>
+ * (one directory level per character), falling back to the 3-character, region-less
+ * directory (e.g. N/G/E instead of N/G/E/E) if the 4-character directory doesn't exist,
+ * since metadata for some ROMs is only provided without the region letter.
+ *
+ * ROMs using the Advanced Homebrew ROM Header Game ID (xEDx) are instead matched by ROM
+ * title, under "<base_directory>/homebrew/<title>".
+ *
+ * @param storage_prefix Storage prefix (e.g. "sd:/").
+ * @param base_directory Base directory relative to the storage prefix (e.g. METADATA_BASE_DIRECTORY).
+ * @param game_code The 4-character game code.
+ * @param rom_title Title of the ROM; only read for homebrew IDs (may be NULL otherwise).
+ * @return A newly allocated path_t* pointing at the resolved directory. Caller must path_free() it.
+ */
+path_t *rom_info_resolve_metadata_directory (const char *storage_prefix, const char *base_directory,
+                                             const char *game_code, const char *rom_title);
+
 /** @brief ROM error enumeration. */
 typedef enum {
     ROM_OK,                /**< No error */

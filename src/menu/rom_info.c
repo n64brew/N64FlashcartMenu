@@ -863,6 +863,33 @@ static bool load_meta_art_fields (ini_t *ini, rom_info_t *rom_info) {
     return ok;
 }
 
+path_t *rom_info_resolve_metadata_directory (const char *storage_prefix, const char *base_directory,
+                                             const char *game_code, const char *rom_title) {
+    path_t *path = path_init((char *)storage_prefix, (char *)base_directory);
+
+    if (game_code[1] == 'E' && game_code[2] == 'D') {
+        // This is using a homebrew ROM ID, use the title for the directory name instead.
+        // Create a null-terminated copy of the title for safe string operations.
+        char safe_title[21]; // 20 chars + null terminator
+        memcpy(safe_title, rom_title, 20);
+        safe_title[20] = '\0';
+
+        char subdir[32];
+        snprintf(subdir, sizeof(subdir), HOMEBREW_ID_SUBDIRECTORY "/%s", safe_title);
+        path_push(path, subdir);
+    } else {
+        char subdir[8];
+        snprintf(subdir, sizeof(subdir), "%c/%c/%c/%c", game_code[0], game_code[1], game_code[2], game_code[3]);
+        path_push(path, subdir);
+
+        if (!directory_exists(path_get(path))) { // Allow metadata to not specify the region code.
+            path_pop(path);
+        }
+    }
+
+    return path;
+}
+
 /**
  * @brief Try to load metadata from a ZIP file path (e.g., .meta file)
  * 
@@ -1162,22 +1189,12 @@ static void load_rom_meta_from_file (path_t *path, rom_info_t *rom_info) {
 
     if (!file_exists(path_get(rom_info_meta_path))) {
         debugf("[META] load_rom_meta_from_file: metadata.ini not found at '%s'\n", meta_path_str);
-        // If that file does not exist, fall back to metadata database using game_code (like boxart uses).
-        // TODO: we should probably check the homebrew path as well.
-        char gamecode_str[8];
-        path_t *fallback_meta_path= path_init("sd:/", "menu/metadata"); // should be menu->storage_prefix and METADATA_BASE_DIRECTORY
-        // FIXME: should use METADATA_BASE_DIRECTORY and path functions, but this is simpler for now since we just want to check for existence of the file.
-        snprintf(
-            gamecode_str,
-            sizeof(gamecode_str),
-            "%c/%c/%c/%c",
-            rom_info->game_code[0], rom_info->game_code[1], rom_info->game_code[2], rom_info->game_code[3]
-        );
-        path_push(fallback_meta_path, gamecode_str);
-
-        if (!directory_exists(path_get(fallback_meta_path))) { // Allow metadata to not specify the region code.
-            path_pop(fallback_meta_path);
-        }
+        // If that file does not exist, fall back to the shared metadata database using the
+        // game code (or homebrew title), matching how boxart/metadata images are resolved.
+        // FIXME: should use menu->storage_prefix, but this function doesn't have access to
+        // menu_t; "sd:/" matches the storage prefix used for SD-card-backed flashcarts.
+        path_t *fallback_meta_path = rom_info_resolve_metadata_directory(
+            "sd:/", METADATA_BASE_DIRECTORY, rom_info->game_code, rom_info->title);
 
         path_push(fallback_meta_path, "metadata.ini");
         debugf("[META] load_rom_meta_from_file: trying fallback path '%s'\n", path_get(fallback_meta_path));

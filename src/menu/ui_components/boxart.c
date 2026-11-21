@@ -11,12 +11,11 @@
 #include "../path.h"
 #include "../jpeg_decoder.h"
 #include "../png_decoder.h"
+#include "../rom_info.h"
 #include "constants.h"
 #include "utils/fs.h"
 
 #define OLD_BOXART_DIRECTORY       "menu/boxart"
-#define METADATA_BASE_DIRECTORY    "menu/metadata"
-#define HOMEBREW_ID_SUBDIRECTORY   "homebrew"
 
 /**
  * @brief PNG decoder callback for boxart image loading.
@@ -129,7 +128,6 @@ component_boxart_t *ui_components_boxart_init_mem_into(const char *filename, voi
  */
 component_boxart_t *ui_components_boxart_init(const char *storage_prefix, const char *game_code, const char *rom_title, file_image_type_t current_image_view) {
     component_boxart_t *b;
-    char boxart_path[32];
 
     if ((b = calloc(1, sizeof(component_boxart_t))) == NULL) {
         return NULL;
@@ -137,40 +135,18 @@ component_boxart_t *ui_components_boxart_init(const char *storage_prefix, const 
 
     b->loading = true;
 
-    path_t *path = path_init(storage_prefix, METADATA_BASE_DIRECTORY);
+    bool is_homebrew = (game_code[1] == 'E' && game_code[2] == 'D');
 
-    if (game_code[1] == 'E' && game_code[2] == 'D') {
-        // This is using a homebrew ROM ID, use the title for the file name instead.
-        // Create a null-terminated copy of the title for safe string operations
-        char safe_title[21];  // 20 chars + null terminator
-        memcpy(safe_title, rom_title, 20);
-        safe_title[20] = '\0';
-        
-        snprintf(boxart_path, sizeof(boxart_path), HOMEBREW_ID_SUBDIRECTORY"/%s", safe_title);
-        path_push(path, boxart_path);
-    }
-    else {
-        snprintf(boxart_path, sizeof(boxart_path), "%c/%c/%c/%c", game_code[0], game_code[1], game_code[2], game_code[3]);
-        path_push(path, boxart_path);
+    path_t *path = rom_info_resolve_metadata_directory(storage_prefix, METADATA_BASE_DIRECTORY, game_code, rom_title);
 
-        if (!directory_exists(path_get(path))) { // Allow boxart to not specify the region code.
-            path_pop(path);
-        }
-
-        if (!directory_exists(path_get(path))) { // Fallback to the old boxart directory if metadata directory doesn't exist.
-            
-            // TODO: As a deprecated path, eventually this should be removed.
-            path_free(path);
-            path = path_init(storage_prefix, OLD_BOXART_DIRECTORY);
-            path_push(path, boxart_path);
-
-            if (!directory_exists(path_get(path))) { // Allow boxart to not specify the region code.
-                path_pop(path);
-            }
-        }
+    if (!is_homebrew && !directory_exists(path_get(path))) {
+        // Fallback to the old boxart directory if metadata directory doesn't exist.
+        // TODO: As a deprecated path, eventually this should be removed.
+        path_free(path);
+        path = rom_info_resolve_metadata_directory(storage_prefix, OLD_BOXART_DIRECTORY, game_code, rom_title);
     }
 
-    debugf("Boxart: Using path %s\n", boxart_path);
+    debugf("Boxart: Using path %s\n", path_get(path));
 
     if (directory_exists(path_get(path))) {
         switch (current_image_view) {
