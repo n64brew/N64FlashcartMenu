@@ -864,8 +864,13 @@ static bool load_meta_art_fields (ini_t *ini, rom_info_t *rom_info) {
 }
 
 path_t *rom_info_resolve_metadata_directory (const char *storage_prefix, const char *base_directory,
-                                             const char *game_code, const char *rom_title) {
+                                             const char *game_code, const char *rom_title,
+                                             bool *used_region_code) {
     path_t *path = path_init((char *)storage_prefix, (char *)base_directory);
+
+    if (used_region_code) {
+        *used_region_code = false;
+    }
 
     if (game_code[1] == 'E' && game_code[2] == 'D') {
         // This is using a homebrew ROM ID, use the title for the directory name instead.
@@ -884,6 +889,8 @@ path_t *rom_info_resolve_metadata_directory (const char *storage_prefix, const c
 
         if (!directory_exists(path_get(path))) { // Allow metadata to not specify the region code.
             path_pop(path);
+        } else if (used_region_code) {
+            *used_region_code = true;
         }
     }
 
@@ -1194,7 +1201,7 @@ static void load_rom_meta_from_file (path_t *path, rom_info_t *rom_info) {
         // FIXME: should use menu->storage_prefix, but this function doesn't have access to
         // menu_t; "sd:/" matches the storage prefix used for SD-card-backed flashcarts.
         path_t *fallback_meta_path = rom_info_resolve_metadata_directory(
-            "sd:/", METADATA_BASE_DIRECTORY, rom_info->game_code, rom_info->title);
+            "sd:/", METADATA_BASE_DIRECTORY, rom_info->game_code, rom_info->title, NULL);
 
         path_push(fallback_meta_path, "metadata.ini");
         debugf("[META] load_rom_meta_from_file: trying fallback path '%s'\n", path_get(fallback_meta_path));

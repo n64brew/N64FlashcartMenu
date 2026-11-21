@@ -137,13 +137,13 @@ component_boxart_t *ui_components_boxart_init(const char *storage_prefix, const 
 
     bool is_homebrew = (game_code[1] == 'E' && game_code[2] == 'D');
 
-    path_t *path = rom_info_resolve_metadata_directory(storage_prefix, METADATA_BASE_DIRECTORY, game_code, rom_title);
+    path_t *path = rom_info_resolve_metadata_directory(storage_prefix, METADATA_BASE_DIRECTORY, game_code, rom_title, NULL);
 
     if (!is_homebrew && !directory_exists(path_get(path))) {
         // Fallback to the old boxart directory if metadata directory doesn't exist.
         // TODO: As a deprecated path, eventually this should be removed.
         path_free(path);
-        path = rom_info_resolve_metadata_directory(storage_prefix, OLD_BOXART_DIRECTORY, game_code, rom_title);
+        path = rom_info_resolve_metadata_directory(storage_prefix, OLD_BOXART_DIRECTORY, game_code, rom_title, NULL);
     }
 
     debugf("Boxart: Using path %s\n", path_get(path));

@@ -36,10 +36,14 @@
  * @param base_directory Base directory relative to the storage prefix (e.g. METADATA_BASE_DIRECTORY).
  * @param game_code The 4-character game code.
  * @param rom_title Title of the ROM; only read for homebrew IDs (may be NULL otherwise).
+ * @param used_region_code Optional (may be NULL). Set to true if the full 4-character,
+ *                         region-specific directory was used, false if the region-less
+ *                         fallback (or the homebrew title directory) was used instead.
  * @return A newly allocated path_t* pointing at the resolved directory. Caller must path_free() it.
  */
 path_t *rom_info_resolve_metadata_directory (const char *storage_prefix, const char *base_directory,
-                                             const char *game_code, const char *rom_title);
+                                             const char *game_code, const char *rom_title,
+                                             bool *used_region_code);
 
 /** @brief ROM error enumeration. */
 typedef enum {

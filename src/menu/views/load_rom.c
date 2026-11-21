@@ -87,7 +87,7 @@ static void scan_metadata_images(menu_t *menu) {
     }
 
     path_t *path = rom_info_resolve_metadata_directory(
-        menu->storage_prefix, METADATA_BASE_DIRECTORY, menu->load.rom_info.game_code, menu->load.rom_info.title);
+        menu->storage_prefix, METADATA_BASE_DIRECTORY, menu->load.rom_info.game_code, menu->load.rom_info.title, NULL);
 
     bool dir_exists = directory_exists(path_get(path));
 
@@ -163,24 +163,34 @@ static const char *load_full_description(menu_t *menu) {
         return full_description_cache;
     }
 
-    // Otherwise, metadata was sourced from a flat metadata.ini (either alongside the
-    // ROM, or in the shared metadata database), and the long description is a sibling
-    // text file in that same metadata directory on the SD card.
-    bool is_homebrew = (menu->load.rom_info.game_code[1] == 'E' && menu->load.rom_info.game_code[2] == 'D');
-    path_t *desc_path = rom_info_resolve_metadata_directory(
-        menu->storage_prefix, METADATA_BASE_DIRECTORY, menu->load.rom_info.game_code, menu->load.rom_info.title);
-
+    // Otherwise, metadata was sourced from a flat metadata.ini, which rom_info.c itself
+    // tries to load first from right next to the ROM, only falling back to the shared
+    // metadata database if that file doesn't exist. Mirror the same order here, since
+    // the long description is a sibling text file wherever that metadata.ini was found.
+    path_t *desc_path = path_clone(menu->load.rom_path);
+    path_pop(desc_path); // directory containing the ROM
     path_push(desc_path, menu->load.rom_info.meta.long_description_fn);
-    char *desc_file_path = (char *)path_get(desc_path);
 
-    // The description file is frequently shared across regions and may live in the
-    // parent (region-less) directory even when metadata.ini itself is region-specific.
-    if (!is_homebrew && !file_exists(desc_file_path)) {
-        path_pop(desc_path); // remove filename
-        path_pop(desc_path); // remove region letter
+    if (!file_exists(path_get(desc_path))) {
+        path_free(desc_path);
+
+        bool used_region_code = false;
+        desc_path = rom_info_resolve_metadata_directory(
+            menu->storage_prefix, METADATA_BASE_DIRECTORY, menu->load.rom_info.game_code, menu->load.rom_info.title,
+            &used_region_code);
+
         path_push(desc_path, menu->load.rom_info.meta.long_description_fn);
-        desc_file_path = (char *)path_get(desc_path);
+
+        // The description file is frequently shared across regions and may live in the
+        // parent (region-less) directory even when metadata.ini itself is region-specific.
+        if (used_region_code && !file_exists(path_get(desc_path))) {
+            path_pop(desc_path); // remove filename
+            path_pop(desc_path); // remove region letter
+            path_push(desc_path, menu->load.rom_info.meta.long_description_fn);
+        }
     }
+
+    char *desc_file_path = (char *)path_get(desc_path);
 
     if (file_exists(desc_file_path)) {
         FILE *f = fopen(desc_file_path, "r");
