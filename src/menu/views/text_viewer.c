@@ -137,6 +137,10 @@ static void deinit (void) {
  */
 void view_text_viewer_init (menu_t *menu) {
     if ((text = calloc(1, sizeof(text_file_t))) == NULL) {
+        // Content ownership was already transferred to this view by the caller; free it
+        // here too, since nothing else will reclaim it on this early failure path.
+        free(menu->text_viewer.content);
+        menu->text_viewer.content = NULL;
         return menu_show_error(menu, "Couldn't allocate memory for the text file");
     }
 

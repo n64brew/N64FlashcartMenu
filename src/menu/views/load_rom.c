@@ -205,8 +205,8 @@ static const char *load_full_description(menu_t *menu) {
                     if (fread(full_description_cache, 1, size, f) == (size_t)size) {
                         full_description_cache[size] = '\0';
                         fclose(f);
-                        path_free(desc_path);
                         debugf("[DESC] loaded %ld bytes from '%s'\n", size, desc_file_path);
+                        path_free(desc_path);
                         return full_description_cache;
                     }
                     free(full_description_cache);
