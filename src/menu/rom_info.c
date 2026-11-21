@@ -1499,7 +1499,7 @@ bool rom_info_read_libdragon_version (path_t *rom_path, rom_libdragon_version_t 
     }
 
     free(version_data);
-    return true;
+    return ok;
 }
 
 void rom_info_free_meta(rom_info_t *rom_info) {
