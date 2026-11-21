@@ -175,19 +175,24 @@ static const char *load_full_description(menu_t *menu) {
         path_free(desc_path);
 
         bool used_region_code = false;
-        desc_path = rom_info_resolve_metadata_directory(
+        path_t *desc_dir = rom_info_resolve_metadata_directory(
             menu->storage_prefix, METADATA_BASE_DIRECTORY, menu->load.rom_info.game_code, menu->load.rom_info.title,
             &used_region_code);
 
-        path_push(desc_path, menu->load.rom_info.meta.long_description_fn);
+        desc_path = path_clone_push(desc_dir, menu->load.rom_info.meta.long_description_fn);
 
         // The description file is frequently shared across regions and may live in the
         // parent (region-less) directory even when metadata.ini itself is region-specific.
+        // Pop the region component from the directory alone (not desc_path, which may
+        // have a long_description_fn containing its own subdirectory components, e.g.
+        // "text/description.txt") before re-appending the filename.
         if (used_region_code && !file_exists(path_get(desc_path))) {
-            path_pop(desc_path); // remove filename
-            path_pop(desc_path); // remove region letter
-            path_push(desc_path, menu->load.rom_info.meta.long_description_fn);
+            path_free(desc_path);
+            path_pop(desc_dir); // remove region letter
+            desc_path = path_clone_push(desc_dir, menu->load.rom_info.meta.long_description_fn);
         }
+
+        path_free(desc_dir);
     }
 
     char *desc_file_path = (char *)path_get(desc_path);
