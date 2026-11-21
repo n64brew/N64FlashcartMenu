@@ -402,9 +402,10 @@ void ui_components_tabs_draw(const char **text, int count, int selected, float w
 /**
  * @brief Draw the common part of the tabs component.
  * 
- * @param selected Index of the selected tab.
+ * @param menu Pointer to the menu structure; Grid is omitted unless enabled.
+ * @param selected Index of the selected tab, counting Grid as 0.
  */
-void ui_components_tabs_common_draw(int selected);
+void ui_components_tabs_common_draw(menu_t *menu, int selected);
 
 /**
  * @brief Draw a value editor component.

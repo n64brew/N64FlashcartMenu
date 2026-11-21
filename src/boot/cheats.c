@@ -56,7 +56,7 @@ typedef enum {
 
 #define IS_TYPE_REPEATER(t) ((t) == 0x50)
 #define IS_TYPE_WRITE(t) ((((t)&0xF0) == 0x80) || (((t)&0xF0) == 0xA0))
-#define IS_TYPE_CONDITIONAL(t) (((t)&0xF0) == 0xD0)
+#define IS_TYPE_CONDITIONAL(t) (((t) == 0xD0) || ((t) == 0xD1) || ((t) == 0xD2) || ((t) == 0xD3))
 
 #define IS_DOUBLE_ENTRY(t) (IS_TYPE_CONDITIONAL(t) || IS_TYPE_REPEATER(t))
 

@@ -26,7 +26,7 @@ static int max_scroll;
 #define OSS_LIBRARIES_TEXT \
     "\tlibdragon (UNLICENSE License)\n" \
     "\tlibspng (BSD 2-Clause License)\n" \
-    "\tlibjpeg-turbo (BSD 3-Clause License)\n" \
+    "\tTJpgDec (ChaN permissive license)\n" \
     "\tminimp3 (CC0 1.0 Universal)\n" \
     "\tdr_flac (MIT License)\n" \
     "\tminiz (MIT License)\n"
@@ -67,8 +67,8 @@ static void format_information (char *buffer, size_t size, bool include_librarie
         sdk_version.commit_date,
         sdk_version.hash,
         include_libraries
-            ? "\thttps://github.com/\n\tPolprzewodnikowy/N64FlashcartMenu\n"
-            : "\thttps://github.com/Polprzewodnikowy/N64FlashcartMenu\n",
+            ? "\thttps://github.com/\n\tn64brew/N64FlashcartMenu\n"
+            : "\thttps://github.com/n64brew/N64FlashcartMenu\n",
         include_libraries ? "\nOSS library software used:\n" OSS_LIBRARIES_TEXT : ""
     );
 }
@@ -77,7 +77,7 @@ static void process (menu_t *menu) {
     if (menu->actions.back) {
         show_oss_lib_info_message = false;
         sound_play_effect(SFX_EXIT);
-        menu->next_mode = MENU_MODE_BROWSER; 
+        menu->next_mode = menu->settings.boot_into_grid && menu->grid_enabled ? MENU_MODE_GRID : MENU_MODE_BROWSER;
     } else if (menu->actions.context) {
         if (show_oss_lib_info_message) {
             show_oss_lib_info_message = false;

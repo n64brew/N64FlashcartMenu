@@ -25,6 +25,7 @@
 typedef enum {
     MENU_MODE_NONE,
     MENU_MODE_STARTUP,
+    MENU_MODE_GRID,
     MENU_MODE_BROWSER,
     MENU_MODE_FILE_INFO,
     MENU_MODE_IMAGE_VIEWER,
@@ -89,6 +90,8 @@ typedef struct {
     menu_mode_t next_mode;
 
     const char *storage_prefix;
+    /** @brief Whether menu/metadata exists; Grid and its settings are hidden without it. */
+    bool grid_enabled;
     settings_t settings;
     bookkeeping_t bookkeeping;
     boot_params_t *boot_params;
@@ -130,6 +133,7 @@ typedef struct {
 
     struct {
         path_t *rom_path;
+        bool from_grid;
         rom_info_t rom_info;
         disk_slot_t disk_slots;
         int32_t load_history_id;

@@ -30,6 +30,12 @@ typedef struct {
     /** @brief Default directory to navigate to when menu loads */
     char *default_directory;
 
+    /** @brief Start in Grid instead of Files (autoload still takes precedence). */
+    bool boot_into_grid;
+
+    /** @brief Directory indexed by Grid, without descending into subdirectories. */
+    char *grid_directory;
+
     /** @brief Put saves into separate directory */
     bool use_saves_folder;
 

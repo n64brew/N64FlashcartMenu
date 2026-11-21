@@ -76,8 +76,8 @@ static const struct substr hidden_prefixes[] = {
 //     return false;
 // }
 
-static bool path_is_hidden (path_t *path) {
-    char *stripped_path = strip_fs_prefix(path_get(path));
+bool view_browser_path_is_hidden (const char *full_path) {
+    char *stripped_path = strip_fs_prefix((char *) full_path);
 
     // Check for hidden files based on full path
     for (size_t i = 0; hidden_root_paths[i] != NULL; i++) {
@@ -298,7 +298,7 @@ static bool load_directory (menu_t *menu) {
 
         if (!menu->settings.show_protected_entries) {
             path_push(path, info.d_name);
-            hide = path_is_hidden(path);
+            hide = view_browser_path_is_hidden(path_get(path));
             path_pop(path);
         }
 
@@ -506,6 +506,7 @@ static void delete_entry (menu_t *menu, void *arg) {
     }
 
     path_free(path);
+    view_grid_library_changed();
 
     if (reload_directory(menu)) {
         menu->browser.valid = false;
@@ -530,12 +531,20 @@ static void open_controller_pak (menu_t *menu, void *arg) {
     view_settings_open_pane(menu, &settings_pane_controller_pak);
 }
 
+static void set_grid_directory (menu_t *menu, void *arg) {
+    free(menu->settings.grid_directory);
+    menu->settings.grid_directory = strdup(strip_fs_prefix(path_get(menu->browser.directory)));
+    settings_save(&menu->settings);
+}
+
 static component_context_menu_t entry_context_menu = {
     .list = {
         { .text = "Show entry properties", .action = show_properties },
         { .text = "Delete selected entry", .action = delete_entry },
-        { .text = "Set current directory as default", .action = set_default_directory },
         { .text = "Controller Pak manager", .action = open_controller_pak },
+        { .text = "Set current directory as Files start", .action = set_default_directory },
+        /* Last, so that hiding it without Grid only shortens the menu. */
+        { .text = "Set current directory as Grid library", .action = set_grid_directory },
         COMPONENT_CONTEXT_MENU_LIST_END,
     }
 };
@@ -665,7 +674,7 @@ static void process (menu_t *menu) {
         menu->next_mode = MENU_MODE_HISTORY;
         sound_play_effect(SFX_CURSOR);
     } else if (menu->actions.tab_left) {
-        menu->next_mode = MENU_MODE_SETTINGS;
+        menu->next_mode = menu->grid_enabled ? MENU_MODE_GRID : MENU_MODE_SETTINGS;
         sound_play_effect(SFX_CURSOR);
     }
 }
@@ -675,7 +684,7 @@ static void draw (menu_t *menu, surface_t *d) {
 
     ui_components_background_draw();
 
-    ui_components_tabs_common_draw(0);
+    ui_components_tabs_common_draw(menu, 1);
 
     ui_components_layout_draw_tabbed();
 
@@ -739,6 +748,9 @@ static void draw (menu_t *menu, surface_t *d) {
 void view_browser_init (menu_t *menu) {
     if (!menu->browser.valid) {
         ui_components_context_menu_init(&entry_context_menu);
+        if (!menu->grid_enabled) {
+            entry_context_menu.row_count--;
+        }
         ui_components_context_menu_init(&archive_context_menu);
         if (load_directory(menu)) {
             path_free(menu->browser.directory);

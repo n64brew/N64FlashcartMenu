@@ -96,9 +96,9 @@ Do not invoke libdragon tools directly unless debugging the build system. Prefer
 
 ## External resources & references
 - **libdragon**  
-  https://github.com/DragonMinded/libdragon/tree/preview  
+  https://github.com/n64brew/libdragon/tree/preview  
   Primary API reference for graphics, input, filesystem, audio, and toolchain usage.  
-  Wiki: https://github.com/DragonMinded/libdragon/wiki
+  Wiki: https://github.com/n64brew/libdragon/wiki
 
 - **N64brew**  
   https://n64brew.dev/  

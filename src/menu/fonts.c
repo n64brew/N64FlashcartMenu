@@ -5,9 +5,13 @@
 #include "utils/fs.h"
 
 static rdpq_font_t *default_font;
+static rdpq_font_t *large_numbers_font;
 
 void fonts_apply_theme(void) {
     const menu_theme_t *theme = theme_get();
+    if (large_numbers_font) {
+        rdpq_font_style(large_numbers_font, STL_DEFAULT, &((rdpq_fontstyle_t) { .color = theme->warning }));
+    }
     if (default_font) {
         rdpq_font_style(default_font, STL_DEFAULT, &((rdpq_fontstyle_t) { .color = theme->text }));
         rdpq_font_style(default_font, STL_GREEN, &((rdpq_fontstyle_t) { .color = theme->success }));
@@ -31,6 +35,8 @@ static void load_default_font (char *custom_font_path) {
     }
 
     default_font = rdpq_font_load(font_path);
+    large_numbers_font = rdpq_font_load("rom:/menu/fonts/digits/Firple-Bold.font64");
+    rdpq_text_register_font(FNT_LARGE_NUMBERS, large_numbers_font);
     fonts_apply_theme();
 
     rdpq_text_register_font(FNT_DEFAULT, default_font);

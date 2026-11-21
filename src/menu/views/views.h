@@ -34,6 +34,55 @@ void view_startup_init(menu_t *menu);
 void view_startup_display(menu_t *menu, surface_t *display);
 
 /**
+ * @brief Initialize the Grid view, loading or refreshing its ROM index.
+ *
+ * @param menu Pointer to the menu structure.
+ */
+void view_grid_init(menu_t *menu);
+
+/**
+ * @brief Display the Grid view.
+ *
+ * @param menu Pointer to the menu structure.
+ * @param display Pointer to the display surface.
+ */
+void view_grid_display(menu_t *menu, surface_t *display);
+
+/**
+ * @brief Note that Files added or removed ROMs, so Grid syncs its index when next shown.
+ */
+void view_grid_library_changed(void);
+
+/**
+ * @brief Describe the Grid cache for Settings, such as "41 ROMs" or "Scan failed".
+ *
+ * @param menu Pointer to the menu structure.
+ * @return A static string, valid until the next call.
+ */
+const char *view_grid_cache_summary(menu_t *menu);
+
+/**
+ * @brief Delete the Grid index, including its arrangement and view choices.
+ *        Grid rebuilds it when next shown.
+ *
+ * @param menu Pointer to the menu structure.
+ */
+void view_grid_clear_cache(menu_t *menu);
+
+/**
+ * @brief Free the Grid index and artwork before leaving the menu.
+ */
+void view_grid_shutdown(void);
+
+/**
+ * @brief Whether Files hides this path as a system or OS metadata file unless
+ *        hidden files are shown.
+ *
+ * @param full_path Path including the storage prefix.
+ */
+bool view_browser_path_is_hidden(const char *full_path);
+
+/**
  * @brief Initialize the browser view.
  *
  * @param menu Pointer to the menu structure.

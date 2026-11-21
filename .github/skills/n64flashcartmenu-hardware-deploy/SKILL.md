@@ -13,6 +13,16 @@ Workflow for building this project inside its devcontainer and deploying/debuggi
 - Diagnosing an on-console crash/assertion — need the real backtrace, not guesswork.
 - "SD card is locked by the N64 side" errors when trying to read/write SD contents from the PC.
 
+## If Already in the Devcontainer
+When the workspace terminal is already inside the project's devcontainer, use it directly. Do not start another container, rebuild the image, or rebuild libdragon just to build the menu.
+
+```bash
+cd /workspaces/N64FlashcartMenu
+make -j4
+```
+
+Use `make all -j4` when vendor-specific ROM copies are needed. Rebuild libdragon only if its submodule, toolchain configuration, or devcontainer setup changed, or if the installed SDK is missing/broken. Check `N64_INST` and the installed compiler/headers first; a cached ROM or host `cc` compile is not a substitute for the N64 build.
+
 ## 1. Find/recreate the build container
 
 ```powershell
