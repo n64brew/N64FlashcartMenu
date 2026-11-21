@@ -816,11 +816,13 @@ static bool rom_requires_missing_expansion_pak (menu_t *menu) {
 
 /**
  * @brief Check whether this ROM uses the Advanced Homebrew ROM Header ID convention
- *        (game code xEDx), identifying it as homebrew rather than a commercial title.
+ *        (game code xEDx).
  *
- * Currently libdragon is the only SDK producing ROMs with this ID, so header fields that
- * are only meaningfully populated by official SDK/devkit tooling (SDK version, clock rate,
- * check code) can't be trusted for these ROMs and shouldn't be shown as if they were valid.
+ * This is only a candidate signal, not proof the ROM was built with libdragon: ROM hacks
+ * of commercial titles also commonly adopt this game code while still being built on the
+ * original, unmodified libUltra ROM, where the standard SDK version/clock rate/check code
+ * fields remain valid. Callers must additionally confirm an embedded libdragon version
+ * entry (see rom_info_read_libdragon_version()) before treating those fields as invalid.
  */
 static bool rom_is_homebrew_id (menu_t *menu) {
     return (menu->load.rom_info.game_code[1] == 'E' && menu->load.rom_info.game_code[2] == 'D');
@@ -1011,30 +1013,33 @@ static void draw (menu_t *menu, surface_t *d) {
         }
 
         if (show_advanced_info_message) {
+            bool show_libdragon_info = false;
             if (rom_is_homebrew_id(menu)) {
+                // Only trust the libdragon-specific display once we've actually found its
+                // embedded version info. ROM hacks also commonly adopt the "xEDx" game code
+                // convention while still being built on the original, unmodified libUltra
+                // ROM, in which case the standard fields below remain valid.
+                compute_advanced_homebrew_info(menu);
+                show_libdragon_info = advanced_homebrew_libdragon_version.found;
+            }
+
+            if (show_libdragon_info) {
                 // Fields that are only meaningfully populated by official SDK/devkit
                 // tooling (SDK version, clock rate, check code) aren't valid for homebrew
                 // ROMs built with libdragon; show its own embedded version info instead,
                 // and omit the rest rather than display misleading values.
-                compute_advanced_homebrew_info(menu);
-
                 char advanced_info_buffer[512];
                 int offset = snprintf(advanced_info_buffer, sizeof(advanced_info_buffer),
                     "ADVANCED ROM INFO\n"
                     "\n"
-                    "Boot address: 0x%08lX\n",
-                    menu->load.rom_info.boot_address
+                    "Boot address: 0x%08lX\n"
+                    "SDK version: libdragon %s%s (%s, %.7s)\n",
+                    menu->load.rom_info.boot_address,
+                    advanced_homebrew_libdragon_version.branch,
+                    advanced_homebrew_libdragon_version.dirty ? "*" : "",
+                    advanced_homebrew_libdragon_version.commit_date,
+                    advanced_homebrew_libdragon_version.hash
                 );
-
-                if (advanced_homebrew_libdragon_version.found) {
-                    offset += snprintf(advanced_info_buffer + offset, sizeof(advanced_info_buffer) - offset,
-                        "SDK version: libdragon %s%s (%s, %.7s)\n",
-                        advanced_homebrew_libdragon_version.branch,
-                        advanced_homebrew_libdragon_version.dirty ? "*" : "",
-                        advanced_homebrew_libdragon_version.commit_date,
-                        advanced_homebrew_libdragon_version.hash
-                    );
-                }
 
                 snprintf(advanced_info_buffer + offset, sizeof(advanced_info_buffer) - offset,
                     "Endianness: %s\n\n\n"
