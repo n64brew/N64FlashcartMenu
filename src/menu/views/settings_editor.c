@@ -122,6 +122,11 @@ static void set_wrap_file_list_scrolling_type (menu_t *menu, void *arg) {
     settings_save(&menu->settings);
 }
 
+static void set_show_full_rom_descriptions_type (menu_t *menu, void *arg) {
+    menu->settings.show_full_rom_descriptions = (bool)(uintptr_t)(arg);
+    settings_save(&menu->settings);
+}
+
 #ifndef FEATURE_AUTOLOAD_ROM_ENABLED
 static void set_use_rom_fast_reboot_enabled_type (menu_t *menu, void *arg) {
     menu->settings.rom_fast_reboot_enabled = (bool)(uintptr_t)(arg);
@@ -321,6 +326,18 @@ static component_context_menu_t set_wrap_file_list_scrolling_context_menu = {
     COMPONENT_CONTEXT_MENU_LIST_END,
 }};
 
+static int get_show_full_rom_descriptions_current_selection (menu_t *menu) {
+    return menu->settings.show_full_rom_descriptions ? 0 : 1;
+}
+
+static component_context_menu_t set_show_full_rom_descriptions_context_menu = {
+    .get_default_selection = get_show_full_rom_descriptions_current_selection,
+    .list = {
+        {.text = "On", .action = set_show_full_rom_descriptions_type, .arg = (void *)(uintptr_t)(true) },
+        {.text = "Off", .action = set_show_full_rom_descriptions_type, .arg = (void *)(uintptr_t)(false) },
+    COMPONENT_CONTEXT_MENU_LIST_END,
+}};
+
 #ifndef FEATURE_AUTOLOAD_ROM_ENABLED
 static int get_use_rom_fast_reboot_current_selection (menu_t *menu) {
     return menu->settings.rom_fast_reboot_enabled ? 0 : 1;
@@ -402,6 +419,7 @@ static const settings_row_t general_settings[] = {
     { "Default Directory", NULL, get_default_directory_value, NULL, NULL },
     { "Use Saves Folder", &set_use_saves_folder_type_context_menu, NULL, NULL, NULL },
     { "Wrap File List", &set_wrap_file_list_scrolling_context_menu, NULL, NULL, NULL },
+    { "Show Full ROM Descriptions", &set_show_full_rom_descriptions_context_menu, NULL, NULL, NULL },
 };
 
 static const settings_row_t browser_settings[] = {

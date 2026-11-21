@@ -36,6 +36,7 @@ static settings_t init = {
     .show_browser_rom_tags = true,
     .wrap_file_list_scrolling = false,
     .rumble_enabled = false,
+    .show_full_rom_descriptions = false,
 };
 
 
@@ -89,6 +90,7 @@ void settings_load (settings_t *settings) {
     settings->show_browser_rom_tags = ini_get_bool(ini, "menu", "show_browser_rom_tags", init.show_browser_rom_tags);
     settings->wrap_file_list_scrolling = ini_get_bool(ini, "menu", "wrap_file_list_scrolling", init.wrap_file_list_scrolling);
     settings->rumble_enabled = ini_get_bool(ini, "menu_beta_flag", "rumble_enabled", init.rumble_enabled);
+    settings->show_full_rom_descriptions = ini_get_bool(ini, "menu", "show_full_rom_descriptions", init.show_full_rom_descriptions);
 
     ini_free(ini);
 }
@@ -123,6 +125,7 @@ void settings_save (settings_t *settings) {
     // ini_set_bool(ini, "menu", "show_browser_file_extensions", settings->show_browser_file_extensions);
     // ini_set_bool(ini, "menu", "show_browser_rom_tags", settings->show_browser_rom_tags);
     ini_set_bool(ini, "menu", "wrap_file_list_scrolling", settings->wrap_file_list_scrolling);
+    ini_set_bool(ini, "menu", "show_full_rom_descriptions", settings->show_full_rom_descriptions);
     // ini_set_bool(ini, "menu_beta_flag", "rumble_enabled", settings->rumble_enabled);
 
     if (!ini_save(ini, settings_path)) {
