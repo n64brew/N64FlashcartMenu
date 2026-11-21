@@ -1237,58 +1237,55 @@ bool rom_info_extract_metadata_image(const rom_info_t *rom_info, const char *fil
     return ok;
 }
 
-bool rom_info_metadata_image_exists(const rom_info_t *rom_info, const char *filename) {
-    if (!rom_info || !rom_info->meta.metadata_zip_path || !filename ||
-        filename[0] == '/' || strstr(filename, "..") != NULL) {
-        return false;
-    }
-
-    mz_zip_archive zip = {0};
-    if (!mz_zip_reader_init_file(&zip, rom_info->meta.metadata_zip_path, 0)) return false;
-
-    mz_uint index = mz_zip_reader_locate_file(&zip, filename, NULL, MZ_ZIP_FLAG_CASE_SENSITIVE);
-    mz_zip_archive_file_stat stat;
-    // Also check the size cap enforced by rom_info_extract_metadata_image, so a declared
-    // entry that could never be extracted isn't reported as usable.
-    bool exists = index != MZ_UINT32_MAX && mz_zip_reader_file_stat(&zip, index, &stat) &&
-                  stat.m_uncomp_size > 0 && stat.m_uncomp_size <= 2 * 1024 * 1024;
-    mz_zip_reader_end(&zip);
-    return exists;
-}
-
-static bool rom_info_metadata_image_has_signature(const rom_info_t *rom_info, const char *filename,
-                                                 const uint8_t *signature, size_t signature_len) {
-    if (!rom_info || !rom_info->meta.metadata_zip_path || !filename ||
-        filename[0] == '/' || strstr(filename, "..") != NULL) {
-        return false;
-    }
-
-    mz_zip_archive zip = {0};
-    if (!mz_zip_reader_init_file(&zip, rom_info->meta.metadata_zip_path, 0)) return false;
-
-    mz_uint index = mz_zip_reader_locate_file(&zip, filename, NULL, MZ_ZIP_FLAG_CASE_SENSITIVE);
-    bool matches = false;
-    if (index != MZ_UINT32_MAX) {
-        uint8_t header[8] = {0};
-        mz_zip_reader_extract_iter_state *iter = mz_zip_reader_extract_iter_new(&zip, index, 0);
-        if (iter) {
-            matches = mz_zip_reader_extract_iter_read(iter, header, signature_len) == signature_len &&
-                      memcmp(header, signature, signature_len) == 0;
-            mz_zip_reader_extract_iter_free(iter);
-        }
-    }
-    mz_zip_reader_end(&zip);
-    return matches;
-}
-
-bool rom_info_metadata_image_is_png(const rom_info_t *rom_info, const char *filename) {
+bool rom_info_metadata_images_supported(const rom_info_t *rom_info,
+                                        const char *const *filenames, size_t count,
+                                        bool *supported) {
     static const uint8_t png_signature[8] = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
-    return rom_info_metadata_image_has_signature(rom_info, filename, png_signature, sizeof(png_signature));
-}
-
-bool rom_info_metadata_image_is_jpeg(const rom_info_t *rom_info, const char *filename) {
     static const uint8_t jpeg_signature[3] = { 0xFF, 0xD8, 0xFF };
-    return rom_info_metadata_image_has_signature(rom_info, filename, jpeg_signature, sizeof(jpeg_signature));
+
+    if (!supported || (count > 0 && !filenames)) {
+        return false;
+    }
+    memset(supported, 0, count * sizeof(*supported));
+
+    if (!rom_info || !rom_info->meta.metadata_zip_path) {
+        return false;
+    }
+
+    mz_zip_archive zip = {0};
+    if (!mz_zip_reader_init_file(&zip, rom_info->meta.metadata_zip_path, 0)) {
+        return false;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        const char *filename = filenames[i];
+        if (!filename || filename[0] == '/' || strstr(filename, "..") != NULL) {
+            continue;
+        }
+
+        mz_uint index = mz_zip_reader_locate_file(&zip, filename, NULL, MZ_ZIP_FLAG_CASE_SENSITIVE);
+        mz_zip_archive_file_stat stat;
+        if (index == MZ_UINT32_MAX || !mz_zip_reader_file_stat(&zip, index, &stat)
+                || stat.m_uncomp_size == 0 || stat.m_uncomp_size > 2 * 1024 * 1024) {
+            continue;
+        }
+
+        uint8_t header[sizeof(png_signature)] = {0};
+        mz_zip_reader_extract_iter_state *iter = mz_zip_reader_extract_iter_new(&zip, index, 0);
+        if (!iter) {
+            continue;
+        }
+        size_t header_size = mz_zip_reader_extract_iter_read(iter, header, sizeof(header));
+        mz_zip_reader_extract_iter_free(iter);
+
+        supported[i] = (header_size >= sizeof(jpeg_signature)
+                        && memcmp(header, jpeg_signature, sizeof(jpeg_signature)) == 0)
+                    || (header_size == sizeof(png_signature)
+                        && memcmp(header, png_signature, sizeof(png_signature)) == 0);
+    }
+
+    mz_zip_reader_end(&zip);
+    return true;
 }
 
 void rom_info_free_meta(rom_info_t *rom_info) {

@@ -6,6 +6,37 @@ Files are made available:
 - **For the 64Drive**, download and use the `menu.bin` file in the root of your SD card.
 - **For compatible Emulators**, download and use the `N64FlashcartMenu.n64` file.
 
+## Release Notes 202x-vFuture
+
+- **New Features**
+	- None.
+
+- **Bug Fixes**
+	- None.
+
+- **Documentation**
+	- None.
+
+- **Refactor**
+	- None.
+
+- **Other**
+	- None.
+
+### Breaking changes
+- None.
+
+### Notes
+- dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
+
+### Current known Issues
+- SC64: Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- PixelFX HDMI mods may need to be updated to latest FW to support display.
+
+### Deprecation notices
+- None.
+
+
 ## Release Notes 202x-vNext
 
 - **New Features**
@@ -30,9 +61,43 @@ Files are made available:
 - dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
 
 ### Current known Issues
-- Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- SC64: Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
 - PixelFX HDMI mods may need to be updated to latest FW to support display.
-- Setting Background Images (for consoles with a Jumper Pak) is more restrictive due to other features taking priority.
+
+### Deprecation notices
+- None.
+
+
+## Release Notes 2026-11-20 - Tagged 0.3.9
+
+- **New Features**
+	- Added four selectable built-in background music tracks.
+
+- **Bug Fixes**
+	- Fix: Long nested folder names cause the menu path buffer to grow, pointing to freed memory.
+	- Fix: Memory allocation issues with background images on consoles using a Jumper Pak.
+
+- **Documentation**
+	- None.
+
+- **Refactor**
+	- Menu Credits, Flashcart Information and N64 Information are now shown as tabs within the Device Information screen. 
+	- Controller Pak Manager has been improved to align with the rest of the menu.
+	- Improve Settings Editor, splitting options list into into tabs and making it directly editable.
+	- Improve UI responsiveness when loading or unloading ROM's with embedded metadata.
+
+- **Other**
+	- None.
+
+### Breaking changes
+- None.
+
+### Notes
+- dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
+
+### Current known Issues
+- SC64: Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- PixelFX HDMI mods may need to be updated to preview FW to support display.
 
 ### Deprecation notices
 - None.

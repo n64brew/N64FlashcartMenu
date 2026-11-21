@@ -56,8 +56,9 @@ static void jpeg_decoder_callback(jpeg_err_t err, surface_t *decoded_image, void
  * @param max_height Maximum height to decode the image to.
  * @return Pointer to the initialized boxart component, or NULL on failure (in which case `data` is freed).
  */
-component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *data, size_t size,
-                                                  int max_width, int max_height) {
+static component_boxart_t *ui_components_boxart_init_mem_internal(
+    const char *filename, void *data, size_t size, int max_width, int max_height,
+    surface_t *output_buffer) {
     component_boxart_t *b = calloc(1, sizeof(component_boxart_t));
     if (!b) {
         free(data);
@@ -80,17 +81,39 @@ component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *da
     }
 
     if (is_jpeg) {
-        jpeg_err_t jpeg_err = jpeg_decoder_start_mem(data, size, max_width, max_height,
-                                                   jpeg_decoder_callback, b);
+        jpeg_err_t jpeg_err = output_buffer != NULL
+            ? jpeg_decoder_start_mem_into(data, size, max_width, max_height,
+                                          output_buffer, jpeg_decoder_callback, b)
+            : jpeg_decoder_start_mem(data, size, max_width, max_height,
+                                     jpeg_decoder_callback, b);
         if (jpeg_err == JPEG_OK) return b;
     } else {
-        png_err_t png_err = png_decoder_start_mem(data, size, max_width, max_height, png_decoder_callback, b);
+        png_err_t png_err = output_buffer != NULL
+            ? png_decoder_start_mem_into(data, size, max_width, max_height,
+                                         output_buffer, png_decoder_callback, b)
+            : png_decoder_start_mem(data, size, max_width, max_height,
+                                    png_decoder_callback, b);
         if (png_err == PNG_OK) return b;
         if (png_err == PNG_ERR_BUSY) free(data);
     }
 
     free(b);
     return NULL;
+}
+
+component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *data,
+                                                  size_t size, int max_width,
+                                                  int max_height) {
+    return ui_components_boxart_init_mem_internal(filename, data, size, max_width,
+                                                  max_height, NULL);
+}
+
+component_boxart_t *ui_components_boxart_init_mem_into(const char *filename, void *data,
+                                                       size_t size, int max_width,
+                                                       int max_height,
+                                                       surface_t *output_buffer) {
+    return ui_components_boxart_init_mem_internal(filename, data, size, max_width,
+                                                  max_height, output_buffer);
 }
 
 /**

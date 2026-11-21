@@ -49,6 +49,15 @@ typedef void png_callback_t (png_err_t err, surface_t *decoded_image, void *call
 png_err_t png_decoder_start (char *path, int max_width, int max_height, png_callback_t *callback, void *callback_data);
 
 /**
+ * @brief Start decoding a PNG into a caller-owned output surface buffer.
+ *
+ * The output buffer must be RGBA16 and large enough for the requested
+ * dimensions. The decoded surface is a non-owning view of it, so the caller
+ * must keep the buffer alive until it frees the returned decoded surface.
+ */
+png_err_t png_decoder_start_into (char *path, int max_width, int max_height, surface_t *output_buffer, png_callback_t *callback, void *callback_data);
+
+/**
  * @brief Start decoding a PNG from an in-memory buffer.
  *
  * Same as png_decoder_start but reads from a heap buffer instead of a file.
@@ -71,6 +80,11 @@ png_err_t png_decoder_start (char *path, int max_width, int max_height, png_call
  *         (decoder already freed buf; caller must not free it again).
  */
 png_err_t png_decoder_start_mem (void *buf, size_t buf_size, int max_width, int max_height, png_callback_t *callback, void *callback_data);
+
+/** Decode a PNG from memory into a caller-owned RGBA16 output surface. */
+png_err_t png_decoder_start_mem_into (void *buf, size_t buf_size, int max_width, int max_height,
+                                      surface_t *output_buffer, png_callback_t *callback,
+                                      void *callback_data);
 
 /**
  * @brief Abort the PNG decoding process.

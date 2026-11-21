@@ -15,8 +15,13 @@ Features:
 > These sequences are always decoded on restore so the note is written back to the Controller Pak with its original name.
 
 ### Controller Pak Manager
-Use the "Controller Pak Manager" (accessed using `Start` button ) to backup and manage the pak (including full backups or individual notes).
-![Backup Controller Pak](./images/cpak-manager.png "Backup Controller Pak confirmation") 
+Use the Controller Pak Manager (opened from the browser's `Start` menu) to manage the Controller Pak in the selected controller port.
+
+- Use `C or D-Pad Left` and `C or D-Pad Right` to switch controller tabs.
+- Use `C or D-Pad Up` and `C or D-Pad Down` to select a note.
+- Press `A` to back up the selected note.
+- Press `L` or `Z` to back up the whole Controller Pak.
+- Press `R` to open options for deleting notes (entry specific), formatting, and restoring.
 
 #### Restoring saves
 To restore full backups or individual notes, browse to the saved file (usually contained within `SD:/cpak_saves/`) and follow the menu instructions.

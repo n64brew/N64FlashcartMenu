@@ -8,6 +8,7 @@
 
 #include "../cart_load.h"
 #include "../fonts.h"
+#include "../ui_components/constants.h"
 #include "../zip_entry_count.h"
 #include "utils/fs.h"
 #include "views.h"
@@ -551,9 +552,7 @@ static component_context_menu_t settings_context_menu = {
         { .text = "Controller Pak manager", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_CONTROLLER_PAKFS) },
         { .text = "Menu settings", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_SETTINGS_EDITOR) },
         { .text = "Time (RTC) settings", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_RTC) },
-        { .text = "Menu information", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_CREDITS) },
-        { .text = "Flashcart information", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_FLASHCART) },
-        { .text = "N64 information", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_SYSTEM_INFO) },
+        { .text = "Device information", .action = set_menu_next_mode, .arg = (void *) (MENU_MODE_CREDITS) },
         COMPONENT_CONTEXT_MENU_LIST_END,
     }
 };
@@ -695,7 +694,7 @@ static void draw (menu_t *menu, surface_t *d) {
 
     ui_components_layout_draw_tabbed();
 
-    ui_components_file_list_draw(menu->browser.list, menu->browser.entries, menu->browser.selected);
+    ui_components_file_list_draw(menu->browser.list, menu->browser.entries, menu->browser.selected, LIST_ENTRIES, true, NULL, NULL);
 
     const char *action = NULL;
 

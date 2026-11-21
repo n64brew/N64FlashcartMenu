@@ -220,7 +220,9 @@ void ui_components_background_draw(void);
 surface_t *ui_components_background_get_image(void);
 
 /**
- * @brief Reload the background image from cache (call after temporarily freeing).
+ * @brief Restore the background image from cache after temporarily freeing it.
+ *
+ * Cache data is loaded incrementally while drawing the background.
  */
 void ui_components_background_reload(void);
 
@@ -230,13 +232,30 @@ void ui_components_background_reload(void);
 void ui_components_background_image_free_only(void);
 
 /**
+ * @brief Return the reserved background decode surface, or NULL if unavailable.
+ */
+surface_t *ui_components_background_get_decode_buffer(void);
+
+/**
  * @brief Draw the file list component.
  * 
  * @param list List of entries.
  * @param entries Number of entries.
  * @param selected Index of the selected entry.
+ * @param visible_items Maximum number of entries to display.
+ * @param show_size Whether to draw the size column.
+ * @param column_header Optional column labels drawn above the scrolling entries.
+ * @param empty_message Optional message to draw when the list is empty.
  */
-void ui_components_file_list_draw(entry_t *list, int entries, int selected);
+void ui_components_file_list_draw(
+    entry_t *list,
+    int entries,
+    int selected,
+    int visible_items,
+    bool show_size,
+    const char *column_header,
+    const char *empty_message
+);
 
 /**
  * @brief Free file list component cached resources.
@@ -315,6 +334,9 @@ component_boxart_t *ui_components_boxart_init(const char *storage_prefix, const 
 /** Initialize boxart from an image buffer owned by the decoder. */
 component_boxart_t *ui_components_boxart_init_mem(const char *filename, void *data, size_t size,
                                                   int max_width, int max_height);
+component_boxart_t *ui_components_boxart_init_mem_into(const char *filename, void *data, size_t size,
+                                                       int max_width, int max_height,
+                                                       surface_t *output_buffer);
 
 /**
  * @brief Free the box art component resources.

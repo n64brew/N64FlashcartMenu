@@ -3,6 +3,16 @@
 N64FlashcartMenu automatically creates a `config.ini` file in `sd:/menu/`, which contains various settings that can be set within the menu's Settings editor.
 If required, you can manually adjust the file (required for some advanced settings) on the SD card using your computer.
 
+### Using the Settings Editor
+
+Press `START` in the File Browser to open the settings menu, then select `Menu settings` to open the Settings Editor.
+
+- Use `C or D-Pad Left` and `C or D-Pad Right` to switch between the General, Browser, Audio, and System tabs. Builds with beta settings enabled also have a Beta tab for beta-only options.
+- Use `C or D-Pad Up` and `C or D-Pad Down` to select a setting.
+- Press `A` to review and confirm a setting change; press `B` to cancel.
+- Press `B` to return to the File Browser.
+- Press `R` to open Settings Options, where you can reset settings or remove the background.
+
 ### Show Hidden Files
 
 Shows any N64FlashcartMenu system-related and hidden files/folders. This setting is OFF by default.
@@ -55,6 +65,10 @@ OFF: ROM saves are saved alongside the ROM file.
 ### Sound Effects
 
 The menu has default sound effects to improve the user experience. See the [sound documentation](./40_sound.md) for details. This setting is OFF by default.
+
+### Background Music
+
+Background Music turns menu music on or off and is OFF by default. Background Music Track selects between Flying Dreams, Warm Waves, Blue Horizon, and White Stones; Flying Dreams is selected by default.
 
 ### Fast ROM reboots
 

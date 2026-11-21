@@ -3,6 +3,7 @@
 #include "../cart_load.h"
 #include "../sound.h"
 #include "views.h"
+#include "info_tabs.h"
 
 
 static int joypad[4];
@@ -36,7 +37,13 @@ static void process (menu_t *menu) {
         accessory[port] = joypad_get_accessory_type(port);
     }
 
-    if (menu->actions.back) {
+    if (menu->actions.go_left) {
+        sound_play_effect(SFX_SETTING);
+        menu->next_mode = MENU_MODE_FLASHCART;
+    } else if (menu->actions.go_right) {
+        sound_play_effect(SFX_SETTING);
+        menu->next_mode = MENU_MODE_CREDITS;
+    } else if (menu->actions.back) {
         sound_play_effect(SFX_EXIT);
         menu->next_mode = MENU_MODE_BROWSER;
     }
@@ -46,14 +53,8 @@ static void draw (menu_t *menu, surface_t *d) {
     rdpq_attach(d, NULL);
 
     ui_components_background_draw();
-
-    ui_components_layout_draw();
-
-    ui_components_main_text_draw(
-        STL_DEFAULT,
-        ALIGN_CENTER, VALIGN_TOP,
-        "N64 SYSTEM INFORMATION"
-    );
+    ui_components_tabs_draw(info_tabs, 3, 2, 162.0f);
+    ui_components_layout_draw_tabbed();
 
     ui_components_main_text_draw(
         STL_DEFAULT,
@@ -85,6 +86,13 @@ static void draw (menu_t *menu, surface_t *d) {
         ALIGN_LEFT, VALIGN_TOP,
         "\n"
         "B: Exit"
+    );
+
+    ui_components_actions_bar_text_draw(
+        STL_DEFAULT,
+        ALIGN_CENTER, VALIGN_TOP,
+        "\n"
+        "◀ Tabs ▶"
     );
 
     rdpq_detach_show();

@@ -1,4 +1,5 @@
 #include "views.h"
+#include "info_tabs.h"
 #include "../sound.h"
 
 #ifndef MENU_VERSION
@@ -13,7 +14,15 @@ static sys_version_t sdk_version = {0};
 static bool show_oss_lib_info_message = false;
 
 static void process (menu_t *menu) {
-    if (menu->actions.back) {
+    if (menu->actions.go_right) {
+        show_oss_lib_info_message = false;
+        sound_play_effect(SFX_SETTING);
+        menu->next_mode = MENU_MODE_FLASHCART;
+    } else if (menu->actions.go_left) {
+        show_oss_lib_info_message = false;
+        sound_play_effect(SFX_SETTING);
+        menu->next_mode = MENU_MODE_SYSTEM_INFO;
+    } else if (menu->actions.back) {
         show_oss_lib_info_message = false;
         sound_play_effect(SFX_EXIT);
         menu->next_mode = MENU_MODE_BROWSER; 
@@ -32,13 +41,8 @@ static void draw (menu_t *menu, surface_t *d) {
 
     ui_components_background_draw();
 
-    ui_components_layout_draw();
-
-    ui_components_main_text_draw(
-        STL_DEFAULT,
-        ALIGN_CENTER, VALIGN_TOP,
-        "MENU INFORMATION"
-    );
+    ui_components_tabs_draw(info_tabs, 3, 0, 162.0f);
+    ui_components_layout_draw_tabbed();
 
     ui_components_main_text_draw(
         STL_DEFAULT,
@@ -84,6 +88,13 @@ static void draw (menu_t *menu, surface_t *d) {
         ALIGN_LEFT, VALIGN_TOP,
         "\n"
         "B: Exit"
+    );
+
+    ui_components_actions_bar_text_draw(
+        STL_DEFAULT,
+        ALIGN_CENTER, VALIGN_TOP,
+        "\n"
+        "◀ Tabs ▶"
     );
 
     ui_components_actions_bar_text_draw(
