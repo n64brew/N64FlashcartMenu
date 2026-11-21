@@ -36,6 +36,15 @@ static bool metadata_image_available[METADATA_IMAGE_CACHE_MAX];
 static uint16_t metadata_image_count;
 static bool metadata_images_scanned = false;
 
+static char *full_description_cache = NULL;
+static bool full_description_cache_loaded = false;
+static int full_description_total_lines = 0;
+static bool full_description_vertical_scroll_possible = false;
+
+static bool show_full_description_view = false;
+static int description_current_line = 0;
+static int description_offset = 0;
+
 static void scan_metadata_images(menu_t *menu) {
     if (metadata_images_scanned) {
         return;
@@ -148,14 +157,180 @@ static void scan_metadata_images(menu_t *menu) {
     metadata_images_scanned = true;
 }
 
-static const char *format_rom_description(menu_t *menu) {
-    const char *rom_description = NULL;
+static void compute_full_description_metrics (void) {
+    full_description_total_lines = 1;
+    full_description_vertical_scroll_possible = false;
 
-    if (menu->load.rom_info.meta.short_description != NULL && strlen(menu->load.rom_info.meta.short_description) > 0) {
-        rom_description = menu->load.rom_info.meta.short_description;
+    if (!full_description_cache) {
+        return;
     }
 
-    return rom_description ? rom_description : "No description available.";
+    for (const char *p = full_description_cache; *p; p++) {
+        if (*p == '\n') {
+            full_description_total_lines += 1;
+        }
+    }
+    full_description_vertical_scroll_possible = (full_description_total_lines > LIST_ENTRIES);
+}
+
+static const char *load_full_description(menu_t *menu) {
+    if (full_description_cache_loaded) {
+        return full_description_cache;
+    }
+
+    full_description_cache_loaded = true;
+
+    if (!menu->load.rom_info.meta.long_description_fn ||
+        menu->load.rom_info.meta.long_description_fn[0] == '\0') {
+        debugf("[DESC] load_full_description: long_description_fn not set in metadata\n");
+        return NULL;
+    }
+
+    debugf("[DESC] load_full_description: long_description_fn='%s', metadata_zip_path='%s'\n",
+        menu->load.rom_info.meta.long_description_fn,
+        menu->load.rom_info.meta.metadata_zip_path ? menu->load.rom_info.meta.metadata_zip_path : "(none)");
+
+    // Metadata sourced from a ZIP (a .meta file, or a ZIP embedded in the ROM itself)
+    // stores the long description as a file entry within that same ZIP archive,
+    // just like boxart/screenshot images.
+    if (menu->load.rom_info.meta.metadata_zip_path) {
+        uint8_t *data = NULL;
+        size_t size = 0;
+
+        if (rom_info_extract_metadata_image(&menu->load.rom_info, menu->load.rom_info.meta.long_description_fn,
+                                            &data, &size) && data && size > 0) {
+            full_description_cache = malloc(size + 1);
+            if (full_description_cache) {
+                memcpy(full_description_cache, data, size);
+                full_description_cache[size] = '\0';
+            }
+            debugf("[DESC] load_full_description: extracted %zu bytes from ZIP\n", size);
+        } else {
+            debugf("[DESC] load_full_description: failed to extract '%s' from ZIP\n",
+                menu->load.rom_info.meta.long_description_fn);
+        }
+        free(data);
+        compute_full_description_metrics();
+        return full_description_cache;
+    }
+
+    // Otherwise, metadata was sourced from a flat metadata.ini (either alongside the
+    // ROM, or in the shared metadata database), and the long description is a sibling
+    // text file in that same metadata directory on the SD card.
+    path_t *desc_path = path_init(menu->storage_prefix, "menu/metadata");
+    char game_code_path[50];
+    bool used_region_dir = false;
+
+    if (menu->load.rom_info.game_code[1] == 'E' && menu->load.rom_info.game_code[2] == 'D') {
+        char safe_title[21];
+        memcpy(safe_title, menu->load.rom_info.title, 20);
+        safe_title[20] = '\0';
+        
+        snprintf(game_code_path, sizeof(game_code_path), "homebrew/%s", safe_title);
+        path_push(desc_path, game_code_path);
+    }
+    else {
+        snprintf(game_code_path, sizeof(game_code_path), "%c/%c/%c/%c",
+            menu->load.rom_info.game_code[0],
+            menu->load.rom_info.game_code[1],
+            menu->load.rom_info.game_code[2],
+            menu->load.rom_info.game_code[3]);
+        path_push(desc_path, game_code_path);
+
+        used_region_dir = directory_exists(path_get(desc_path));
+        if (!used_region_dir) {
+            debugf("[DESC] load_full_description: dir '%s' missing, retrying without region code\n", path_get(desc_path));
+            path_pop(desc_path);
+        }
+    }
+
+    path_push(desc_path, menu->load.rom_info.meta.long_description_fn);
+    
+    char *desc_file_path = (char *)path_get(desc_path);
+    debugf("[DESC] load_full_description: trying file '%s'\n", desc_file_path);
+
+    // The description file is frequently shared across regions and may live in the
+    // parent (region-less) directory even when metadata.ini itself is region-specific.
+    if (!file_exists(desc_file_path) && used_region_dir) {
+        path_pop(desc_path); // remove filename
+        path_pop(desc_path); // remove region letter
+        path_push(desc_path, menu->load.rom_info.meta.long_description_fn);
+        desc_file_path = (char *)path_get(desc_path);
+        debugf("[DESC] load_full_description: retrying without region code: '%s'\n", desc_file_path);
+    }
+
+    if (file_exists(desc_file_path)) {
+        FILE *f = fopen(desc_file_path, "r");
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            long size = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            
+            if (size > 0 && size <= 64 * 1024) {
+                full_description_cache = malloc(size + 1);
+                if (full_description_cache) {
+                    if (fread(full_description_cache, 1, size, f) == (size_t)size) {
+                        full_description_cache[size] = '\0';
+                        fclose(f);
+                        path_free(desc_path);
+                        debugf("[DESC] load_full_description: loaded %ld bytes from '%s'\n", size, desc_file_path);
+                        compute_full_description_metrics();
+                        return full_description_cache;
+                    }
+                    free(full_description_cache);
+                    full_description_cache = NULL;
+                }
+            } else {
+                debugf("[DESC] load_full_description: '%s' size %ld out of range\n", desc_file_path, size);
+            }
+            fclose(f);
+        }
+    } else {
+        debugf("[DESC] load_full_description: file '%s' does not exist\n", desc_file_path);
+    }
+
+    path_free(desc_path);
+    return NULL;
+}
+
+#define ROM_DESCRIPTION_INLINE_BODY_MAX 110
+
+static const char *format_rom_description(menu_t *menu) {
+    static char description_display_buffer[ROM_DESCRIPTION_INLINE_BODY_MAX + 16];
+
+    const char *short_description =
+        (menu->load.rom_info.meta.short_description != NULL && strlen(menu->load.rom_info.meta.short_description) > 0)
+        ? menu->load.rom_info.meta.short_description
+        : "No description available.";
+
+    // Only check for a full/long description when the setting is enabled; its presence
+    // just adds an indicator here, the short description is still what's shown inline.
+    bool has_full_description = false;
+    if (menu->settings.show_full_rom_descriptions) {
+        const char *full_desc = load_full_description(menu);
+        has_full_description = (full_desc != NULL && full_desc[0] != '\0');
+    }
+
+    size_t len = strlen(short_description);
+    bool truncated = len > ROM_DESCRIPTION_INLINE_BODY_MAX;
+    size_t copy_len = truncated ? ROM_DESCRIPTION_INLINE_BODY_MAX : len;
+
+    if (!truncated && !has_full_description) {
+        return short_description;
+    }
+
+    char body[ROM_DESCRIPTION_INLINE_BODY_MAX + 1];
+    memcpy(body, short_description, copy_len);
+    body[copy_len] = '\0';
+
+    if (has_full_description) {
+        // A full/long description is available; the ellipsis and down arrow hint that
+        // pressing Down opens the complete, scrollable text.
+        snprintf(description_display_buffer, sizeof(description_display_buffer), "%s... ▼", body);
+    } else {
+        snprintf(description_display_buffer, sizeof(description_display_buffer), "%s...", body);
+    }
+    return description_display_buffer;
 }
 
 static char *convert_error_message (rom_err_t err) {
@@ -694,8 +869,49 @@ static bool rom_requires_missing_expansion_pak (menu_t *menu) {
     return (menu->load.rom_info.features.expansion_pak == EXPANSION_PAK_REQUIRED) && !is_memory_expanded();
 }
 
+static void perform_description_vertical_scroll (int lines) {
+    if (!full_description_vertical_scroll_possible || !full_description_cache) {
+        return;
+    }
+
+    int direction = (lines < 0) ? -1 : 1;
+    int next_offset = description_offset;
+    long length = (long)strlen(full_description_cache);
+
+    for (int i = 0; i < abs(lines); i++) {
+        while (true) {
+            next_offset += direction;
+            if (next_offset <= 0) {
+                description_current_line = 0;
+                description_offset = 0;
+                return;
+            }
+            if (next_offset > length) {
+                return;
+            }
+            if (full_description_cache[next_offset - 1] == '\n') {
+                break;
+            }
+        }
+        description_current_line += direction;
+        description_offset = next_offset;
+    }
+}
+
 static void process (menu_t *menu) {
     if (ui_components_context_menu_process(menu, &options_context_menu)) {
+        return;
+    }
+
+    if (show_full_description_view) {
+        if (menu->actions.back) {
+            show_full_description_view = false;
+            sound_play_effect(SFX_EXIT);
+        } else if (menu->actions.go_up) {
+            perform_description_vertical_scroll(menu->actions.go_fast ? -10 : -1);
+        } else if (menu->actions.go_down) {
+            perform_description_vertical_scroll(menu->actions.go_fast ? 10 : 1);
+        }
         return;
     }
 
@@ -737,6 +953,13 @@ static void process (menu_t *menu) {
             show_advanced_info_message = true;
         }
         sound_play_effect(SFX_SETTING);
+    } else if (menu->actions.go_down) {
+        if (full_description_cache && full_description_cache[0] != '\0') {
+            show_full_description_view = true;
+            description_current_line = 0;
+            description_offset = 0;
+            sound_play_effect(SFX_SETTING);
+        }
     } else if (menu->actions.go_right) {
         iterate_metadata_image(menu, 1);
         sound_play_effect(SFX_CURSOR);
@@ -746,10 +969,37 @@ static void process (menu_t *menu) {
     }
 }
 
+static void draw_full_description_view (void) {
+    ui_components_layout_draw();
+
+    ui_components_main_text_draw(
+        STL_DEFAULT,
+        ALIGN_LEFT, VALIGN_TOP,
+        "%s\n",
+        full_description_cache + description_offset
+    );
+
+    ui_components_list_scrollbar_draw(description_current_line, full_description_total_lines, LIST_ENTRIES);
+
+    ui_components_actions_bar_text_draw(
+        STL_DEFAULT,
+        ALIGN_LEFT, VALIGN_TOP,
+        "^%02XUp / Down: Scroll^00\n"
+        "B: Back",
+        full_description_vertical_scroll_possible ? STL_DEFAULT : STL_GRAY
+    );
+}
+
 static void draw (menu_t *menu, surface_t *d) {
     rdpq_attach(d, NULL);
 
     ui_components_background_draw();
+
+    if (show_full_description_view) {
+        draw_full_description_view();
+        rdpq_detach_show();
+        return;
+    }
 #ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     if (menu->load_pending.rom_file && menu->settings.loading_progress_bar_enabled) {
         ui_components_loader_draw(0.0f, NULL);
@@ -769,7 +1019,7 @@ static void draw (menu_t *menu, surface_t *d) {
         ui_components_main_text_draw(
             STL_DEFAULT,
             ALIGN_LEFT, VALIGN_TOP,
-            "\n\n\n\t%.120s\n",
+            "\n\n\n\t%s\n",
             format_rom_description(menu)
             
         );
@@ -995,6 +1245,17 @@ static void reset_metadata_image_cache (void) {
     metadata_images_scanned = false;
     metadata_image_count = 0;
     boxart_sd_fallback_attempted = false;
+
+    if (full_description_cache) {
+        free(full_description_cache);
+        full_description_cache = NULL;
+    }
+    full_description_cache_loaded = false;
+    full_description_total_lines = 0;
+    full_description_vertical_scroll_possible = false;
+    show_full_description_view = false;
+    description_current_line = 0;
+    description_offset = 0;
 
     for (uint16_t i = 0; i < METADATA_IMAGE_CACHE_MAX; i++) {
         metadata_image_available[i] = false;

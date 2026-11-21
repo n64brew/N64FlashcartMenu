@@ -970,6 +970,7 @@ static bool load_metadata_from_zip_file (const char *zip_path, rom_info_t *rom_i
         rom_info->meta.age_rating = ini_get_int(meta_ini, "meta", "age-rating", 0);
         rom_info->meta.num_players = ini_get_int(meta_ini, "meta", "num-players", 1);
         ok &= replace_owned_string(&rom_info->meta.short_description, ini_get_string(meta_ini, "meta", "short-desc",   ""));
+        ok &= replace_owned_string(&rom_info->meta.long_description_fn, ini_get_string(meta_ini, "meta", "long-desc", ""));
         ok &= load_meta_art_fields(meta_ini, rom_info);
         ini_free(meta_ini);
         success = ok;
@@ -1123,7 +1124,7 @@ static bool load_rom_meta_from_embedded_zip (const char *rom_path, rom_header_t 
         rom_info->meta.age_rating = ini_get_int(meta_ini, "meta", "age-rating", 0);
         rom_info->meta.num_players = ini_get_int(meta_ini, "meta", "num-players", 1);
         ok &= replace_owned_string(&rom_info->meta.short_description, ini_get_string(meta_ini, "meta", "short-desc",   ""));
-        ok &= replace_owned_string(&rom_info->meta.long_description_fn, ini_get_string(meta_ini, "meta", "long-desc-fn", ""));
+        ok &= replace_owned_string(&rom_info->meta.long_description_fn, ini_get_string(meta_ini, "meta", "long-desc", ""));
         ok &= load_meta_art_fields(meta_ini, rom_info);
         ini_free(meta_ini);
         success = ok;
@@ -1174,6 +1175,10 @@ static void load_rom_meta_from_file (path_t *path, rom_info_t *rom_info) {
         );
         path_push(fallback_meta_path, gamecode_str);
 
+        if (!directory_exists(path_get(fallback_meta_path))) { // Allow metadata to not specify the region code.
+            path_pop(fallback_meta_path);
+        }
+
         path_push(fallback_meta_path, "metadata.ini");
         debugf("[META] load_rom_meta_from_file: trying fallback path '%s'\n", path_get(fallback_meta_path));
         path_free(rom_info_meta_path);
@@ -1194,7 +1199,7 @@ static void load_rom_meta_from_file (path_t *path, rom_info_t *rom_info) {
         rom_info->meta.age_rating = ini_get_int(rom_meta_ini, "meta", "age-rating", 0);
         rom_info->meta.num_players = ini_get_int(rom_meta_ini, "meta", "num-players", 1);
         ok &= replace_owned_string(&rom_info->meta.short_description, ini_get_string(rom_meta_ini, "meta", "short-desc",   ""));
-        ok &= replace_owned_string(&rom_info->meta.long_description_fn, ini_get_string(rom_meta_ini, "meta", "long-desc-fn", ""));
+        ok &= replace_owned_string(&rom_info->meta.long_description_fn, ini_get_string(rom_meta_ini, "meta", "long-desc", ""));
         ok &= load_meta_art_fields(rom_meta_ini, rom_info);
         ini_free(rom_meta_ini);
         if (ok) {
