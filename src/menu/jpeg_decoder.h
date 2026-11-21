@@ -1,5 +1,10 @@
+/**
+ * @file jpeg_decoder.h
+ * @brief JPEG decoder component.
+ * @ingroup ui_components
+ */
+
 #ifndef JPEG_DECODER_H__
-/** @file jpeg_decoder.h JPEG decoder component. */
 #define JPEG_DECODER_H__
 
 #include <stddef.h>

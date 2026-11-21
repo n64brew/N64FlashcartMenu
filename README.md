@@ -83,7 +83,7 @@ The features in this project were made possible by the [contributors](https://gi
 
 # License
 This project is released under the [GNU AFFERO GENERAL PUBLIC LICENSE](LICENSE.md) as compatible with all other dependent project licenses.  
-Other license options may be available upon request with permissions of the original `N64FlashcartMenu` project authors / maintainers.  
+Other compatible or commercial license options may be available upon request with permissions of the original `N64FlashcartMenu` project authors / maintainers.  
 * [Mateusz Faderewski / Polprzewodnikowy](https://github.com/Polprzewodnikowy)
 * [Robin Jones / NetworkFusion](https://github.com/networkfusion)
 
@@ -92,7 +92,7 @@ Other license options may be available upon request with permissions of the orig
 * [libdragon](https://github.com/n64brew/libdragon/tree/preview) - [UNLICENSE License](https://github.com/n64brew/libdragon/blob/preview/LICENSE.md)
 * [libspng](https://github.com/randy408/libspng) - [BSD 2-Clause License](https://github.com/randy408/libspng/blob/master/LICENSE)
 * [TJpgDec](https://elm-chan.org/fsw/tjpgd/) - [ChaN permissive license](https://elm-chan.org/fsw/tjpgd/en/appnote.html)
-* [dr_mp3](https://github.com/mackron/dr_libs) - [Public domain or MIT-0](https://github.com/mackron/dr_libs/blob/master/LICENSE)
+* [minimp3](https://github.com/lieff/minimp3) - [CC0 1.0 Universal](https://github.com/lieff/minimp3/blob/master/LICENSE)
 * [dr_flac](https://github.com/mackron/dr_libs) - [MIT License](https://github.com/mackron/dr_libs/blob/master/LICENSE)
 * [miniz](https://github.com/richgel999/miniz) - [MIT License](https://github.com/richgel999/miniz/blob/master/LICENSE)
 
