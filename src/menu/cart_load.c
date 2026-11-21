@@ -136,6 +136,14 @@ cart_load_err_t cart_load_n64_rom_and_save (menu_t *menu, flashcart_progress_cal
         if (!flashcart_has_feature(FLASHCART_FEATURE_ROM_REBOOT_FAST)) {
             return CART_LOAD_ERR_FUNCTION_NOT_SUPPORTED;
         }
+        flashcart_tv_type_t tv;
+        switch (rom_info_get_tv_type(&menu->load.rom_info)) {
+            case ROM_TV_TYPE_PAL:  tv = FLASHCART_TV_TYPE_PAL;  break;
+            case ROM_TV_TYPE_NTSC: tv = FLASHCART_TV_TYPE_NTSC; break;
+            case ROM_TV_TYPE_MPAL: tv = FLASHCART_TV_TYPE_MPAL; break;
+            default:               tv = FLASHCART_TV_TYPE_PASSTHROUGH; break;
+        }
+        flashcart_set_tv_type(tv);
         menu->flashcart_err = flashcart_set_next_boot_mode(FLASHCART_REBOOT_MODE_ROM);
         if (menu->flashcart_err != FLASHCART_OK) {
             path_free(path);

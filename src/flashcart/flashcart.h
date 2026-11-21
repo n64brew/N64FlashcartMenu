@@ -56,6 +56,14 @@ typedef enum {
     FLASHCART_REBOOT_MODE_ROM,
 } flashcart_reboot_mode_t;
 
+/** @brief TV type to configure on the flashcart for fast reboot */
+typedef enum {
+    FLASHCART_TV_TYPE_PAL = 0,         /**< PAL */
+    FLASHCART_TV_TYPE_NTSC = 1,        /**< NTSC */
+    FLASHCART_TV_TYPE_MPAL = 2,        /**< MPAL */
+    FLASHCART_TV_TYPE_PASSTHROUGH = 3, /**< Use console's own TV type */
+} flashcart_tv_type_t;
+
 /** @brief Flashcart Disk Parameter Structure. */
 typedef struct {
     bool development_drive; /**< Development drive flag */
@@ -106,6 +114,8 @@ typedef struct {
     flashcart_err_t (*set_save_writeback) (char *save_path);
     /** @brief The flashcart set boot mode function */
     flashcart_err_t (*set_next_boot_mode) (flashcart_reboot_mode_t boot_mode);
+    /** @brief The flashcart set TV type function (optional, NULL if unsupported) */
+    flashcart_err_t (*set_tv_type) (flashcart_tv_type_t tv_type);
 } flashcart_t;
 
 /**
@@ -242,5 +252,16 @@ flashcart_err_t flashcart_get_voltage_temperature (uint16_t *voltage_mv, int16_t
 * @return flashcart_err_t Error code.
 */
 flashcart_err_t flashcart_set_next_boot_mode (flashcart_reboot_mode_t boot_mode);
+
+/**
+ * @brief Set the TV type for the next ROM boot.
+ *
+ * Only meaningful when fast reboot is enabled. Has no effect if the
+ * flashcart does not support TV type configuration.
+ *
+ * @param tv_type The TV type to set.
+ * @return flashcart_err_t Error code.
+ */
+flashcart_err_t flashcart_set_tv_type (flashcart_tv_type_t tv_type);
 
 #endif /* FLASHCART_H__ */
