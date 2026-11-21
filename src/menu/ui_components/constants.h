@@ -253,6 +253,17 @@
 #define LIST_SCROLLBAR_Y                (VISIBLE_AREA_Y0 + TAB_HEIGHT + BORDER_THICKNESS)
 
 /**
+ * @def CONTENT_SCROLLBAR_HEIGHT
+ * @brief Height of the scrollbar for views with no tab bar (pixels), e.g. the text viewer.
+ */
+#define CONTENT_SCROLLBAR_HEIGHT        (LAYOUT_ACTIONS_SEPARATOR_Y - OVERSCAN_HEIGHT - BORDER_THICKNESS)
+/**
+ * @def CONTENT_SCROLLBAR_Y
+ * @brief Y coordinate of the scrollbar for views with no tab bar, e.g. the text viewer.
+ */
+#define CONTENT_SCROLLBAR_Y             (VISIBLE_AREA_Y0 + BORDER_THICKNESS)
+
+/**
  * @def LIST_ENTRIES
  * @brief Maximum number of file list entries.
  */

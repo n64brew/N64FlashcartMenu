@@ -145,6 +145,16 @@ typedef struct {
         bool emulator_file;
         bool extract_file;
     } load_pending;
+
+    struct {
+        /** @brief Mode to switch to when the text viewer is closed (Back). */
+        menu_mode_t return_mode;
+        /** @brief Optional pre-loaded content to display instead of reading a file from
+         * the browser. When set, ownership transfers to the text viewer, which frees it
+         * once the viewer closes. Left NULL to display the currently selected browser
+         * file as before. */
+        char *content;
+    } text_viewer;
 } menu_t;
 
 

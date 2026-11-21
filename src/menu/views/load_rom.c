@@ -36,6 +36,12 @@ static bool metadata_image_available[METADATA_IMAGE_CACHE_MAX];
 static uint16_t metadata_image_count;
 static bool metadata_images_scanned = false;
 
+static char *full_description_cache = NULL;
+static bool full_description_cache_loaded = false;
+
+static bool advanced_homebrew_info_computed = false;
+static rom_libdragon_version_t advanced_homebrew_libdragon_version;
+
 static void scan_metadata_images(menu_t *menu) {
     if (metadata_images_scanned) {
         return;
@@ -83,31 +89,8 @@ static void scan_metadata_images(menu_t *menu) {
         }
     }
 
-    path_t *path = path_init(menu->storage_prefix, "menu/metadata"); // should be METADATA_BASE_DIRECTORY
-    char game_code_path[50];
-
-    if (menu->load.rom_info.game_code[1] == 'E' && menu->load.rom_info.game_code[2] == 'D') {
-        // This is using a homebrew ROM ID, use the title for the file name instead.
-        // Create a null-terminated copy of the title for safe string operations
-        char safe_title[21];  // 20 chars + null terminator
-        memcpy(safe_title, menu->load.rom_info.title, 20);
-        safe_title[20] = '\0';
-        
-        snprintf(game_code_path, sizeof(game_code_path), "homebrew/%s", safe_title); // should be HOMEBREW_ID_SUBDIRECTORY
-        path_push(path, game_code_path);
-    }
-    else {
-        snprintf(game_code_path, sizeof(game_code_path), "%c/%c/%c/%c",
-            menu->load.rom_info.game_code[0],
-            menu->load.rom_info.game_code[1],
-            menu->load.rom_info.game_code[2],
-            menu->load.rom_info.game_code[3]);
-        path_push(path, game_code_path);
-
-        if (!directory_exists(path_get(path))) { // Allow boxart to not specify the region code.
-            path_pop(path);
-        }
-    }
+    path_t *path = rom_info_resolve_metadata_directory(
+        menu->storage_prefix, METADATA_BASE_DIRECTORY, menu->load.rom_info.game_code, menu->load.rom_info.title, NULL);
 
     bool dir_exists = directory_exists(path_get(path));
 
@@ -142,20 +125,157 @@ static void scan_metadata_images(menu_t *menu) {
         }
     }
 
-    debugf("Metadata: Scanned metadata for ROM ID %s. \n", game_code_path);
+    debugf("Metadata: Scanned metadata for ROM at %s. \n", path_get(path));
 
     path_free(path);
     metadata_images_scanned = true;
 }
 
-static const char *format_rom_description(menu_t *menu) {
-    const char *rom_description = NULL;
-
-    if (menu->load.rom_info.meta.short_description != NULL && strlen(menu->load.rom_info.meta.short_description) > 0) {
-        rom_description = menu->load.rom_info.meta.short_description;
+static const char *load_full_description(menu_t *menu) {
+    if (full_description_cache_loaded) {
+        return full_description_cache;
     }
 
-    return rom_description ? rom_description : "No description available.";
+    full_description_cache_loaded = true;
+
+    if (!menu->load.rom_info.meta.long_description_fn ||
+        menu->load.rom_info.meta.long_description_fn[0] == '\0') {
+        return NULL;
+    }
+
+    debugf("[DESC] loading '%s' (zip='%s')\n",
+        menu->load.rom_info.meta.long_description_fn,
+        menu->load.rom_info.meta.metadata_zip_path ? menu->load.rom_info.meta.metadata_zip_path : "(none)");
+
+    // Metadata sourced from a ZIP (a .meta file, or a ZIP embedded in the ROM itself)
+    // stores the long description as a file entry within that same ZIP archive,
+    // just like boxart/screenshot images.
+    if (menu->load.rom_info.meta.metadata_zip_path) {
+        uint8_t *data = NULL;
+        size_t size = 0;
+
+        if (rom_info_extract_metadata_image(&menu->load.rom_info, menu->load.rom_info.meta.long_description_fn,
+                                            &data, &size) && data && size > 0) {
+            full_description_cache = malloc(size + 1);
+            if (full_description_cache) {
+                memcpy(full_description_cache, data, size);
+                full_description_cache[size] = '\0';
+            }
+        }
+        free(data);
+        return full_description_cache;
+    }
+
+    // Otherwise, metadata was sourced from a flat metadata.ini, which rom_info.c itself
+    // tries to load first from right next to the ROM, only falling back to the shared
+    // metadata database if that file doesn't exist. Mirror the same order here, since
+    // the long description is a sibling text file wherever that metadata.ini was found.
+    path_t *desc_path = path_clone(menu->load.rom_path);
+    path_pop(desc_path); // directory containing the ROM
+    path_push(desc_path, menu->load.rom_info.meta.long_description_fn);
+
+    if (!file_exists(path_get(desc_path))) {
+        path_free(desc_path);
+
+        bool used_region_code = false;
+        path_t *desc_dir = rom_info_resolve_metadata_directory(
+            menu->storage_prefix, METADATA_BASE_DIRECTORY, menu->load.rom_info.game_code, menu->load.rom_info.title,
+            &used_region_code);
+
+        desc_path = path_clone_push(desc_dir, menu->load.rom_info.meta.long_description_fn);
+
+        // The description file is frequently shared across regions and may live in the
+        // parent (region-less) directory even when metadata.ini itself is region-specific.
+        // Pop the region component from the directory alone (not desc_path, which may
+        // have a long_description_fn containing its own subdirectory components, e.g.
+        // "text/description.txt") before re-appending the filename.
+        if (used_region_code && !file_exists(path_get(desc_path))) {
+            path_free(desc_path);
+            path_pop(desc_dir); // remove region letter
+            desc_path = path_clone_push(desc_dir, menu->load.rom_info.meta.long_description_fn);
+        }
+
+        path_free(desc_dir);
+    }
+
+    char *desc_file_path = (char *)path_get(desc_path);
+
+    if (file_exists(desc_file_path)) {
+        FILE *f = fopen(desc_file_path, "r");
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            long size = ftell(f);
+            fseek(f, 0, SEEK_SET);
+
+            if (size > 0 && size <= 64 * 1024) {
+                full_description_cache = malloc(size + 1);
+                if (full_description_cache) {
+                    if (fread(full_description_cache, 1, size, f) == (size_t)size) {
+                        full_description_cache[size] = '\0';
+                        fclose(f);
+                        debugf("[DESC] loaded %ld bytes from '%s'\n", size, desc_file_path);
+                        path_free(desc_path);
+                        return full_description_cache;
+                    }
+                    free(full_description_cache);
+                    full_description_cache = NULL;
+                }
+            }
+            fclose(f);
+        }
+    }
+
+    debugf("[DESC] '%s' not found\n", desc_file_path);
+    path_free(desc_path);
+    return NULL;
+}
+
+#define ROM_DESCRIPTION_INLINE_BODY_MAX 110
+
+static const char *format_rom_description(menu_t *menu) {
+    static char description_display_buffer[ROM_DESCRIPTION_INLINE_BODY_MAX + 16];
+
+    const char *short_description =
+        (menu->load.rom_info.meta.short_description != NULL && strlen(menu->load.rom_info.meta.short_description) > 0)
+        ? menu->load.rom_info.meta.short_description
+        : "No description available.";
+
+    // Only check for a full/long description when the setting is enabled; its presence
+    // just adds an indicator here, the short description is still what's shown inline.
+    bool has_full_description = false;
+    if (menu->settings.show_full_rom_descriptions) {
+        const char *full_desc = load_full_description(menu);
+        has_full_description = (full_desc != NULL && full_desc[0] != '\0');
+    }
+
+    size_t len = strlen(short_description);
+    bool truncated = len > ROM_DESCRIPTION_INLINE_BODY_MAX;
+    size_t copy_len = truncated ? ROM_DESCRIPTION_INLINE_BODY_MAX : len;
+
+    if (truncated) {
+        // Avoid splitting a multi-byte UTF-8 sequence: back up over any continuation
+        // bytes (10xxxxxx) so the cut lands on a complete code-point boundary.
+        while (copy_len > 0 && (short_description[copy_len] & 0xC0) == 0x80) {
+            copy_len--;
+        }
+    }
+
+    if (!truncated && !has_full_description) {
+        return short_description;
+    }
+
+    char body[ROM_DESCRIPTION_INLINE_BODY_MAX + 1];
+    memcpy(body, short_description, copy_len);
+    body[copy_len] = '\0';
+
+    if (has_full_description) {
+        // A full/long description is available; the ellipsis and down arrow hint that
+        // pressing Down opens the complete, scrollable text.
+        snprintf(description_display_buffer, sizeof(description_display_buffer), "%s... ▼", body);
+    } else {
+        snprintf(description_display_buffer, sizeof(description_display_buffer), "%s...", body);
+    }
+    return description_display_buffer;
 }
 
 static char *convert_error_message (rom_err_t err) {
@@ -694,6 +814,30 @@ static bool rom_requires_missing_expansion_pak (menu_t *menu) {
     return (menu->load.rom_info.features.expansion_pak == EXPANSION_PAK_REQUIRED) && !is_memory_expanded();
 }
 
+/**
+ * @brief Check whether this ROM uses the Advanced Homebrew ROM Header ID convention
+ *        (game code xEDx).
+ *
+ * This is only a candidate signal, not proof the ROM was built with libdragon: ROM hacks
+ * of commercial titles also commonly adopt this game code while still being built on the
+ * original, unmodified libUltra ROM, where the standard SDK version/clock rate/check code
+ * fields remain valid. Callers must additionally confirm an embedded libdragon version
+ * entry (see rom_info_read_libdragon_version()) before treating those fields as invalid.
+ */
+static bool rom_is_homebrew_id (menu_t *menu) {
+    return (menu->load.rom_info.game_code[1] == 'E' && menu->load.rom_info.game_code[2] == 'D');
+}
+
+/** @brief Lazily compute the libdragon SDK version info shown for homebrew ROMs. */
+static void compute_advanced_homebrew_info (menu_t *menu) {
+    if (advanced_homebrew_info_computed) {
+        return;
+    }
+    advanced_homebrew_info_computed = true;
+
+    rom_info_read_libdragon_version(menu->load.rom_path, &advanced_homebrew_libdragon_version);
+}
+
 static void process (menu_t *menu) {
     if (ui_components_context_menu_process(menu, &options_context_menu)) {
         return;
@@ -737,6 +881,17 @@ static void process (menu_t *menu) {
             show_advanced_info_message = true;
         }
         sound_play_effect(SFX_SETTING);
+    } else if (menu->actions.go_down) {
+        if (full_description_cache && full_description_cache[0] != '\0') {
+            // Hand ownership of the cached description off to the text viewer; it will
+            // free it when closed. Clear our own references so deinit()/a later reload
+            // don't touch the now-transferred buffer.
+            menu->text_viewer.content = full_description_cache;
+            menu->text_viewer.return_mode = MENU_MODE_LOAD_ROM;
+            full_description_cache = NULL;
+            menu->next_mode = MENU_MODE_TEXT_VIEWER;
+            sound_play_effect(SFX_SETTING);
+        }
     } else if (menu->actions.go_right) {
         iterate_metadata_image(menu, 1);
         sound_play_effect(SFX_CURSOR);
@@ -769,7 +924,7 @@ static void draw (menu_t *menu, surface_t *d) {
         ui_components_main_text_draw(
             STL_DEFAULT,
             ALIGN_LEFT, VALIGN_TOP,
-            "\n\n\n\t%.120s\n",
+            "\n\n\n\t%s\n",
             format_rom_description(menu)
             
         );
@@ -858,21 +1013,58 @@ static void draw (menu_t *menu, surface_t *d) {
         }
 
         if (show_advanced_info_message) {
-            ui_components_messagebox_draw(
-                "ADVANCED ROM INFO\n"
-                "\n"
-                "Boot address: 0x%08lX\n"
-                "SDK version: %.1f%c\n"
-                "Clock Rate: %.2fMHz\n"
-                "Check code: 0x%016llX\n"
-                "Endianness: %s\n\n\n"
-                "Press START to return.\n",
-                menu->load.rom_info.boot_address,
-                (menu->load.rom_info.libultra.version / 10.0f), menu->load.rom_info.libultra.revision,
-                menu->load.rom_info.clock_rate,
-                menu->load.rom_info.check_code,
-                format_rom_endianness(menu->load.rom_info.endianness)
-            );
+            bool show_libdragon_info = false;
+            if (rom_is_homebrew_id(menu)) {
+                // Only trust the libdragon-specific display once we've actually found its
+                // embedded version info. ROM hacks also commonly adopt the "xEDx" game code
+                // convention while still being built on the original, unmodified libUltra
+                // ROM, in which case the standard fields below remain valid.
+                compute_advanced_homebrew_info(menu);
+                show_libdragon_info = advanced_homebrew_libdragon_version.found;
+            }
+
+            if (show_libdragon_info) {
+                // Fields that are only meaningfully populated by official SDK/devkit
+                // tooling (SDK version, clock rate, check code) aren't valid for homebrew
+                // ROMs built with libdragon; show its own embedded version info instead,
+                // and omit the rest rather than display misleading values.
+                char advanced_info_buffer[512];
+                int offset = snprintf(advanced_info_buffer, sizeof(advanced_info_buffer),
+                    "ADVANCED ROM INFO\n"
+                    "\n"
+                    "Boot address: 0x%08lX\n"
+                    "SDK version: libdragon %s%s (%s, %.7s)\n",
+                    menu->load.rom_info.boot_address,
+                    advanced_homebrew_libdragon_version.branch,
+                    advanced_homebrew_libdragon_version.dirty ? "*" : "",
+                    advanced_homebrew_libdragon_version.commit_date,
+                    advanced_homebrew_libdragon_version.hash
+                );
+
+                snprintf(advanced_info_buffer + offset, sizeof(advanced_info_buffer) - offset,
+                    "Endianness: %s\n\n\n"
+                    "Press START to return.\n",
+                    format_rom_endianness(menu->load.rom_info.endianness)
+                );
+
+                ui_components_messagebox_draw("%s", advanced_info_buffer);
+            } else {
+                ui_components_messagebox_draw(
+                    "ADVANCED ROM INFO\n"
+                    "\n"
+                    "Boot address: 0x%08lX\n"
+                    "SDK version: %.1f%c\n"
+                    "Clock Rate: %.2fMHz\n"
+                    "Check code: 0x%016llX\n"
+                    "Endianness: %s\n\n\n"
+                    "Press START to return.\n",
+                    menu->load.rom_info.boot_address,
+                    (menu->load.rom_info.libultra.version / 10.0f), menu->load.rom_info.libultra.revision,
+                    menu->load.rom_info.clock_rate,
+                    menu->load.rom_info.check_code,
+                    format_rom_endianness(menu->load.rom_info.endianness)
+                );
+            }
         }
 
         if (show_expansion_pak_warning) {
@@ -995,6 +1187,14 @@ static void reset_metadata_image_cache (void) {
     metadata_images_scanned = false;
     metadata_image_count = 0;
     boxart_sd_fallback_attempted = false;
+    advanced_homebrew_info_computed = false;
+    memset(&advanced_homebrew_libdragon_version, 0, sizeof(advanced_homebrew_libdragon_version));
+
+    if (full_description_cache) {
+        free(full_description_cache);
+        full_description_cache = NULL;
+    }
+    full_description_cache_loaded = false;
 
     for (uint16_t i = 0; i < METADATA_IMAGE_CACHE_MAX; i++) {
         metadata_image_available[i] = false;
@@ -1158,8 +1358,13 @@ void view_load_rom_display (menu_t *menu, surface_t *display) {
     }
 
     if (menu->next_mode != MENU_MODE_LOAD_ROM && menu->next_mode != MENU_MODE_DATEL_CODE_EDITOR) {
-        menu->load.load_history_id = -1;
-        menu->load.load_favorite_id = -1;
+        // Preserve history/favorite context across a round-trip to the full description
+        // view, so view_load_rom_init() reloads the same ROM entry when we return,
+        // rather than falling back to whatever is currently selected in the browser.
+        if (menu->next_mode != MENU_MODE_TEXT_VIEWER) {
+            menu->load.load_history_id = -1;
+            menu->load.load_favorite_id = -1;
+        }
         deinit();
     }
 }
