@@ -101,15 +101,24 @@ static void draw (menu_t *menu, surface_t *d) {
         text->contents + text->offset
     );
 
-    ui_components_list_scrollbar_draw(text->current_line, text->lines, LIST_ENTRIES);
-
     ui_components_actions_bar_text_draw(
         STL_DEFAULT,
         ALIGN_LEFT, VALIGN_TOP,
-        "^%02XUp / Down: Scroll^00\n"
-        "B: Back",
-        text->vertical_scroll_possible ? STL_DEFAULT : STL_GRAY
+        "B: Back"
     );
+
+    if (text->vertical_scroll_possible) {
+        ui_components_scrollbar_draw(
+            LIST_SCROLLBAR_X, CONTENT_SCROLLBAR_Y, LIST_SCROLLBAR_WIDTH, CONTENT_SCROLLBAR_HEIGHT,
+            text->current_line, text->lines, LIST_ENTRIES
+        );
+
+        ui_components_actions_bar_text_draw(
+            STL_DEFAULT,
+            ALIGN_CENTER, VALIGN_TOP,
+            "▼▲ Scroll"
+        );
+    }
 
     rdpq_detach_show();
 }
