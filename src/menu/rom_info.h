@@ -226,6 +226,30 @@ bool rom_info_metadata_images_supported(const rom_info_t *rom_info,
                                         const char *const *filenames, size_t count,
                                         bool *supported);
 
+/** @brief Libdragon SDK version info embedded in a ROM's ROM-Pak table of contents, if present. */
+typedef struct {
+    bool found;             /**< True if a "libdragon.version" ROM-Pak entry was located */
+    char branch[32];        /**< Git branch name the SDK was built from */
+    char hash[16];          /**< Short git commit hash */
+    char commit_date[32];   /**< Git commit date */
+    bool dirty;             /**< True if the SDK working tree had uncommitted changes at build time */
+} rom_libdragon_version_t;
+
+/**
+ * @brief Read the libdragon SDK version embedded in a ROM file's ROM-Pak, if present.
+ *
+ * Libdragon embeds a small "libdragon.version" entry in a ROM-Pak table of contents (the
+ * same mechanism used for embedded filesystems/symbols/debug info), located directly from
+ * the ROM file on disk without needing to execute it.
+ *
+ * @param rom_path Path to the ROM file.
+ * @param version Output: populated with version info; version->found is false if no
+ *                "libdragon.version" entry could be located (e.g. older libdragon builds,
+ *                or ROMs not built with libdragon at all).
+ * @return true if the ROM file could be opened and read, false on I/O error.
+ */
+bool rom_info_read_libdragon_version(path_t *rom_path, rom_libdragon_version_t *version);
+
 /**
  * @brief Get the CIC seed for the ROM.
  * 

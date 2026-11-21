@@ -39,6 +39,9 @@ static bool metadata_images_scanned = false;
 static char *full_description_cache = NULL;
 static bool full_description_cache_loaded = false;
 
+static bool advanced_homebrew_info_computed = false;
+static rom_libdragon_version_t advanced_homebrew_libdragon_version;
+
 static void scan_metadata_images(menu_t *menu) {
     if (metadata_images_scanned) {
         return;
@@ -811,6 +814,28 @@ static bool rom_requires_missing_expansion_pak (menu_t *menu) {
     return (menu->load.rom_info.features.expansion_pak == EXPANSION_PAK_REQUIRED) && !is_memory_expanded();
 }
 
+/**
+ * @brief Check whether this ROM uses the Advanced Homebrew ROM Header ID convention
+ *        (game code xEDx), identifying it as homebrew rather than a commercial title.
+ *
+ * Currently libdragon is the only SDK producing ROMs with this ID, so header fields that
+ * are only meaningfully populated by official SDK/devkit tooling (SDK version, clock rate,
+ * check code) can't be trusted for these ROMs and shouldn't be shown as if they were valid.
+ */
+static bool rom_is_homebrew_id (menu_t *menu) {
+    return (menu->load.rom_info.game_code[1] == 'E' && menu->load.rom_info.game_code[2] == 'D');
+}
+
+/** @brief Lazily compute the libdragon SDK version info shown for homebrew ROMs. */
+static void compute_advanced_homebrew_info (menu_t *menu) {
+    if (advanced_homebrew_info_computed) {
+        return;
+    }
+    advanced_homebrew_info_computed = true;
+
+    rom_info_read_libdragon_version(menu->load.rom_path, &advanced_homebrew_libdragon_version);
+}
+
 static void process (menu_t *menu) {
     if (ui_components_context_menu_process(menu, &options_context_menu)) {
         return;
@@ -986,21 +1011,55 @@ static void draw (menu_t *menu, surface_t *d) {
         }
 
         if (show_advanced_info_message) {
-            ui_components_messagebox_draw(
-                "ADVANCED ROM INFO\n"
-                "\n"
-                "Boot address: 0x%08lX\n"
-                "SDK version: %.1f%c\n"
-                "Clock Rate: %.2fMHz\n"
-                "Check code: 0x%016llX\n"
-                "Endianness: %s\n\n\n"
-                "Press START to return.\n",
-                menu->load.rom_info.boot_address,
-                (menu->load.rom_info.libultra.version / 10.0f), menu->load.rom_info.libultra.revision,
-                menu->load.rom_info.clock_rate,
-                menu->load.rom_info.check_code,
-                format_rom_endianness(menu->load.rom_info.endianness)
-            );
+            if (rom_is_homebrew_id(menu)) {
+                // Fields that are only meaningfully populated by official SDK/devkit
+                // tooling (SDK version, clock rate, check code) aren't valid for homebrew
+                // ROMs built with libdragon; show its own embedded version info instead,
+                // and omit the rest rather than display misleading values.
+                compute_advanced_homebrew_info(menu);
+
+                char advanced_info_buffer[512];
+                int offset = snprintf(advanced_info_buffer, sizeof(advanced_info_buffer),
+                    "ADVANCED ROM INFO\n"
+                    "\n"
+                    "Boot address: 0x%08lX\n",
+                    menu->load.rom_info.boot_address
+                );
+
+                if (advanced_homebrew_libdragon_version.found) {
+                    offset += snprintf(advanced_info_buffer + offset, sizeof(advanced_info_buffer) - offset,
+                        "SDK version: libdragon %s%s (%s, %.7s)\n",
+                        advanced_homebrew_libdragon_version.branch,
+                        advanced_homebrew_libdragon_version.dirty ? "*" : "",
+                        advanced_homebrew_libdragon_version.commit_date,
+                        advanced_homebrew_libdragon_version.hash
+                    );
+                }
+
+                snprintf(advanced_info_buffer + offset, sizeof(advanced_info_buffer) - offset,
+                    "Endianness: %s\n\n\n"
+                    "Press START to return.\n",
+                    format_rom_endianness(menu->load.rom_info.endianness)
+                );
+
+                ui_components_messagebox_draw("%s", advanced_info_buffer);
+            } else {
+                ui_components_messagebox_draw(
+                    "ADVANCED ROM INFO\n"
+                    "\n"
+                    "Boot address: 0x%08lX\n"
+                    "SDK version: %.1f%c\n"
+                    "Clock Rate: %.2fMHz\n"
+                    "Check code: 0x%016llX\n"
+                    "Endianness: %s\n\n\n"
+                    "Press START to return.\n",
+                    menu->load.rom_info.boot_address,
+                    (menu->load.rom_info.libultra.version / 10.0f), menu->load.rom_info.libultra.revision,
+                    menu->load.rom_info.clock_rate,
+                    menu->load.rom_info.check_code,
+                    format_rom_endianness(menu->load.rom_info.endianness)
+                );
+            }
         }
 
         if (show_expansion_pak_warning) {
@@ -1123,6 +1182,8 @@ static void reset_metadata_image_cache (void) {
     metadata_images_scanned = false;
     metadata_image_count = 0;
     boxart_sd_fallback_attempted = false;
+    advanced_homebrew_info_computed = false;
+    memset(&advanced_homebrew_libdragon_version, 0, sizeof(advanced_homebrew_libdragon_version));
 
     if (full_description_cache) {
         free(full_description_cache);
