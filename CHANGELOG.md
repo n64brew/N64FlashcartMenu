@@ -40,7 +40,7 @@ Files are made available:
 ## Release Notes 202x-vNext
 
 - **New Features**
-	- None.
+	- Enable ROM info to show full ROM descriptions (rather than just short descriptions) when available.
 
 - **Bug Fixes**
 	- None.
@@ -49,7 +49,7 @@ Files are made available:
 	- None.
 
 - **Refactor**
-	- None.
+	- Advanced ROM description info to show libdragon based ROMs correctly.
 
 - **Other**
 	- None.
