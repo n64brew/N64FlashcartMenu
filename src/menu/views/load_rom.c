@@ -249,6 +249,14 @@ static const char *format_rom_description(menu_t *menu) {
     bool truncated = len > ROM_DESCRIPTION_INLINE_BODY_MAX;
     size_t copy_len = truncated ? ROM_DESCRIPTION_INLINE_BODY_MAX : len;
 
+    if (truncated) {
+        // Avoid splitting a multi-byte UTF-8 sequence: back up over any continuation
+        // bytes (10xxxxxx) so the cut lands on a complete code-point boundary.
+        while (copy_len > 0 && (short_description[copy_len] & 0xC0) == 0x80) {
+            copy_len--;
+        }
+    }
+
     if (!truncated && !has_full_description) {
         return short_description;
     }
@@ -854,7 +862,6 @@ static void process (menu_t *menu) {
             menu->text_viewer.content = full_description_cache;
             menu->text_viewer.return_mode = MENU_MODE_LOAD_ROM;
             full_description_cache = NULL;
-            full_description_cache_loaded = false;
             menu->next_mode = MENU_MODE_TEXT_VIEWER;
             sound_play_effect(SFX_SETTING);
         }
