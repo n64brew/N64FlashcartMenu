@@ -51,6 +51,14 @@ void view_error_display (menu_t *menu, surface_t *display) {
 
 void menu_show_error (menu_t *menu, char *error_message) {
     sound_play_effect(SFX_ERROR);
+    // Dismissing an error always leads back to the browser (see process() above), so any
+    // pending History/Favorites load target must be abandoned here too; otherwise a mode
+    // that preserves it across a round-trip (e.g. the ROM info screen handing a
+    // description off to the text viewer) could leave it set after an error diverts away
+    // from that round-trip, causing a later, unrelated browser selection to be ignored in
+    // favor of the stale entry.
+    menu->load.load_history_id = -1;
+    menu->load.load_favorite_id = -1;
     menu->next_mode = MENU_MODE_ERROR;
     menu->error_message = error_message;
 }

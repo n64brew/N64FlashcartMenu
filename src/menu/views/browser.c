@@ -649,6 +649,8 @@ static void process (menu_t *menu) {
                 menu->next_mode = MENU_MODE_FILE_INFO; // FIXME: Implement MENU_MODE_LOAD_ROM_PATCH.
                 break;
             case ENTRY_TYPE_TEXT:
+                menu->text_viewer.return_mode = MENU_MODE_BROWSER;
+                menu->text_viewer.content = NULL;
                 menu->next_mode = MENU_MODE_TEXT_VIEWER;
                 break;
             case ENTRY_TYPE_ROM_META:
