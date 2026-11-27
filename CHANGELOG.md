@@ -40,6 +40,37 @@ Files are made available:
 ## Release Notes 202x-vNext
 
 - **New Features**
+	- None.
+
+- **Bug Fixes**
+	- None.
+
+- **Documentation**
+	- None.
+
+- **Refactor**
+	- None.
+
+- **Other**
+	- None.
+
+### Breaking changes
+- None.
+
+### Notes
+- dragonminded/libdragon was archived. As a stepping stone, the links were changed to n64brew/libdragon.
+
+### Current known Issues
+- SC64: Fast Rebooting a 64DD disk once will result in a blank screen. Twice will return to menu.
+- PixelFX HDMI mods may need to be updated to latest FW to support display.
+
+### Deprecation notices
+- None.
+
+
+## Release Notes 2026-11-27 - Tagged 0.3.10
+
+- **New Features**
 	- Enable ROM info to show full ROM descriptions (rather than just short descriptions) when available.
 
 - **Bug Fixes**
@@ -50,6 +81,7 @@ Files are made available:
 
 - **Refactor**
 	- Advanced ROM description info to show libdragon based ROMs correctly.
+	- Improved action bar scroll characters to align all menus.
 
 - **Other**
 	- None.
