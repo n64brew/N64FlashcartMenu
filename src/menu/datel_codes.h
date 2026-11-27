@@ -81,6 +81,17 @@ void load_cheats_from_file(char *path);
  */
 void load_cheats_for_rom_path(path_t *rom_path);
 
+/**
+ * @brief Check whether the in-memory cheat list is already current for this ROM: either
+ * freshly loaded from its cheat file, or already synced by a prior
+ * load_cheats_for_rom_path() call for this exact ROM (e.g. from visiting the Datel Code
+ * Editor, which always loads fresh from file on entry).
+ *
+ * @param rom_path Path to the ROM file.
+ * @return true if the in-memory cheat list is already current for this ROM.
+ */
+bool cheats_loaded_for_rom_path(path_t *rom_path);
+
 /** * @brief Save cheats to a file.
  * 
  * @param path Path to the file where cheat codes should be saved.

@@ -13,7 +13,6 @@ static bool show_extra_info_message = false;
 static bool show_advanced_info_message = false;
 static bool show_expansion_pak_warning = false;
 static bool boot_without_cheats = false;
-static bool skip_cheats_reload_on_init = false;
 static component_boxart_t *boxart;
 static component_boxart_t *pending_boxart;
 static bool boxart_sd_fallback_attempted = false;
@@ -491,9 +490,11 @@ static void set_cheat_option(menu_t *menu, void *arg) {
     else {
         bool enabled = (bool)arg;
         rom_config_setting_set_cheats(menu->load.rom_path, &menu->load.rom_info, enabled);
-        if (enabled) {
+        if (enabled && !cheats_loaded_for_rom_path(menu->load.rom_path)) {
             // Load the cheat list right away so it's ready to apply without requiring a
-            // separate Datel Code Editor visit first.
+            // separate Datel Code Editor visit first. Skipped if the user already applied
+            // (possibly unsaved) changes via the editor for this exact ROM, so enabling
+            // the setting afterwards doesn't discard them.
             load_cheats_for_rom_path(menu->load.rom_path);
         }
         menu->browser.reload = true;
@@ -1314,12 +1315,13 @@ void view_load_rom_init (menu_t *menu) {
 
     // Keep the in-memory cheat list in sync with the currently displayed ROM: cheats are
     // applied straight from here (see load()) without requiring a Datel Code Editor visit.
-    // Skipped on the round-trip back from the editor itself, since its "Apply to ROM" is
-    // intentionally volatile and must not be clobbered by reloading from the saved file.
-    if (menu->load.rom_info.settings.cheats_enabled && !skip_cheats_reload_on_init) {
+    // Skipped if already in sync for this exact ROM (e.g. returning from the Datel Code
+    // Editor, or from the full description view, or after re-enabling the setting), since
+    // the editor's "Apply to ROM" is intentionally volatile and must not be clobbered by
+    // reloading from the saved file.
+    if (menu->load.rom_info.settings.cheats_enabled && !cheats_loaded_for_rom_path(menu->load.rom_path)) {
         load_cheats_for_rom_path(menu->load.rom_path);
     }
-    skip_cheats_reload_on_init = false;
 
     if (menu->load.rom_info.meta.size_limit_exceeded) {
         menu_show_error(menu, "ROM metadata was skipped\nmetadata.ini exceeds size limit");
@@ -1411,14 +1413,6 @@ void view_load_rom_display (menu_t *menu, surface_t *display) {
     if (menu->load_pending.rom_file) {
         menu->load_pending.rom_file = false;
         load(menu);
-    }
-
-    if (menu->next_mode == MENU_MODE_DATEL_CODE_EDITOR) {
-        // Suppress the next cheats-from-file reload in view_load_rom_init(): the Datel
-        // Code Editor's "Apply to ROM" is intentionally volatile (unsaved changes are
-        // only kept in memory, see save_cheats_to_file()); reloading from the .datel file
-        // on this round-trip would silently discard whatever the user just toggled there.
-        skip_cheats_reload_on_init = true;
     }
 
     if (menu->next_mode != MENU_MODE_LOAD_ROM && menu->next_mode != MENU_MODE_DATEL_CODE_EDITOR) {

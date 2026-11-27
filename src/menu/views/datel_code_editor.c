@@ -460,7 +460,11 @@ void view_datel_code_editor_init (menu_t *menu) {
     ui_components_context_menu_init(&options_context_menu);
     ui_components_context_menu_init(&cm_edit_selected_cheat);
 
-    load_cheats_for_rom_path(menu->load.rom_path);
+    // Only reload from the cheat file if not already in sync for this exact ROM, so
+    // re-entering the editor doesn't discard a previous, still-unsaved Apply to ROM.
+    if (!cheats_loaded_for_rom_path(menu->load.rom_path)) {
+        load_cheats_for_rom_path(menu->load.rom_path);
+    }
     cheat_codes = get_cheat_codes();
 }
 

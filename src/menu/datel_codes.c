@@ -20,6 +20,10 @@ static cheat_file_t *cheat_file_text;
 
 cheat_file_code_t cheat_codes[MAX_CHEAT_CODES]; // Global array to hold cheat codes
 
+// Path of the ROM the in-memory cheat_codes array is currently considered current for
+// (loaded from its cheat file, or applied/edited via the Datel Code Editor); NULL if none.
+static path_t *cheats_synced_rom_path = NULL;
+
 /**
  * @brief Generate a cheats array containing enabled cheats as address/value pairs.
  *        The last two entries will always be zero.
@@ -298,6 +302,13 @@ void load_cheats_for_rom_path(path_t *rom_path) {
 
     path_free(rom_datel_filepath);
     path_free(rom_datel_txt_filepath);
+
+    path_free(cheats_synced_rom_path);
+    cheats_synced_rom_path = path_clone(rom_path);
+}
+
+bool cheats_loaded_for_rom_path(path_t *rom_path) {
+    return cheats_synced_rom_path != NULL && path_are_match(cheats_synced_rom_path, rom_path);
 }
 
 void save_cheats_to_file(char *path) {
