@@ -17,7 +17,6 @@
 
 #include "sound.h"
 #include "usb_comm.h"
-#include "utils/fs.h"
 #include "utils/utils.h"
 #include "views/views.h"
 
@@ -37,7 +36,6 @@
 #define MAX_PATH_LENGTH (512)
 #define DATA_CHUNK_SIZE (4096) // Small enough to be sent well within the USB write timeout
 #define MAX_DELETE_DEPTH (16)
-#define PATH_SEPARATORS "/\\" // FatFs permits the two separators
 
 /** @brief The supported USB commands structure. */
 typedef struct {
@@ -354,48 +352,6 @@ static void command_send_file (menu_t *menu) {
 }
 
 /**
- * @brief Find if a path is the archive that the browser has open, or a directory that contains it.
- *
- * FatFs does not prevent changes to an open file, thus the file commands must not change the archive.
- *
- * @param menu Pointer to the menu structure.
- * @param path Path from the USB host.
- * @return true if the path is in use, false otherwise.
- */
-static bool archive_in_use (menu_t *menu, const char *path) {
-    if (!menu->browser.archive) {
-        return false;
-    }
-
-    const char *archive = strip_fs_prefix(path_get(menu->browser.directory));
-
-    // FatFs permits a volume before the path, for example "0:"
-    const char *volume_end = strchr(path, ':');
-    if (volume_end) {
-        path = volume_end + 1;
-    }
-
-    // Compare one name at a time, thus repeated separators make no difference
-    while (true) {
-        archive += strspn(archive, PATH_SEPARATORS);
-        path += strspn(path, PATH_SEPARATORS);
-
-        if (*path == '\0') {
-            return true;
-        }
-
-        size_t length = strcspn(path, PATH_SEPARATORS);
-
-        if ((strcspn(archive, PATH_SEPARATORS) != length) || (strncasecmp(archive, path, length) != 0)) {
-            return false;
-        }
-
-        archive += length;
-        path += length;
-    }
-}
-
-/**
  * @brief Write a part of a file from the USB host.
  *
  * Arguments: <offset> <path>\0, then the data. Offset 0 makes a new file.
@@ -415,7 +371,8 @@ static void command_put_file (menu_t *menu) {
         return usb_comm_send_result(FR_INVALID_PARAMETER);
     }
 
-    if (archive_in_use(menu, path)) {
+    // FatFs does not prevent changes to an open file, thus no changes are permitted while an archive is open
+    if (menu->browser.archive) {
         return usb_comm_send_result(FR_LOCKED);
     }
 
@@ -521,7 +478,7 @@ static void command_delete (menu_t *menu) {
         return usb_comm_send_result(FR_INVALID_PARAMETER);
     }
 
-    if (archive_in_use(menu, path)) {
+    if (menu->browser.archive) {
         return usb_comm_send_result(FR_LOCKED);
     }
 
@@ -549,7 +506,7 @@ static void command_rename (menu_t *menu) {
         return usb_comm_send_result(FR_INVALID_PARAMETER);
     }
 
-    if (archive_in_use(menu, old_path) || archive_in_use(menu, new_path)) {
+    if (menu->browser.archive) {
         return usb_comm_send_result(FR_LOCKED);
     }
 
