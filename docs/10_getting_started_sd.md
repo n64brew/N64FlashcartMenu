@@ -13,7 +13,7 @@ Insert the (Micro) SD card to your PC and ensure it is properly formatted to be 
 > [!TIP]
 > Most (Micro) SD cards are factory formatted to FAT32 or EXFAT with MBR partition and don't require re-formatting.
 
-- Download the latest `sc64menu.n64` file from the [releases](https://github.com/Polprzewodnikowy/N64FlashcartMenu/releases/) page, then place it in the root directory of your Micro SD card.
+- Download the latest `sc64menu.n64` file from the [releases](https://github.com/n64brew/N64FlashcartMenu/releases/) page, then place it in the root directory of your Micro SD card.
 - Place your ROM files on the Micro SD card, **in any folder except the root directory `menu` folder**.
 - Remove the Micro SD Card from your computer and insert it into the SC64. 
 

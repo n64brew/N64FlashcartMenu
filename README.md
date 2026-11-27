@@ -1,8 +1,8 @@
-![Build](https://github.com/polprzewodnikowy/N64FlashcartMenu/actions/workflows/build.yml/badge.svg)
-![GitHub Org's stars](https://img.shields.io/github/stars/Polprzewodnikowy/N64FlashcartMenu)
-[![Average time to resolve an issue](http://isitmaintained.com/badge/resolution/Polprzewodnikowy/N64FlashcartMenu.svg)](http://isitmaintained.com/project/Polprzewodnikowy/N64FlashcartMenu "Average time to resolve an issue")
-[![Percentage of issues still open](http://isitmaintained.com/badge/open/Polprzewodnikowy/N64FlashcartMenu.svg)](http://isitmaintained.com/project/Polprzewodnikowy/N64FlashcartMenu "Percentage of issues still open")
-[![#yourfirstpr](https://img.shields.io/badge/first--timers--only-friendly-blue.svg)](https://github.com/Polprzewodnikowy/N64FlashcartMenu/blob/main/CONTRIBUTING.md)
+![Build](https://github.com/n64brew/N64FlashcartMenu/actions/workflows/build.yml/badge.svg)
+![GitHub Org's stars](https://img.shields.io/github/stars/n64brew/N64FlashcartMenu)
+[![Average time to resolve an issue](http://isitmaintained.com/badge/resolution/n64brewy/N64FlashcartMenu.svg)](http://isitmaintained.com/project/n64brew/N64FlashcartMenu "Average time to resolve an issue")
+[![Percentage of issues still open](http://isitmaintained.com/badge/open/n64brew/N64FlashcartMenu.svg)](http://isitmaintained.com/project/n64brew/N64FlashcartMenu "Percentage of issues still open")
+[![#yourfirstpr](https://img.shields.io/badge/first--timers--only-friendly-blue.svg)](https://github.com/n64brew/N64FlashcartMenu/blob/main/CONTRIBUTING.md)
 
 # N64FlashcartMenu
 An open source menu for N64 flashcarts that aims to support as many as possible.  
@@ -64,7 +64,7 @@ The current state of support is:
 ## Flashcart specific information
 
 ### SummerCart64
-Download the latest `sc64menu.n64` file from the [releases](https://github.com/Polprzewodnikowy/N64FlashcartMenu/releases/) page, then put it in the root directory of your SD card.  
+Download the latest `sc64menu.n64` file from the [releases](https://github.com/n64brew/N64FlashcartMenu/releases/) page, then put it in the root directory of your SD card.  
   
 > [!TIP]
 > A quick video tutorial can be found here:
@@ -74,11 +74,11 @@ Download the latest `sc64menu.n64` file from the [releases](https://github.com/P
 
 ### 64drive
 * Ensure the cart has the latest [firmware](https://64drive.retroactive.be/support.php) installed.
-* Download the latest `menu.bin` file from the [releases](https://github.com/Polprzewodnikowy/N64FlashcartMenu/releases/) page, then put it in the root directory of your SD card.
+* Download the latest `menu.bin` file from the [releases](https://github.com/n64brew/N64FlashcartMenu/releases/) page, then put it in the root directory of your SD card.
 
 
 # Contributors
-The features in this project were made possible by the [contributors](https://github.com/Polprzewodnikowy/N64FlashcartMenu/graphs/contributors).
+The features in this project were made possible by the [contributors](https://github.com/n64brew/N64FlashcartMenu/graphs/contributors).
 
 # License
 This project is released under the [GNU AFFERO GENERAL PUBLIC LICENSE](LICENSE.md) as compatible with all other dependent project licenses.  
