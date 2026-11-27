@@ -67,8 +67,9 @@ void set_cheat_codes(cheat_file_code_t *cheats);
 /** * @brief Load cheats from a file.
  * 
  * @param path Path to the file containing cheat codes.
+ * @return true if the file was opened, read, and parsed successfully, false on I/O error.
  */
-void load_cheats_from_file(char *path);
+bool load_cheats_from_file(char *path);
 
 /**
  * @brief Load the cheat codes for a ROM's cheat file into memory, if one exists.

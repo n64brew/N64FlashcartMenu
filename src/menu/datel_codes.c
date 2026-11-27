@@ -216,7 +216,7 @@ void cheat_file_open_res_debug(cheat_file_load_err_t res) {
     }
 }
 
-void load_cheats_from_file(char *path) {
+bool load_cheats_from_file(char *path) {
 
     debugf("Cheat Editor: Loading cheats from path %s.\n", path);
 
@@ -274,11 +274,13 @@ void load_cheats_from_file(char *path) {
         // --END DEBUG CODE
         #endif
 
+        return true;
     }
     else {
         cheat_file_open_res_debug(res_file_open);
         set_cheat_codes(NULL);
         deinit_cheat_file();
+        return false;
     }
 }
 
@@ -289,12 +291,13 @@ void load_cheats_for_rom_path(path_t *rom_path) {
     path_t *rom_datel_txt_filepath = path_clone(rom_path);
     path_ext_replace(rom_datel_txt_filepath, "datel.txt");
 
+    bool loaded = true;
     if (file_exists(path_get(rom_datel_filepath))) {
         debugf("Cheats: Loading cheats from %s.\n", path_get(rom_datel_filepath));
-        load_cheats_from_file(path_get(rom_datel_filepath));
+        loaded = load_cheats_from_file(path_get(rom_datel_filepath));
     } else if (file_exists(path_get(rom_datel_txt_filepath))) {
         debugf("Cheats: Loading cheats from %s.\n", path_get(rom_datel_txt_filepath));
-        load_cheats_from_file(path_get(rom_datel_txt_filepath));
+        loaded = load_cheats_from_file(path_get(rom_datel_txt_filepath));
     } else {
         debugf("Cheats: No cheat file found, clearing cheat list.\n");
         set_cheat_codes(NULL);
@@ -303,8 +306,13 @@ void load_cheats_for_rom_path(path_t *rom_path) {
     path_free(rom_datel_filepath);
     path_free(rom_datel_txt_filepath);
 
-    path_free(cheats_synced_rom_path);
-    cheats_synced_rom_path = path_clone(rom_path);
+    // Only record this ROM as synced on a successful load or confirmed file absence; an
+    // I/O error reading an existing cheat file should remain retryable (e.g. the next time
+    // the Datel Code Editor is opened), rather than being stuck with an empty cheat list.
+    if (loaded) {
+        path_free(cheats_synced_rom_path);
+        cheats_synced_rom_path = path_clone(rom_path);
+    }
 }
 
 bool cheats_loaded_for_rom_path(path_t *rom_path) {
