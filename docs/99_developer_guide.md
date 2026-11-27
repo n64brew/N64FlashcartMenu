@@ -154,7 +154,7 @@ The commands from `list-dir` to `free-space` are the file commands. These rules 
 * `free-space` gives one line: `<total bytes> <free bytes>`.
 * The browser reloads the directory after `make-dir`, `delete` and `rename`.
 * `put-file` does not reload the browser, because one file can use many commands. To show a new file, write it with a temporary name and then use `rename`.
-* `put-file`, `delete` and `rename` give the result code 16 (`FR_LOCKED`) for the archive that the browser has open.
+* `put-file`, `delete` and `rename` give the result code 16 (`FR_LOCKED`) while the browser has an archive open.
 
 
 ### How to deploy and/or debug to other flashcarts/emulators
