@@ -288,23 +288,16 @@ void load_cheats_for_rom_path(path_t *rom_path) {
     path_t *rom_datel_filepath = path_clone(rom_path);
     path_ext_replace(rom_datel_filepath, "datel");
 
-    path_t *rom_datel_txt_filepath = path_clone(rom_path);
-    path_ext_replace(rom_datel_txt_filepath, "datel.txt");
-
     bool loaded = true;
     if (file_exists(path_get(rom_datel_filepath))) {
         debugf("Cheats: Loading cheats from %s.\n", path_get(rom_datel_filepath));
         loaded = load_cheats_from_file(path_get(rom_datel_filepath));
-    } else if (file_exists(path_get(rom_datel_txt_filepath))) {
-        debugf("Cheats: Loading cheats from %s.\n", path_get(rom_datel_txt_filepath));
-        loaded = load_cheats_from_file(path_get(rom_datel_txt_filepath));
     } else {
         debugf("Cheats: No cheat file found, clearing cheat list.\n");
         set_cheat_codes(NULL);
     }
 
     path_free(rom_datel_filepath);
-    path_free(rom_datel_txt_filepath);
 
     // Only record this ROM as synced on a successful load or confirmed file absence; an
     // I/O error reading an existing cheat file should remain retryable (e.g. the next time
@@ -317,6 +310,11 @@ void load_cheats_for_rom_path(path_t *rom_path) {
 
 bool cheats_loaded_for_rom_path(path_t *rom_path) {
     return cheats_synced_rom_path != NULL && path_are_match(cheats_synced_rom_path, rom_path);
+}
+
+void invalidate_cheats_sync(void) {
+    path_free(cheats_synced_rom_path);
+    cheats_synced_rom_path = NULL;
 }
 
 void save_cheats_to_file(char *path) {

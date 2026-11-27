@@ -74,9 +74,9 @@ bool load_cheats_from_file(char *path);
 /**
  * @brief Load the cheat codes for a ROM's cheat file into memory, if one exists.
  *
- * Looks for a sibling file next to the ROM with a ".datel" extension, falling back to
- * ".datel.txt" if that's not found. Clears the in-memory cheat list if neither exists,
- * so stale cheats from a previously viewed ROM are never carried over.
+ * Looks for a sibling file next to the ROM with a ".datel" extension. Clears the
+ * in-memory cheat list if it doesn't exist, so stale cheats from a previously viewed ROM
+ * are never carried over.
  *
  * @param rom_path Path to the ROM file.
  */
@@ -92,6 +92,16 @@ void load_cheats_for_rom_path(path_t *rom_path);
  * @return true if the in-memory cheat list is already current for this ROM.
  */
 bool cheats_loaded_for_rom_path(path_t *rom_path);
+
+/**
+ * @brief Invalidate the cheat sync marker, forcing the next load_cheats_for_rom_path()
+ * call to reload from file rather than trusting stale state.
+ *
+ * Needed after loading cheats outside of load_cheats_for_rom_path() (e.g. for a
+ * standalone cheat file opened directly from the browser, not tied to any ROM), since
+ * that also replaces the shared in-memory cheat list without updating the marker.
+ */
+void invalidate_cheats_sync(void);
 
 /** * @brief Save cheats to a file.
  * 

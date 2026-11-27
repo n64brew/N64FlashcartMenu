@@ -16,7 +16,7 @@ Another product by Blaze, called the Xploder64/Xplorer64 also existed in some re
 > The N64FlashcartMenu can only support cheat codes based on Datel carts when **also** using an Expansion Pak. Codes will not be loaded when the Expansion Pak is not found.
 
 Caveats:
-- Requires an Expansion Pak to work.
+- Requires an Expansion Pak to actually apply/use cheats when launching a ROM (editing cheat files in the Datel Code Editor doesn't require one).
 - Codes that require a button to pressed are not yet supported (TODO: possible with the SC64, requires hook).
 - `DE` codes are ignored.
 - Games that were developed using later versions of the libDragon SDK are not supported and are currently incompatible due to ipl3 clearing RDRAM.
@@ -38,6 +38,8 @@ When within the ROM info screen, Press `R` and load the `Datel Code Editor`. Adj
 
 > [!WARNING]
 > Any changes made in the code editor are totally volatile (i.e. not saved when returning to the current screen). Press `L|Z` to save them.
+
+Cheat files (and other recognized cheat-related extensions, e.g. `.cht`/`.cheats`/`.gameshark`) can also be opened directly from the file browser: selecting one opens it in the Datel Code Editor for viewing/editing, falling back to the plain text viewer if it can't be read as a cheat file. In this standalone mode, `A` saves directly to the file instead of applying it to a ROM, and `B` returns to the browser.
 
 
 #### Datel Cheat Files
