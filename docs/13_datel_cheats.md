@@ -25,9 +25,11 @@ Caveats:
 - The cheat engine is subtly different from an actual GameShark and ED64 implementation so working enable and cheat codes may vary.
 
 ### Enable Cheats
-Ensure you have a cheat file and have accessed the Datel Code Editor screen, then from the ROM info screen, press `R` to set `Use Cheats` to `Enabled`.
+Place a cheat file alongside the ROM (see below), then from the ROM info screen, press `R` and set `Use Cheats` to `Enabled`. The cheat file is loaded automatically from then on; visiting the Datel Code Editor is optional.
 
 ![MM ROM info](./images/rom-info-NZSE.png "MM ROM info")  
+
+When cheats are `Enabled` and at least one enabled cheat code was found (and an Expansion Pak is present), pressing `A` to launch the ROM shows a quick choice between launching with or without the cheats applied, letting you decide per launch without having to change the setting each time.
 
 #### Datel Code Editor
 When within the ROM info screen, Press `R` and load the `Datel Code Editor`. Adjust the cheat codes as needed then press `A` to `Apply ROM with these cheats`.

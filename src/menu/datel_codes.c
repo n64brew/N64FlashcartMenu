@@ -4,6 +4,7 @@
 #include <libdragon.h> // only included for debugf
 #include <sys/stat.h>
 #include "utils/utils.h"
+#include "utils/fs.h"
 
 
 #define MAX_FILE_SIZE KiB(128)
@@ -275,6 +276,28 @@ void load_cheats_from_file(char *path) {
         set_cheat_codes(NULL);
         deinit_cheat_file();
     }
+}
+
+void load_cheats_for_rom_path(path_t *rom_path) {
+    path_t *rom_datel_filepath = path_clone(rom_path);
+    path_ext_replace(rom_datel_filepath, "datel");
+
+    path_t *rom_datel_txt_filepath = path_clone(rom_path);
+    path_ext_replace(rom_datel_txt_filepath, "datel.txt");
+
+    if (file_exists(path_get(rom_datel_filepath))) {
+        debugf("Cheats: Loading cheats from %s.\n", path_get(rom_datel_filepath));
+        load_cheats_from_file(path_get(rom_datel_filepath));
+    } else if (file_exists(path_get(rom_datel_txt_filepath))) {
+        debugf("Cheats: Loading cheats from %s.\n", path_get(rom_datel_txt_filepath));
+        load_cheats_from_file(path_get(rom_datel_txt_filepath));
+    } else {
+        debugf("Cheats: No cheat file found, clearing cheat list.\n");
+        set_cheat_codes(NULL);
+    }
+
+    path_free(rom_datel_filepath);
+    path_free(rom_datel_txt_filepath);
 }
 
 void save_cheats_to_file(char *path) {

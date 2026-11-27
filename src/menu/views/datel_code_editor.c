@@ -9,7 +9,6 @@
 #include "../datel_codes.h"
 #include "../sound.h"
 #include "views.h"
-#include "utils/fs.h"
 
 
 static cheat_file_code_t *cheat_codes;
@@ -461,26 +460,8 @@ void view_datel_code_editor_init (menu_t *menu) {
     ui_components_context_menu_init(&options_context_menu);
     ui_components_context_menu_init(&cm_edit_selected_cheat);
 
+    load_cheats_for_rom_path(menu->load.rom_path);
     cheat_codes = get_cheat_codes();
-    path_t *rom_datel_filepath = path_clone(menu->load.rom_path);
-    path_ext_replace(rom_datel_filepath, "datel");
-
-    path_t *rom_datel_txt_filepath = path_clone(menu->load.rom_path);
-    path_ext_replace(rom_datel_txt_filepath, "datel.txt");
-
-    if (file_exists(path_get(rom_datel_filepath))) {
-        debugf("Cheat Editor: Loading cheats from %s.\n", path_get(rom_datel_filepath));
-        load_cheats_from_file(path_get(rom_datel_filepath));
-    } else if (file_exists(path_get(rom_datel_txt_filepath))) {
-        debugf("Cheat Editor: Loading cheats from %s.\n", path_get(rom_datel_txt_filepath));
-        load_cheats_from_file(path_get(rom_datel_txt_filepath));
-    } else {
-        debugf("Cheat Editor: No cheat file found, starting with empty list.\n");
-    }
-
-    path_free(rom_datel_filepath);
-    path_free(rom_datel_txt_filepath);
-
 }
 
 void view_datel_code_editor_display (menu_t *menu, surface_t *display) {

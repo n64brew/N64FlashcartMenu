@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "path.h"
 
 // The maximum number of cheat codes to support is dependent on the available space in the N64 RAM.
 // However, for simplicity, we will hardcode it to 64 for now, as this number of codes should handle most games (keeping it low allows us to collect caveats).
@@ -68,6 +69,17 @@ void set_cheat_codes(cheat_file_code_t *cheats);
  * @param path Path to the file containing cheat codes.
  */
 void load_cheats_from_file(char *path);
+
+/**
+ * @brief Load the cheat codes for a ROM's cheat file into memory, if one exists.
+ *
+ * Looks for a sibling file next to the ROM with a ".datel" extension, falling back to
+ * ".datel.txt" if that's not found. Clears the in-memory cheat list if neither exists,
+ * so stale cheats from a previously viewed ROM are never carried over.
+ *
+ * @param rom_path Path to the ROM file.
+ */
+void load_cheats_for_rom_path(path_t *rom_path);
 
 /** * @brief Save cheats to a file.
  * 
