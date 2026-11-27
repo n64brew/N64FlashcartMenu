@@ -416,6 +416,9 @@ static bool reload_directory (menu_t *menu) {
     if (menu->browser.selected >= menu->browser.entries) {
         menu->browser.selected = menu->browser.entries - 1;
     }
+    if ((menu->browser.selected < 0) && (menu->browser.entries > 0)) {
+        menu->browser.selected = 0;
+    }
     menu->browser.entry = menu->browser.selected >= 0 ? &menu->browser.list[menu->browser.selected] : NULL;
 
     return false;
@@ -745,6 +748,29 @@ static void draw (menu_t *menu, surface_t *d) {
 }
 
 
+static void reload_if_requested (menu_t *menu) {
+    // An open archive keeps the request until the browser goes out of the archive
+    if (!menu->browser.reload || menu->browser.archive) {
+        return;
+    }
+
+    // An open context menu keeps the request, because its actions use the selected entry
+    if ((entry_context_menu.row_selected >= 0) || (archive_context_menu.row_selected >= 0)) {
+        return;
+    }
+
+    menu->browser.reload = false;
+    if (reload_directory(menu)) {
+        menu_show_error(
+            menu,
+            directory_entry_limit_exceeded
+                ? "Current directory is too large for Jumper Pak\nUse an Expansion Pak"
+                : "Error while reloading current directory"
+        );
+        menu->browser.valid = false;
+    }
+}
+
 void view_browser_init (menu_t *menu) {
     if (!menu->browser.valid) {
         ui_components_context_menu_init(&entry_context_menu);
@@ -780,21 +806,15 @@ void view_browser_init (menu_t *menu) {
         menu->browser.select_file = NULL;
     }
 
-    if (menu->browser.reload) {
-        menu->browser.reload = false;
-        if (reload_directory(menu)) {
-            menu_show_error(
-                menu,
-                directory_entry_limit_exceeded
-                    ? "Current directory is too large for Jumper Pak\nUse an Expansion Pak"
-                    : "Error while reloading current directory"
-            );
-            menu->browser.valid = false;
-        }
-    }
+    reload_if_requested(menu);
 }
 
 void view_browser_display (menu_t *menu, surface_t *display) {
+    // Files can change while the browser is on screen (see usb_comm.c)
+    if (menu->browser.valid) {
+        reload_if_requested(menu);
+    }
+
     process(menu);
 
     draw(menu, display);
