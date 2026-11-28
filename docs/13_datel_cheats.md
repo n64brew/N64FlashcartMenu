@@ -19,7 +19,7 @@ Caveats:
 - Requires an Expansion Pak to actually apply/use cheats when launching a ROM (editing cheat files in the Datel Code Editor doesn't require one).
 - Codes that require a button to pressed are not yet supported (TODO: possible with the SC64, requires hook).
 - `DE` codes are ignored.
-- Games that were developed using later versions of the libDragon SDK are not supported and are currently incompatible due to ipl3 clearing RDRAM.
+- Games that were developed using the libDragon SDK are not yet supported.
 - The maximum number of cheat codes that will work is dependent on the available space in the N64 RAM (especially with game ROM's that use an Expansion Pak), exceeding them may cause unwanted side effects.
  - Whilst an experimental feature, the UI is currently hardcoded to limit the amount of codes to 64 (keeping it low allows us to collect caveats). This will be increased once enough feedback is collected.
 - The cheat engine is subtly different from an actual GameShark and ED64 implementation so working enable and cheat codes may vary.
@@ -39,7 +39,7 @@ When within the ROM info screen, Press `R` and load the `Datel Code Editor`. Adj
 > [!WARNING]
 > Any changes made in the code editor are totally volatile (i.e. not saved when returning to the current screen). Press `L|Z` to save them.
 
-Cheat files ( e.g. `.datel`/`.cht`) can also be opened directly from the file browser: selecting one opens it in the Datel Code Editor for viewing/editing, falling back to the plain text viewer if it can't be read as a cheat file. In this standalone mode, `A` saves directly to the file instead of applying it to a ROM, and `B` returns to the browser.
+Cheat files can also be opened directly from the file browser: selecting one opens it in the Datel Code Editor for viewing/editing. In this standalone mode, `A` saves directly to the file instead of applying it to a ROM, and `B` returns to the browser.
 
 
 #### Datel Cheat Files
