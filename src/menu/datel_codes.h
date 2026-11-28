@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "path.h"
 
 // The maximum number of cheat codes to support is dependent on the available space in the N64 RAM.
 // However, for simplicity, we will hardcode it to 64 for now, as this number of codes should handle most games (keeping it low allows us to collect caveats).
@@ -66,8 +67,41 @@ void set_cheat_codes(cheat_file_code_t *cheats);
 /** * @brief Load cheats from a file.
  * 
  * @param path Path to the file containing cheat codes.
+ * @return true if the file was opened, read, and parsed successfully, false on I/O error.
  */
-void load_cheats_from_file(char *path);
+bool load_cheats_from_file(char *path);
+
+/**
+ * @brief Load the cheat codes for a ROM's cheat file into memory, if one exists.
+ *
+ * Looks for a sibling file next to the ROM with a ".datel" extension. Clears the
+ * in-memory cheat list if it doesn't exist, so stale cheats from a previously viewed ROM
+ * are never carried over.
+ *
+ * @param rom_path Path to the ROM file.
+ */
+void load_cheats_for_rom_path(path_t *rom_path);
+
+/**
+ * @brief Check whether the in-memory cheat list is already current for this ROM: either
+ * freshly loaded from its cheat file, or already synced by a prior
+ * load_cheats_for_rom_path() call for this exact ROM (e.g. from visiting the Datel Code
+ * Editor, which always loads fresh from file on entry).
+ *
+ * @param rom_path Path to the ROM file.
+ * @return true if the in-memory cheat list is already current for this ROM.
+ */
+bool cheats_loaded_for_rom_path(path_t *rom_path);
+
+/**
+ * @brief Invalidate the cheat sync marker, forcing the next load_cheats_for_rom_path()
+ * call to reload from file rather than trusting stale state.
+ *
+ * Needed after loading cheats outside of load_cheats_for_rom_path() (e.g. for a
+ * standalone cheat file opened directly from the browser, not tied to any ROM), since
+ * that also replaces the shared in-memory cheat list without updating the marker.
+ */
+void invalidate_cheats_sync(void);
 
 /** * @brief Save cheats to a file.
  * 

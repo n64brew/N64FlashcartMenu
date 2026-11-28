@@ -15,7 +15,7 @@
 #include "../sound.h"
 
 static const char *archive_extensions[] = { "zip", NULL };
-static const char *cheat_extensions[] = {"cht", "cheats", "datel", "gameshark", NULL};
+static const char *cheat_extensions[] = {"cht", "datel", NULL};
 static const char *disk_extensions[] = { "ndd", NULL };
 static const char *emulator_extensions[] = { "nes", "sfc", "smc", "gb", "gbc", "sms", "gg", "sg", "chf", "rzx", "mx1", "mx2", "emu", NULL };
 static const char *image_extensions[] = { "png", "jpg", "jpeg", NULL };
@@ -643,7 +643,11 @@ static void process (menu_t *menu) {
                 menu->next_mode = MENU_MODE_LOAD_ROM;
                 break;
             case ENTRY_TYPE_ROM_CHEAT:
-                menu->next_mode = MENU_MODE_FILE_INFO; // FIXME: Implement MENU_MODE_LOAD_ROM_CHEAT.
+                // Try the Datel Code Editor first; it falls back to the text viewer
+                // itself if the file can't actually be read as a cheat file.
+                menu->datel_editor.standalone_path = path_clone_push(menu->browser.directory, menu->browser.entry->name);
+                menu->datel_editor.return_mode = MENU_MODE_BROWSER;
+                menu->next_mode = MENU_MODE_DATEL_CODE_EDITOR;
                 break;
             case ENTRY_TYPE_ROM_PATCH:
                 menu->next_mode = MENU_MODE_FILE_INFO; // FIXME: Implement MENU_MODE_LOAD_ROM_PATCH.
@@ -707,6 +711,7 @@ static void draw (menu_t *menu, surface_t *d) {
             case ENTRY_TYPE_DISK: action = "A: Load"; break;
             case ENTRY_TYPE_IMAGE: action = "A: Show"; break;
             case ENTRY_TYPE_TEXT: action = "A: View"; break;
+            case ENTRY_TYPE_ROM_CHEAT: action = "A: Edit"; break;
             case ENTRY_TYPE_MUSIC: action = "A: Play"; break;
             case ENTRY_TYPE_ARCHIVE: action = "A: Open"; break;
             default: action = "A: Info"; break;

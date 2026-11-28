@@ -4,6 +4,7 @@
 #include <libdragon.h> // only included for debugf
 #include <sys/stat.h>
 #include "utils/utils.h"
+#include "utils/fs.h"
 
 
 #define MAX_FILE_SIZE KiB(128)
@@ -18,6 +19,10 @@ typedef struct {
 static cheat_file_t *cheat_file_text;
 
 cheat_file_code_t cheat_codes[MAX_CHEAT_CODES]; // Global array to hold cheat codes
+
+// Path of the ROM the in-memory cheat_codes array is currently considered current for
+// (loaded from its cheat file, or applied/edited via the Datel Code Editor); NULL if none.
+static path_t *cheats_synced_rom_path = NULL;
 
 /**
  * @brief Generate a cheats array containing enabled cheats as address/value pairs.
@@ -211,7 +216,7 @@ void cheat_file_open_res_debug(cheat_file_load_err_t res) {
     }
 }
 
-void load_cheats_from_file(char *path) {
+bool load_cheats_from_file(char *path) {
 
     debugf("Cheat Editor: Loading cheats from path %s.\n", path);
 
@@ -269,12 +274,47 @@ void load_cheats_from_file(char *path) {
         // --END DEBUG CODE
         #endif
 
+        return true;
     }
     else {
         cheat_file_open_res_debug(res_file_open);
         set_cheat_codes(NULL);
         deinit_cheat_file();
+        return false;
     }
+}
+
+void load_cheats_for_rom_path(path_t *rom_path) {
+    path_t *rom_datel_filepath = path_clone(rom_path);
+    path_ext_replace(rom_datel_filepath, "datel");
+
+    bool loaded = true;
+    if (file_exists(path_get(rom_datel_filepath))) {
+        debugf("Cheats: Loading cheats from %s.\n", path_get(rom_datel_filepath));
+        loaded = load_cheats_from_file(path_get(rom_datel_filepath));
+    } else {
+        debugf("Cheats: No cheat file found, clearing cheat list.\n");
+        set_cheat_codes(NULL);
+    }
+
+    path_free(rom_datel_filepath);
+
+    // Only record this ROM as synced on a successful load or confirmed file absence; an
+    // I/O error reading an existing cheat file should remain retryable (e.g. the next time
+    // the Datel Code Editor is opened), rather than being stuck with an empty cheat list.
+    if (loaded) {
+        path_free(cheats_synced_rom_path);
+        cheats_synced_rom_path = path_clone(rom_path);
+    }
+}
+
+bool cheats_loaded_for_rom_path(path_t *rom_path) {
+    return cheats_synced_rom_path != NULL && path_are_match(cheats_synced_rom_path, rom_path);
+}
+
+void invalidate_cheats_sync(void) {
+    path_free(cheats_synced_rom_path);
+    cheats_synced_rom_path = NULL;
 }
 
 void save_cheats_to_file(char *path) {

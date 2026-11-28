@@ -16,18 +16,20 @@ Another product by Blaze, called the Xploder64/Xplorer64 also existed in some re
 > The N64FlashcartMenu can only support cheat codes based on Datel carts when **also** using an Expansion Pak. Codes will not be loaded when the Expansion Pak is not found.
 
 Caveats:
-- Requires an Expansion Pak to work.
+- Requires an Expansion Pak to actually apply/use cheats when launching a ROM (editing cheat files in the Datel Code Editor doesn't require one).
 - Codes that require a button to pressed are not yet supported (TODO: possible with the SC64, requires hook).
 - `DE` codes are ignored.
-- Games that were developed using later versions of the libDragon SDK are not supported and are currently incompatible due to ipl3 clearing RDRAM.
+- Games that were developed using the libDragon SDK are not yet supported.
 - The maximum number of cheat codes that will work is dependent on the available space in the N64 RAM (especially with game ROM's that use an Expansion Pak), exceeding them may cause unwanted side effects.
  - Whilst an experimental feature, the UI is currently hardcoded to limit the amount of codes to 64 (keeping it low allows us to collect caveats). This will be increased once enough feedback is collected.
 - The cheat engine is subtly different from an actual GameShark and ED64 implementation so working enable and cheat codes may vary.
 
 ### Enable Cheats
-Ensure you have a cheat file and have accessed the Datel Code Editor screen, then from the ROM info screen, press `R` to set `Use Cheats` to `Enabled`.
+Place a cheat file alongside the ROM (see below), then from the ROM info screen, press `R` and set `Use Cheats` to `Enabled`. The cheat file is loaded automatically from then on; visiting the Datel Code Editor is optional.
 
 ![MM ROM info](./images/rom-info-NZSE.png "MM ROM info")  
+
+When cheats are `Enabled` and at least one enabled cheat code was found (and an Expansion Pak is present), pressing `A` to launch the ROM shows a quick choice between launching with or without the cheats applied, letting you decide per launch without having to change the setting each time.
 
 #### Datel Code Editor
 When within the ROM info screen, Press `R` and load the `Datel Code Editor`. Adjust the cheat codes as needed then press `A` to `Apply ROM with these cheats`.
@@ -36,6 +38,8 @@ When within the ROM info screen, Press `R` and load the `Datel Code Editor`. Adj
 
 > [!WARNING]
 > Any changes made in the code editor are totally volatile (i.e. not saved when returning to the current screen). Press `L|Z` to save them.
+
+Cheat files can also be opened directly from the file browser: selecting one opens it in the Datel Code Editor for viewing/editing. In this standalone mode, `A` saves directly to the file instead of applying it to a ROM, and `B` returns to the browser.
 
 
 #### Datel Cheat Files

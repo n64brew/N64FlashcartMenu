@@ -12,6 +12,7 @@
 static bool show_extra_info_message = false;
 static bool show_advanced_info_message = false;
 static bool show_expansion_pak_warning = false;
+static bool boot_without_cheats = false;
 static component_boxart_t *boxart;
 static component_boxart_t *pending_boxart;
 static bool boxart_sd_fallback_attempted = false;
@@ -489,6 +490,13 @@ static void set_cheat_option(menu_t *menu, void *arg) {
     else {
         bool enabled = (bool)arg;
         rom_config_setting_set_cheats(menu->load.rom_path, &menu->load.rom_info, enabled);
+        if (enabled && !cheats_loaded_for_rom_path(menu->load.rom_path)) {
+            // Load the cheat list right away so it's ready to apply without requiring a
+            // separate Datel Code Editor visit first. Skipped if the user already applied
+            // (possibly unsaved) changes via the editor for this exact ROM, so enabling
+            // the setting afterwards doesn't discard them.
+            load_cheats_for_rom_path(menu->load.rom_path);
+        }
         menu->browser.reload = true;
     }
 }
@@ -814,6 +822,16 @@ static bool rom_requires_missing_expansion_pak (menu_t *menu) {
     return (menu->load.rom_info.features.expansion_pak == EXPANSION_PAK_REQUIRED) && !is_memory_expanded();
 }
 
+/** @brief Check whether this ROM has cheats enabled and at least one enabled cheat code loaded. */
+static bool rom_has_enabled_cheats_available (menu_t *menu) {
+    if (!is_memory_expanded() || !menu->load.rom_info.settings.cheats_enabled) {
+        return false;
+    }
+    uint32_t tmp_cheats[MAX_CHEAT_CODE_ARRAYLIST_SIZE];
+    size_t cheat_item_count = generate_enabled_cheats_array(get_cheat_codes(), tmp_cheats);
+    return cheat_item_count > 2; // account for at least one valid cheat code, excluding the trailing zeros
+}
+
 /**
  * @brief Check whether this ROM uses the Advanced Homebrew ROM Header ID convention
  *        (game code xEDx).
@@ -838,8 +856,30 @@ static void compute_advanced_homebrew_info (menu_t *menu) {
     rom_info_read_libdragon_version(menu->load.rom_path, &advanced_homebrew_libdragon_version);
 }
 
+static void confirm_launch_with_cheats (menu_t *menu, void *arg) {
+    (void)arg;
+    boot_without_cheats = false;
+    menu->load_pending.rom_file = true;
+}
+
+static void confirm_launch_without_cheats (menu_t *menu, void *arg) {
+    (void)arg;
+    boot_without_cheats = true;
+    menu->load_pending.rom_file = true;
+}
+
+static component_context_menu_t cheats_load_confirm_menu = { .list = {
+    { .text = "Launch with Cheats", .action = confirm_launch_with_cheats },
+    { .text = "Launch without Cheats", .action = confirm_launch_without_cheats },
+    COMPONENT_CONTEXT_MENU_LIST_END,
+}};
+
 static void process (menu_t *menu) {
     if (ui_components_context_menu_process(menu, &options_context_menu)) {
+        return;
+    }
+
+    if (ui_components_context_menu_process(menu, &cheats_load_confirm_menu)) {
         return;
     }
 
@@ -858,6 +898,9 @@ static void process (menu_t *menu) {
         if (rom_requires_missing_expansion_pak(menu)) {
             show_expansion_pak_warning = true;
             sound_play_effect(SFX_ERROR);
+        } else if (rom_has_enabled_cheats_available(menu)) {
+            ui_components_context_menu_show(&cheats_load_confirm_menu);
+            sound_play_effect(SFX_SETTING);
         } else {
             menu->load_pending.rom_file = true;
         }
@@ -1077,6 +1120,7 @@ static void draw (menu_t *menu, surface_t *d) {
         }
 
         ui_components_context_menu_draw(&options_context_menu);
+        ui_components_context_menu_draw(&cheats_load_confirm_menu);
 #ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     }
 #endif
@@ -1143,8 +1187,10 @@ static void load (menu_t *menu) {
         default: menu->boot_params->tv_type = BOOT_TV_TYPE_PASSTHROUGH; break;
     }
 
-    // Handle cheat codes only if Expansion Pak is present and cheats are enabled
-    if (is_memory_expanded() && menu->load.rom_info.settings.cheats_enabled) {
+    // Handle cheat codes only if Expansion Pak is present, cheats are enabled, and the
+    // user didn't choose to launch without them for this one boot (see
+    // confirm_launch_without_cheats()).
+    if (is_memory_expanded() && menu->load.rom_info.settings.cheats_enabled && !boot_without_cheats) {
         uint32_t tmp_cheats[MAX_CHEAT_CODE_ARRAYLIST_SIZE];
         size_t cheat_item_count = generate_enabled_cheats_array(get_cheat_codes(), tmp_cheats);
 
@@ -1167,7 +1213,7 @@ static void load (menu_t *menu) {
             menu->boot_params->cheat_list = NULL;
         }
     } else {
-        debugf("Cheats disabled or Expansion Pak not present\n");
+        debugf("Cheats disabled, Expansion Pak not present, or launching without cheats\n");
         menu->boot_params->cheat_list = NULL;
     }
 
@@ -1247,6 +1293,7 @@ void view_load_rom_init (menu_t *menu) {
         show_advanced_info_message = false;
     }
     show_expansion_pak_warning = false;
+    boot_without_cheats = false;
 
     debugf("Load ROM: loading ROM info from %s\n", path_get(menu->load.rom_path));
     rom_err_t err = rom_config_load(menu->load.rom_path, &menu->load.rom_info);
@@ -1264,6 +1311,16 @@ void view_load_rom_init (menu_t *menu) {
 
     if (!is_memory_expanded()) {
         menu->load.rom_info.settings.cheats_enabled = false;
+    }
+
+    // Keep the in-memory cheat list in sync with the currently displayed ROM: cheats are
+    // applied straight from here (see load()) without requiring a Datel Code Editor visit.
+    // Skipped if already in sync for this exact ROM (e.g. returning from the Datel Code
+    // Editor, or from the full description view, or after re-enabling the setting), since
+    // the editor's "Apply to ROM" is intentionally volatile and must not be clobbered by
+    // reloading from the saved file.
+    if (menu->load.rom_info.settings.cheats_enabled && !cheats_loaded_for_rom_path(menu->load.rom_path)) {
+        load_cheats_for_rom_path(menu->load.rom_path);
     }
 
     if (menu->load.rom_info.meta.size_limit_exceeded) {
@@ -1310,6 +1367,7 @@ void view_load_rom_init (menu_t *menu) {
             );
         }
         ui_components_context_menu_init(&options_context_menu);
+        ui_components_context_menu_init(&cheats_load_confirm_menu);
 #ifdef FEATURE_AUTOLOAD_ROM_ENABLED
     }
 #endif

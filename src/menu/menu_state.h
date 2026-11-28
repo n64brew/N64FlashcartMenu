@@ -155,6 +155,18 @@ typedef struct {
          * file as before. */
         char *content;
     } text_viewer;
+
+    struct {
+        /** @brief Mode to switch to when the editor is closed (Back), used only when
+         * standalone_path is set. The normal ROM-info-screen flow always returns to
+         * MENU_MODE_LOAD_ROM instead, regardless of this field. */
+        menu_mode_t return_mode;
+        /** @brief Path to a specific cheat file to load/save directly, bypassing the
+         * normal ROM association (load.rom_path). Set when opened directly from the
+         * browser for a standalone cheat file; NULL for the normal ROM-info-screen flow.
+         * Ownership transfers to the editor, which frees it once it closes. */
+        path_t *standalone_path;
+    } datel_editor;
 } menu_t;
 
 

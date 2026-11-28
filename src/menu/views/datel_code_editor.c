@@ -9,7 +9,6 @@
 #include "../datel_codes.h"
 #include "../sound.h"
 #include "views.h"
-#include "utils/fs.h"
 
 
 static cheat_file_code_t *cheat_codes;
@@ -194,13 +193,23 @@ static void process(menu_t *menu) {
             sound_play_effect(SFX_CURSOR);
         } else if(menu->actions.enter) {
             if (show_message_save_confirm) {
-
-                path_t *rom_datel_filepath = path_clone(menu->load.rom_path);
-                path_ext_replace(rom_datel_filepath, "datel");
-                save_cheats_to_file(path_get(rom_datel_filepath));
-                path_free(rom_datel_filepath);
+                if (menu->datel_editor.standalone_path) {
+                    save_cheats_to_file(path_get(menu->datel_editor.standalone_path));
+                } else {
+                    path_t *rom_datel_filepath = path_clone(menu->load.rom_path);
+                    path_ext_replace(rom_datel_filepath, "datel");
+                    save_cheats_to_file(path_get(rom_datel_filepath));
+                    path_free(rom_datel_filepath);
+                }
                 sound_play_effect(SFX_SETTING);
                 show_message_save_confirm = false;
+            }
+            else if (menu->datel_editor.standalone_path) {
+                // Standalone mode (opened directly from the browser): there's no loaded
+                // ROM to apply these cheats to, so "A" just saves, same as "L|Z" below.
+                debugf("Cheat Editor: Prompting to save cheats (standalone).\n");
+                show_message_save_confirm = true;
+                sound_play_effect(SFX_SETTING);
             }
             else {
                 set_cheat_codes(cheat_codes);
@@ -214,7 +223,7 @@ static void process(menu_t *menu) {
             }
             else {
                 debugf("Cheat Editor: Cheats not saved or applied.\n");
-                menu->next_mode = MENU_MODE_LOAD_ROM;
+                menu->next_mode = menu->datel_editor.standalone_path ? menu->datel_editor.return_mode : MENU_MODE_LOAD_ROM;
             }
             sound_play_effect(SFX_EXIT);
         } else if (menu->actions.options) {
@@ -411,8 +420,11 @@ static void draw (menu_t *menu, surface_t *display) {
     ui_components_actions_bar_text_draw(
         STL_DEFAULT,
         ALIGN_LEFT, VALIGN_TOP,
-        "A: Apply to ROM\n"
-        "B: Back"
+        menu->datel_editor.standalone_path
+            ? "A: Save\n"
+              "B: Back"
+            : "A: Apply to ROM\n"
+              "B: Back"
     );
 
     ui_components_actions_bar_text_draw(
@@ -449,9 +461,11 @@ static void draw (menu_t *menu, surface_t *display) {
 }
 
 void view_datel_code_editor_init (menu_t *menu) {
-    if (!is_memory_expanded()) {
+    // Editing cheat files doesn't itself require an Expansion Pak; only actually applying
+    // them when launching a ROM does (enforced separately in load_rom.c). This check only
+    // guards the ROM-association flow, which will otherwise try to apply them at boot.
+    if (!menu->datel_editor.standalone_path && !is_memory_expanded()) {
         menu_show_error(menu, "Datel Cheats require an Expansion Pak");
-        menu->next_mode = MENU_MODE_LOAD_ROM;
         return;
     }
 
@@ -461,30 +475,40 @@ void view_datel_code_editor_init (menu_t *menu) {
     ui_components_context_menu_init(&options_context_menu);
     ui_components_context_menu_init(&cm_edit_selected_cheat);
 
-    cheat_codes = get_cheat_codes();
-    path_t *rom_datel_filepath = path_clone(menu->load.rom_path);
-    path_ext_replace(rom_datel_filepath, "datel");
-
-    path_t *rom_datel_txt_filepath = path_clone(menu->load.rom_path);
-    path_ext_replace(rom_datel_txt_filepath, "datel.txt");
-
-    if (file_exists(path_get(rom_datel_filepath))) {
-        debugf("Cheat Editor: Loading cheats from %s.\n", path_get(rom_datel_filepath));
-        load_cheats_from_file(path_get(rom_datel_filepath));
-    } else if (file_exists(path_get(rom_datel_txt_filepath))) {
-        debugf("Cheat Editor: Loading cheats from %s.\n", path_get(rom_datel_txt_filepath));
-        load_cheats_from_file(path_get(rom_datel_txt_filepath));
-    } else {
-        debugf("Cheat Editor: No cheat file found, starting with empty list.\n");
+    if (menu->datel_editor.standalone_path) {
+        // Opened directly from the browser for a specific cheat file, not tied to a
+        // loaded ROM. The file is already known to exist (it was listed by the
+        // browser), so a load failure here means it couldn't actually be read as a
+        // cheat file; fall back to showing it in the plain text viewer instead.
+        //
+        // Either way this replaces the shared in-memory cheat list outside of
+        // load_cheats_for_rom_path()'s own tracking, so invalidate its sync marker:
+        // otherwise a ROM previously marked synced would stay (incorrectly) trusted.
+        bool standalone_loaded = load_cheats_from_file(path_get(menu->datel_editor.standalone_path));
+        invalidate_cheats_sync();
+        if (!standalone_loaded) {
+            menu->text_viewer.return_mode = MENU_MODE_BROWSER;
+            menu->text_viewer.content = NULL;
+            menu->next_mode = MENU_MODE_TEXT_VIEWER;
+            path_free(menu->datel_editor.standalone_path);
+            menu->datel_editor.standalone_path = NULL;
+            return;
+        }
+    } else if (!cheats_loaded_for_rom_path(menu->load.rom_path)) {
+        // Only reload from the cheat file if not already in sync for this exact ROM, so
+        // re-entering the editor doesn't discard a previous, still-unsaved Apply to ROM.
+        load_cheats_for_rom_path(menu->load.rom_path);
     }
-
-    path_free(rom_datel_filepath);
-    path_free(rom_datel_txt_filepath);
-
+    cheat_codes = get_cheat_codes();
 }
 
 void view_datel_code_editor_display (menu_t *menu, surface_t *display) {
     process(menu);
 
     draw(menu, display);
+
+    if (menu->next_mode != MENU_MODE_DATEL_CODE_EDITOR && menu->datel_editor.standalone_path) {
+        path_free(menu->datel_editor.standalone_path);
+        menu->datel_editor.standalone_path = NULL;
+    }
 }
