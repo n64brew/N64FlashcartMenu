@@ -15,7 +15,7 @@
 #include "../sound.h"
 
 static const char *archive_extensions[] = { "zip", NULL };
-static const char *cheat_extensions[] = {"cht", "cheats", "datel", "gameshark", NULL};
+static const char *cheat_extensions[] = {"cht", "datel", NULL};
 static const char *disk_extensions[] = { "ndd", NULL };
 static const char *emulator_extensions[] = { "nes", "sfc", "smc", "gb", "gbc", "sms", "gg", "sg", "chf", "rzx", "mx1", "mx2", "emu", NULL };
 static const char *image_extensions[] = { "png", "jpg", "jpeg", NULL };

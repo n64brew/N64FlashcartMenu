@@ -39,7 +39,7 @@ When within the ROM info screen, Press `R` and load the `Datel Code Editor`. Adj
 > [!WARNING]
 > Any changes made in the code editor are totally volatile (i.e. not saved when returning to the current screen). Press `L|Z` to save them.
 
-Cheat files (and other recognized cheat-related extensions, e.g. `.cht`/`.cheats`/`.gameshark`) can also be opened directly from the file browser: selecting one opens it in the Datel Code Editor for viewing/editing, falling back to the plain text viewer if it can't be read as a cheat file. In this standalone mode, `A` saves directly to the file instead of applying it to a ROM, and `B` returns to the browser.
+Cheat files ( e.g. `.datel`/`.cht`) can also be opened directly from the file browser: selecting one opens it in the Datel Code Editor for viewing/editing, falling back to the plain text viewer if it can't be read as a cheat file. In this standalone mode, `A` saves directly to the file instead of applying it to a ROM, and `B` returns to the browser.
 
 
 #### Datel Cheat Files
