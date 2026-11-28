@@ -11,7 +11,7 @@ This tab shows the menu version, build date, developer credits, and licensing in
 ### Flashcart Information
 This tab shows information about the flashcart, including its firmware version and supported features. The information shown depends on the flashcart in use.
 ![Screenshot of the Flashcart information screen](./images/sc64-flashcart-information.png "Screenshot of the Flashcart information screen")
-On flashcarts that support diagnostics, press `L` or `Z` to view the current button state, voltage, and temperature.
+The feature list indicates whether flashcart diagnostics are supported. On flashcarts that support diagnostics via the menu, press `L` or `Z` to view them.
 
 ### N64 Information
 ![Example N64 system information](./images/system-information.png "Example N64 system information")
